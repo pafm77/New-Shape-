@@ -1,0 +1,487 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    // --- Validation Helpers ---
+    function isValidClient(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             data.phone is string && data.phone.size() <= 20 &&
+             data.notes is string && data.notes.size() <= 500 &&
+             data.active is bool &&
+             data.newClient is bool &&
+             (!('monthlyFeeEur' in data) || (data.monthlyFeeEur is number && data.monthlyFeeEur >= 0 && data.monthlyFeeEur <= 100000)) &&
+             (!('fidelizacaoMonths' in data) || (data.fidelizacaoMonths in [0, 6, 12])) &&
+             (!('fidelizacaoStartMillis' in data) || (data.fidelizacaoStartMillis is int && data.fidelizacaoStartMillis >= 0));
+    }
+
+    function isValidWeek(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.weekKey is string && data.weekKey.size() >= 1 && data.weekKey.size() <= 30 &&
+             data.label is string && data.label.size() >= 1 && data.label.size() <= 50 &&
+             data.startDateMillis is int &&
+             data.published is bool;
+    }
+
+    function isValidSession(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.weekKey is string && data.weekKey.size() >= 1 && data.weekKey.size() <= 30 &&
+             data.dayOfWeek is int && data.dayOfWeek >= 1 && data.dayOfWeek <= 7 &&
+             data.dateLabel is string && data.dateLabel.size() >= 1 && data.dateLabel.size() <= 50 &&
+             data.timeLabel is string && data.timeLabel.size() >= 1 && data.timeLabel.size() <= 20 &&
+             data.durationMinutes is int && data.durationMinutes >= 10 && data.durationMinutes <= 300 &&
+             data.capacity is int && data.capacity >= 1 && data.capacity <= 100 &&
+             data.note is string && data.note.size() <= 200 &&
+             data.startMillis is int;
+    }
+
+    function isValidBooking(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+             data.weekKey is string && data.weekKey.size() >= 1 && data.weekKey.size() <= 30 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.status in ['PENDING', 'CONFIRMED', 'ALTERED', 'CANCELLED'] &&
+             data.requestedAtMillis is int;
+    }
+
+    function isValidWeekResponse(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.weekKey is string && data.weekKey.size() >= 1 && data.weekKey.size() <= 30 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.status in ['UNAVAILABLE', 'REMINDED'];
+    }
+
+    function isValidPayment(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.monthYear is string && data.monthYear.size() >= 1 && data.monthYear.size() <= 20 &&
+             data.monthLabel is string && data.monthLabel.size() >= 1 && data.monthLabel.size() <= 30 &&
+             data.amountEur is number && data.amountEur >= 0 && data.amountEur <= 100000 &&
+             data.paid is bool &&
+             data.paidAtMillis is int &&
+             data.note is string && data.note.size() <= 200;
+    }
+
+    function isValidFidelizacao(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.durationMonths in [6, 12] &&
+             data.startDateMillis is int &&
+             data.endDateMillis is int &&
+             data.notes is string && data.notes.size() <= 300;
+    }
+
+    function isValidExercise(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             data.muscleGroup is string && data.muscleGroup.size() >= 1 && data.muscleGroup.size() <= 40 &&
+             data.equipment is string && data.equipment.size() <= 60 &&
+             data.instructions is string && data.instructions.size() <= 600 &&
+             data.custom is bool;
+    }
+
+    function isValidWorkoutPlan(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.splitLabel is string && data.splitLabel.size() <= 120 &&
+             data.createdAtMillis is int;
+    }
+
+    function isValidWorkoutPlanItem(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.planId is string && data.planId.size() >= 1 && data.planId.size() <= 128 &&
+             data.exerciseId is string && data.exerciseId.size() <= 128 &&
+             data.exerciseName is string && data.exerciseName.size() >= 1 && data.exerciseName.size() <= 120 &&
+             data.muscleGroup is string && data.muscleGroup.size() >= 1 && data.muscleGroup.size() <= 40 &&
+             data.sets is int && data.sets >= 1 && data.sets <= 30 &&
+             data.reps is string && data.reps.size() >= 1 && data.reps.size() <= 40 &&
+             data.loadKg is string && data.loadKg.size() <= 40 &&
+             data.restSeconds is int && data.restSeconds >= 0 && data.restSeconds <= 600 &&
+             data.notes is string && data.notes.size() <= 300 &&
+             data.orderIndex is int && data.orderIndex >= 0 && data.orderIndex <= 200;
+    }
+
+    function isValidFoodItem(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             data.category is string && data.category.size() >= 1 && data.category.size() <= 40 &&
+             data.kcalPer100g is number && data.kcalPer100g >= 0 &&
+             data.proteinPer100g is number && data.proteinPer100g >= 0 &&
+             data.carbsPer100g is number && data.carbsPer100g >= 0 &&
+             data.fatPer100g is number && data.fatPer100g >= 0 &&
+             data.custom is bool;
+    }
+
+    function isValidNutritionEntry(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.mealType is string && data.mealType.size() >= 1 && data.mealType.size() <= 40 &&
+             data.foodId is string && data.foodId.size() <= 128 &&
+             data.foodName is string && data.foodName.size() >= 1 && data.foodName.size() <= 120 &&
+             data.grams is number && data.grams > 0 && data.grams <= 10000 &&
+             data.kcal is number && data.kcal >= 0 &&
+             data.protein is number && data.protein >= 0 &&
+             data.carbs is number && data.carbs >= 0 &&
+             data.fat is number && data.fat >= 0;
+    }
+
+    function isValidChatMessage(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.senderRole in ['PT', 'STUDENT'] &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             data.timestampMillis is int;
+    }
+
+    function isValidMessageTemplate(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.templateKey is string && data.templateKey.size() >= 1 && data.templateKey.size() <= 40 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 80 &&
+             data.description is string && data.description.size() <= 200 &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 1500 &&
+             data.defaultBody is string && data.defaultBody.size() >= 1 && data.defaultBody.size() <= 1500;
+    }
+
+    function isValidStudioSettings(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientsCanEdit is bool &&
+             data.cutoffHours is int && data.cutoffHours >= 0 && data.cutoffHours <= 72 &&
+             data.whatsappWebMode is bool &&
+             data.siteBaseUrl is string && data.siteBaseUrl.size() >= 1 && data.siteBaseUrl.size() <= 300 &&
+             data.seeded is bool;
+    }
+
+    function isValidPhysicalAssessment(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.dateMillis is int && data.dateMillis >= 0 &&
+             data.weightKg is number && data.weightKg > 0 && data.weightKg <= 500 &&
+             data.ageYears is int && data.ageYears >= 5 && data.ageYears <= 120 &&
+             data.heightCm is number && data.heightCm >= 50 && data.heightCm <= 260 &&
+             data.sex in ['M', 'F'] &&
+             data.bodyFatPct is number && data.bodyFatPct >= 0 && data.bodyFatPct <= 80 &&
+             data.muscleMassKg is number && data.muscleMassKg >= 0 && data.muscleMassKg <= 200 &&
+             data.visceralFat is number && data.visceralFat >= 0 && data.visceralFat <= 60 &&
+             data.bmi is number && data.bmi > 0 && data.bmi <= 150 &&
+             data.bmrKcal is number && data.bmrKcal >= 0 && data.bmrKcal <= 10000 &&
+             data.notes is string && data.notes.size() <= 500;
+    }
+
+    // --- User-Scoped Subcollections ---
+    match /users/{userId} {
+      allow read, write: if false;
+
+      match /clients/{clientId} {
+        allow get: if isOwner(userId) && isValidId(clientId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(clientId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidClient(incoming());
+        allow update: if isOwner(userId) && isValidId(clientId) &&
+                         isValidClient(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(clientId);
+      }
+
+      match /weeks/{weekId} {
+        allow get: if isOwner(userId) && isValidId(weekId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(weekId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'weekKey', 'label', 'startDateMillis', 'published', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'weekKey', 'label', 'startDateMillis', 'published', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidWeek(incoming());
+        allow update: if isOwner(userId) && isValidId(weekId) &&
+                         isValidWeek(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['label', 'published', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(weekId);
+      }
+
+      match /sessions/{sessionId} {
+        allow get: if isOwner(userId) && isValidId(sessionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(sessionId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'weekKey', 'dayOfWeek', 'dateLabel', 'timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'weekKey', 'dayOfWeek', 'dateLabel', 'timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidSession(incoming());
+        allow update: if isOwner(userId) && isValidId(sessionId) &&
+                         isValidSession(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(sessionId);
+      }
+
+      match /bookings/{bookingId} {
+        allow get: if isOwner(userId) && isValidId(bookingId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(bookingId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidBooking(incoming());
+        allow update: if isOwner(userId) && isValidId(bookingId) &&
+                         isValidBooking(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['sessionId', 'status', 'requestedAtMillis', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(bookingId);
+      }
+
+      match /week_responses/{responseId} {
+        allow get: if isOwner(userId) && isValidId(responseId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(responseId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'weekKey', 'clientId', 'status', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'weekKey', 'clientId', 'status', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidWeekResponse(incoming());
+        allow update: if isOwner(userId) && isValidId(responseId) &&
+                         isValidWeekResponse(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(responseId);
+      }
+
+      match /payments/{paymentId} {
+        allow get: if isOwner(userId) && isValidId(paymentId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(paymentId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'monthYear', 'monthLabel', 'amountEur', 'paid', 'paidAtMillis', 'note', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'monthYear', 'monthLabel', 'amountEur', 'paid', 'paidAtMillis', 'note', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidPayment(incoming());
+        allow update: if isOwner(userId) && isValidId(paymentId) &&
+                         isValidPayment(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['amountEur', 'paid', 'paidAtMillis', 'note', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(paymentId);
+      }
+
+      match /fidelizacoes/{fidelizacaoId} {
+        allow get: if isOwner(userId) && isValidId(fidelizacaoId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(fidelizacaoId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'durationMonths', 'startDateMillis', 'endDateMillis', 'notes', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'durationMonths', 'startDateMillis', 'endDateMillis', 'notes', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidFidelizacao(incoming());
+        allow update: if isOwner(userId) && isValidId(fidelizacaoId) &&
+                         isValidFidelizacao(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['durationMonths', 'startDateMillis', 'endDateMillis', 'notes', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(fidelizacaoId);
+      }
+
+      match /exercises/{exerciseId} {
+        allow get: if isOwner(userId) && isValidId(exerciseId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(exerciseId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'name', 'muscleGroup', 'equipment', 'instructions', 'custom', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'muscleGroup', 'equipment', 'instructions', 'custom', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidExercise(incoming());
+        allow update: if isOwner(userId) && isValidId(exerciseId) &&
+                         isValidExercise(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'muscleGroup', 'equipment', 'instructions', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(exerciseId);
+      }
+
+      match /workout_plans/{planId} {
+        allow get: if isOwner(userId) && isValidId(planId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(planId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'title', 'splitLabel', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'title', 'splitLabel', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidWorkoutPlan(incoming());
+        allow update: if isOwner(userId) && isValidId(planId) &&
+                         isValidWorkoutPlan(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'splitLabel', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(planId);
+      }
+
+      match /workout_plan_items/{itemId} {
+        allow get: if isOwner(userId) && isValidId(itemId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(itemId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidWorkoutPlanItem(incoming());
+        allow update: if isOwner(userId) && isValidId(itemId) &&
+                         isValidWorkoutPlanItem(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(itemId);
+      }
+
+      match /foods/{foodId} {
+        allow get: if isOwner(userId) && isValidId(foodId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(foodId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'name', 'category', 'kcalPer100g', 'proteinPer100g', 'carbsPer100g', 'fatPer100g', 'custom', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'category', 'kcalPer100g', 'proteinPer100g', 'carbsPer100g', 'fatPer100g', 'custom', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidFoodItem(incoming());
+        allow update: if isOwner(userId) && isValidId(foodId) &&
+                         isValidFoodItem(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'kcalPer100g', 'proteinPer100g', 'carbsPer100g', 'fatPer100g', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(foodId);
+      }
+
+      match /nutrition_entries/{entryId} {
+        allow get: if isOwner(userId) && isValidId(entryId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(entryId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'mealType', 'foodId', 'foodName', 'grams', 'kcal', 'protein', 'carbs', 'fat', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'mealType', 'foodId', 'foodName', 'grams', 'kcal', 'protein', 'carbs', 'fat', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidNutritionEntry(incoming());
+        allow update: if isOwner(userId) && isValidId(entryId) &&
+                         isValidNutritionEntry(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['grams', 'kcal', 'protein', 'carbs', 'fat', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(entryId);
+      }
+
+      match /chat_messages/{messageId} {
+        allow get: if isOwner(userId) && isValidId(messageId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(messageId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'senderRole', 'text', 'timestampMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'senderRole', 'text', 'timestampMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidChatMessage(incoming());
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(messageId);
+      }
+
+      match /templates/{templateKey} {
+        allow get: if isOwner(userId) && isValidId(templateKey);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(templateKey) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'templateKey', 'title', 'description', 'body', 'defaultBody', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'templateKey', 'title', 'description', 'body', 'defaultBody', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidMessageTemplate(incoming());
+        allow update: if isOwner(userId) && isValidId(templateKey) &&
+                         isValidMessageTemplate(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['body', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(templateKey);
+      }
+
+      match /settings/{settingId} {
+        allow get: if isOwner(userId) && isValidId(settingId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(settingId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidStudioSettings(incoming());
+        allow update: if isOwner(userId) && isValidId(settingId) &&
+                         isValidStudioSettings(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(settingId);
+      }
+
+      match /physical_assessments/{assessmentId} {
+        allow get: if isOwner(userId) && isValidId(assessmentId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(assessmentId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'dateMillis', 'weightKg', 'ageYears', 'heightCm', 'sex', 'bodyFatPct', 'muscleMassKg', 'visceralFat', 'bmi', 'bmrKcal', 'notes', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'dateMillis', 'weightKg', 'ageYears', 'heightCm', 'sex', 'bodyFatPct', 'muscleMassKg', 'visceralFat', 'bmi', 'bmrKcal', 'notes', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidPhysicalAssessment(incoming());
+        allow update: if isOwner(userId) && isValidId(assessmentId) &&
+                         isValidPhysicalAssessment(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['dateMillis', 'weightKg', 'ageYears', 'heightCm', 'sex', 'bodyFatPct', 'muscleMassKg', 'visceralFat', 'bmi', 'bmrKcal', 'notes', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(assessmentId);
+      }
+    }
+  }
+}

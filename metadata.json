@@ -1,0 +1,6 @@
+{
+  "name": "New Shape",
+  "description": "App para Personal Trainer e Alunos: marcações semanais com WhatsApp, mensalidades, finanças, fidelizações, nutrição com macros, planos de treino, biblioteca de exercícios e chat privado.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

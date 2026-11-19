@@ -1,0 +1,347 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "Aluno do estúdio New Shape",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "notes": { "type": "string" },
+        "active": { "type": "boolean" },
+        "newClient": { "type": "boolean" },
+        "monthlyFeeEur": { "type": "number" },
+        "fidelizacaoMonths": { "type": "integer" },
+        "fidelizacaoStartMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "phone", "notes", "active", "newClient", "createdAt", "updatedAt"]
+    },
+    "TrainingWeek": {
+      "title": "TrainingWeek",
+      "description": "Semana de treinos (segunda a domingo)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "weekKey": { "type": "string" },
+        "label": { "type": "string" },
+        "startDateMillis": { "type": "integer" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "weekKey", "label", "startDateMillis", "published", "createdAt", "updatedAt"]
+    },
+    "TrainingSession": {
+      "title": "TrainingSession",
+      "description": "Sessão de treino numa semana",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "weekKey": { "type": "string" },
+        "dayOfWeek": { "type": "integer" },
+        "dateLabel": { "type": "string" },
+        "timeLabel": { "type": "string" },
+        "durationMinutes": { "type": "integer" },
+        "capacity": { "type": "integer" },
+        "note": { "type": "string" },
+        "startMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "weekKey", "dayOfWeek", "dateLabel", "timeLabel", "durationMinutes", "capacity", "note", "startMillis", "createdAt", "updatedAt"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Pedido de marcação ou reserva de treino",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "weekKey": { "type": "string" },
+        "clientId": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "CONFIRMED", "ALTERED", "CANCELLED"] },
+        "requestedAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "sessionId", "weekKey", "clientId", "status", "requestedAtMillis", "createdAt", "updatedAt"]
+    },
+    "WeekResponse": {
+      "title": "WeekResponse",
+      "description": "Estado de resposta semanal do aluno (indisponível ou lembrado)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "weekKey": { "type": "string" },
+        "clientId": { "type": "string" },
+        "status": { "type": "string", "enum": ["UNAVAILABLE", "REMINDED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "weekKey", "clientId", "status", "createdAt", "updatedAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Registo de mensalidade paga pelo aluno",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "monthYear": { "type": "string" },
+        "monthLabel": { "type": "string" },
+        "amountEur": { "type": "number" },
+        "paid": { "type": "boolean" },
+        "paidAtMillis": { "type": "integer" },
+        "note": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "monthYear", "monthLabel", "amountEur", "paid", "paidAtMillis", "note", "createdAt", "updatedAt"]
+    },
+    "Fidelizacao": {
+      "title": "Fidelizacao",
+      "description": "Contrato de fidelização de 6 ou 12 meses",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "durationMonths": { "type": "integer" },
+        "startDateMillis": { "type": "integer" },
+        "endDateMillis": { "type": "integer" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "durationMonths", "startDateMillis", "endDateMillis", "notes", "createdAt", "updatedAt"]
+    },
+    "Exercise": {
+      "title": "Exercise",
+      "description": "Exercício da biblioteca de treino",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "muscleGroup": { "type": "string" },
+        "equipment": { "type": "string" },
+        "instructions": { "type": "string" },
+        "custom": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "muscleGroup", "equipment", "instructions", "custom", "createdAt", "updatedAt"]
+    },
+    "WorkoutPlan": {
+      "title": "WorkoutPlan",
+      "description": "Plano de treino atribuído a um aluno",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "title": { "type": "string" },
+        "splitLabel": { "type": "string" },
+        "createdAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "title", "splitLabel", "createdAtMillis", "createdAt", "updatedAt"]
+    },
+    "WorkoutPlanItem": {
+      "title": "WorkoutPlanItem",
+      "description": "Exercício dentro de um plano de treino",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "planId": { "type": "string" },
+        "exerciseId": { "type": "string" },
+        "exerciseName": { "type": "string" },
+        "muscleGroup": { "type": "string" },
+        "sets": { "type": "integer" },
+        "reps": { "type": "string" },
+        "loadKg": { "type": "string" },
+        "restSeconds": { "type": "integer" },
+        "notes": { "type": "string" },
+        "orderIndex": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "planId", "exerciseId", "exerciseName", "muscleGroup", "sets", "reps", "loadKg", "restSeconds", "notes", "orderIndex", "createdAt", "updatedAt"]
+    },
+    "FoodItem": {
+      "title": "FoodItem",
+      "description": "Alimento com macronutrientes por 100g",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "kcalPer100g": { "type": "number" },
+        "proteinPer100g": { "type": "number" },
+        "carbsPer100g": { "type": "number" },
+        "fatPer100g": { "type": "number" },
+        "custom": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "category", "kcalPer100g", "proteinPer100g", "carbsPer100g", "fatPer100g", "custom", "createdAt", "updatedAt"]
+    },
+    "NutritionEntry": {
+      "title": "NutritionEntry",
+      "description": "Alimento adicionado a uma refeição do plano nutricional do aluno",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "mealType": { "type": "string" },
+        "foodId": { "type": "string" },
+        "foodName": { "type": "string" },
+        "grams": { "type": "number" },
+        "kcal": { "type": "number" },
+        "protein": { "type": "number" },
+        "carbs": { "type": "number" },
+        "fat": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "mealType", "foodId", "foodName", "grams", "kcal", "protein", "carbs", "fat", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Mensagem privada entre PT e aluno",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["PT", "STUDENT"] },
+        "text": { "type": "string" },
+        "timestampMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "senderRole", "text", "timestampMillis", "createdAt", "updatedAt"]
+    },
+    "MessageTemplate": {
+      "title": "MessageTemplate",
+      "description": "Modelo de mensagem WhatsApp personalizável",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "templateKey": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "body": { "type": "string" },
+        "defaultBody": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "templateKey", "title", "description", "body", "defaultBody", "createdAt", "updatedAt"]
+    },
+    "StudioSettings": {
+      "title": "StudioSettings",
+      "description": "Definições gerais do estúdio New Shape",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientsCanEdit": { "type": "boolean" },
+        "cutoffHours": { "type": "integer" },
+        "whatsappWebMode": { "type": "boolean" },
+        "siteBaseUrl": { "type": "string" },
+        "seeded": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientsCanEdit", "cutoffHours", "whatsappWebMode", "siteBaseUrl", "seeded", "createdAt", "updatedAt"]
+    },
+    "PhysicalAssessment": {
+      "title": "PhysicalAssessment",
+      "description": "Avaliação física do aluno com cálculo automático de IMC e TMB",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "dateMillis": { "type": "integer" },
+        "weightKg": { "type": "number" },
+        "ageYears": { "type": "integer" },
+        "heightCm": { "type": "number" },
+        "sex": { "type": "string", "enum": ["M", "F"] },
+        "bodyFatPct": { "type": "number" },
+        "muscleMassKg": { "type": "number" },
+        "visceralFat": { "type": "number" },
+        "bmi": { "type": "number" },
+        "bmrKcal": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "dateMillis", "weightKg", "ageYears", "heightCm", "sex", "bodyFatPct", "muscleMassKg", "visceralFat", "bmi", "bmrKcal", "notes", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Lista de alunos do estúdio"
+    },
+    "/users/{userId}/weeks/{weekId}": {
+      "schema": { "$ref": "#/entities/TrainingWeek" },
+      "description": "Semanas de treinos"
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/TrainingSession" },
+      "description": "Horários de treino publicados ou em rascunho"
+    },
+    "/users/{userId}/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Marcações dos alunos"
+    },
+    "/users/{userId}/week_responses/{responseId}": {
+      "schema": { "$ref": "#/entities/WeekResponse" },
+      "description": "Respostas de indisponibilidade e lembretes"
+    },
+    "/users/{userId}/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Mensalidades pagas pelos alunos"
+    },
+    "/users/{userId}/fidelizacoes/{fidelizacaoId}": {
+      "schema": { "$ref": "#/entities/Fidelizacao" },
+      "description": "Fidelizações de 6 e 12 meses"
+    },
+    "/users/{userId}/exercises/{exerciseId}": {
+      "schema": { "$ref": "#/entities/Exercise" },
+      "description": "Biblioteca de exercícios"
+    },
+    "/users/{userId}/workout_plans/{planId}": {
+      "schema": { "$ref": "#/entities/WorkoutPlan" },
+      "description": "Planos de treino dos alunos"
+    },
+    "/users/{userId}/workout_plan_items/{itemId}": {
+      "schema": { "$ref": "#/entities/WorkoutPlanItem" },
+      "description": "Exercícios pertencentes a planos de treino"
+    },
+    "/users/{userId}/foods/{foodId}": {
+      "schema": { "$ref": "#/entities/FoodItem" },
+      "description": "Lista de alimentos com macros"
+    },
+    "/users/{userId}/nutrition_entries/{entryId}": {
+      "schema": { "$ref": "#/entities/NutritionEntry" },
+      "description": "Refeições e macros por aluno"
+    },
+    "/users/{userId}/chat_messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Mensagens privadas PT <-> Aluno"
+    },
+    "/users/{userId}/templates/{templateKey}": {
+      "schema": { "$ref": "#/entities/MessageTemplate" },
+      "description": "Modelos de mensagens WhatsApp"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StudioSettings" },
+      "description": "Definições do estúdio"
+    },
+    "/users/{userId}/physical_assessments/{assessmentId}": {
+      "schema": { "$ref": "#/entities/PhysicalAssessment" },
+      "description": "Avaliações físicas e evolução corporal dos alunos"
+    }
+  }
+}

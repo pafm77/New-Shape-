@@ -1,0 +1,435 @@
+package com.example.ui.screens
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.example.data.model.BookingRecord
+import com.example.data.model.BookingStatus
+import com.example.data.model.TrainingSessionRecord
+import com.example.ui.*
+import com.example.ui.components.*
+import com.example.ui.theme.*
+
+@Composable
+fun PtHomeTab(
+    state: StudioUiState,
+    viewModel: NewShapeViewModel
+) {
+    var selectedSubTab by remember { mutableIntStateOf(0) }
+    val subTabs = listOf("Por confirmar", "Semanas", "Respostas", "Mensagens")
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScrollableTabRow(
+            selectedTabIndex = selectedSubTab,
+            containerColor = CharcoalSurface,
+            contentColor = NewShapeGold,
+            edgePadding = 16.dp,
+            divider = { HorizontalDivider(color = HairlineBorder) }
+        ) {
+            subTabs.forEachIndexed { idx, title ->
+                val countSuffix = if (idx == 0 && state.pendingQueue.isNotEmpty()) " (${state.pendingQueue.size})" else ""
+                Tab(
+                    selected = selectedSubTab == idx,
+                    onClick = { selectedSubTab = idx },
+                    modifier = Modifier.testTag("pt_home_subtab_$idx"),
+                    text = {
+                        Text(
+                            text = "$title$countSuffix",
+                            fontWeight = if (selectedSubTab == idx) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selectedSubTab == idx) NewShapeGold else TextSecondaryDark
+                        )
+                    }
+                )
+            }
+        }
+
+        when (selectedSubTab) {
+            0 -> PorConfirmarSection(
+                state = state,
+                viewModel = viewModel,
+                onJumpToResponses = { selectedSubTab = 2 }
+            )
+            1 -> SemanasSection(state = state, viewModel = viewModel)
+            2 -> RespostasSection(state = state, viewModel = viewModel)
+            3 -> MensagensSettingsSection(state = state, viewModel = viewModel)
+        }
+    }
+}
+
+@Composable
+private fun PorConfirmarSection(
+    state: StudioUiState,
+    viewModel: NewShapeViewModel,
+    onJumpToResponses: () -> Unit
+) {
+    val context = LocalContext.current
+    val activeWeek = state.activeWeek
+
+    val activeClients = state.clients.filter { it.active }
+    val weekBookedClientIds = if (activeWeek != null) {
+        state.bookings.filter { it.weekKey == activeWeek.weekKey && it.status != BookingStatus.CANCELLED.name }
+            .map { it.clientId }.toSet()
+    } else emptySet()
+    val unavailableClientIds = if (activeWeek != null) {
+        state.weekResponses.filter { it.weekKey == activeWeek.weekKey && it.status == "UNAVAILABLE" }
+            .map { it.clientId }.toSet()
+    } else emptySet()
+    val notRespondedCount = activeClients.count { it.id !in weekBookedClientIds && it.id !in unavailableClientIds }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (activeWeek != null) {
+            item {
+                Surface(
+                    color = NewShapeGoldMuted,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Semana ${activeWeek.label}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = NewShapeGoldBright
+                            )
+                            Text(
+                                text = "$notRespondedCount aluno(s) por responder",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark
+                            )
+                        }
+                        TextButton(onClick = onJumpToResponses) {
+                            Text("Ver respostas", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Por confirmar",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = TextPrimaryDark
+                )
+                if (state.pendingQueue.isNotEmpty()) {
+                    StatusPill(
+                        text = state.pendingQueue.size.toString(),
+                        textColor = TextOnGold,
+                        containerColor = NewShapeGold
+                    )
+                }
+            }
+        }
+
+        if (state.pendingQueue.isEmpty()) {
+            item {
+                EmptyStateBox(
+                    icon = Icons.Default.DoneAll,
+                    title = "Fila vazia!",
+                    subtitle = "Todos os pedidos de marcação estão confirmados."
+                )
+            }
+        } else {
+            itemsIndexed(state.pendingQueue, key = { _, card -> "${card.client.id}_${card.week.weekKey}" }) { index, card ->
+                PendingConfirmationCardView(
+                    card = card,
+                    isFirst = index == 0,
+                    isLockedByWhatsApp = state.waitingWhatsAppReturn,
+                    allWeekSessions = state.sessions.filter { it.weekKey == card.week.weekKey },
+                    allBookings = state.bookings,
+                    buildMessage = { key, sessions ->
+                        viewModel.buildMessage(key, card.client.name, sessions, card.week)
+                    },
+                    onConfirmAll = {
+                        val templateKey = if (card.isCancelledAll) "CANCELAMENTO" else "CONFIRMACAO"
+                        val msg = viewModel.buildMessage(
+                            templateKey = templateKey,
+                            clientName = card.client.name,
+                            sessions = card.items.map { it.session },
+                            week = card.week
+                        )
+                        viewModel.confirmCardAndNotify(card)
+                        openWhatsApp(context, card.client.phone, msg, state.settings.whatsappWebMode)
+                    },
+                    onRejectItem = { item ->
+                        val msg = viewModel.buildMessage(
+                            templateKey = "RECUSA",
+                            clientName = card.client.name,
+                            sessions = listOf(item.session),
+                            week = card.week
+                        )
+                        viewModel.rejectBooking(item.booking)
+                        openWhatsApp(context, card.client.phone, msg, state.settings.whatsappWebMode)
+                    },
+                    onMoveItem = { item, newSession ->
+                        val msg = viewModel.buildMessage(
+                            templateKey = "ALTERACAO",
+                            clientName = card.client.name,
+                            sessions = listOf(newSession),
+                            week = card.week
+                        )
+                        viewModel.moveBooking(item.booking, newSession.id)
+                        openWhatsApp(context, card.client.phone, msg, state.settings.whatsappWebMode)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PendingConfirmationCardView(
+    card: PendingConfirmationCard,
+    isFirst: Boolean,
+    isLockedByWhatsApp: Boolean,
+    allWeekSessions: List<TrainingSessionRecord>,
+    allBookings: List<BookingRecord>,
+    buildMessage: (String, List<TrainingSessionRecord>) -> String,
+    onConfirmAll: () -> Unit,
+    onRejectItem: (BookingWithSession) -> Unit,
+    onMoveItem: (BookingWithSession, TrainingSessionRecord) -> Unit
+) {
+    var showMessagePreview by remember { mutableStateOf(false) }
+
+    BrandCard(highlightBorder = isFirst) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = card.client.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = TextPrimaryDark
+                    )
+                    if (card.isAltered) {
+                        StatusPill("Alterado", PendingAmber, PendingAmberContainer)
+                    }
+                    if (card.isCancelledAll) {
+                        StatusPill("Cancelou", DangerRed, DangerRedContainer)
+                    }
+                    if (card.client.newClient) {
+                        StatusPill("Novo", InfoBlue, InfoBlueContainer)
+                    }
+                }
+                Text(
+                    text = card.client.phone,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = formatTimeAgo(card.requestedAtMillis),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondaryDark
+                )
+                Text(
+                    text = card.week.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NewShapeGold
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(color = HairlineBorder)
+        Spacer(Modifier.height(10.dp))
+
+        card.items.forEach { item ->
+            var showMovePicker by remember { mutableStateOf(false) }
+            var selectedMoveTarget by remember { mutableStateOf<TrainingSessionRecord?>(null) }
+
+            val availableTargets = remember(allWeekSessions, allBookings, item.session.id) {
+                allWeekSessions.filter { s ->
+                    if (s.id == item.session.id) return@filter false
+                    val bookedCount = allBookings.count {
+                        it.sessionId == s.id && it.status != BookingStatus.CANCELLED.name
+                    }
+                    s.capacity - bookedCount > 0
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text(
+                    text = "${item.session.dateLabel} – ${item.session.timeLabel.replace(":", "h")}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextPrimaryDark
+                )
+                if (!card.isCancelledAll) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Text(
+                            text = "Recusar",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = DangerRed,
+                            modifier = Modifier
+                                .clickable(enabled = !isLockedByWhatsApp) { onRejectItem(item) }
+                                .padding(vertical = 6.dp)
+                        )
+                        Text(
+                            text = if (showMovePicker) "Fechar mover" else "Mover para...",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = NewShapeGold,
+                            modifier = Modifier
+                                .clickable(enabled = !isLockedByWhatsApp) {
+                                    showMovePicker = !showMovePicker
+                                    selectedMoveTarget = availableTargets.firstOrNull()
+                                }
+                                .padding(vertical = 6.dp)
+                        )
+                    }
+                }
+
+                AnimatedVisibility(visible = showMovePicker) {
+                    Surface(
+                        color = ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, HairlineBorder),
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            if (availableTargets.isEmpty()) {
+                                Text(
+                                    "Sem outros treinos com vagas esta semana.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark
+                                )
+                            } else {
+                                availableTargets.forEach { target ->
+                                    val bookedCount = allBookings.count {
+                                        it.sessionId == target.id && it.status != BookingStatus.CANCELLED.name
+                                    }
+                                    val spots = (target.capacity - bookedCount).coerceAtLeast(0)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { selectedMoveTarget = target }
+                                            .padding(vertical = 4.dp)
+                                    ) {
+                                        RadioButton(
+                                            selected = selectedMoveTarget?.id == target.id,
+                                            onClick = { selectedMoveTarget = target },
+                                            colors = RadioButtonDefaults.colors(selectedColor = NewShapeGold)
+                                        )
+                                        Text(
+                                            text = "${target.dateLabel} – ${target.timeLabel.replace(":", "h")} ($spots vagas)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextPrimaryDark
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                DarkSecondaryButton(
+                                    text = "Mover, confirmar e abrir WhatsApp",
+                                    onClick = {
+                                        selectedMoveTarget?.let { target ->
+                                            showMovePicker = false
+                                            onMoveItem(item, target)
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clickable { showMessagePreview = !showMessagePreview }
+                .padding(vertical = 6.dp)
+        ) {
+            Icon(
+                imageVector = if (showMessagePreview) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = TextSecondaryDark,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "Ver mensagem",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondaryDark
+            )
+        }
+
+        AnimatedVisibility(visible = showMessagePreview) {
+            val previewKey = if (card.isCancelledAll) "CANCELAMENTO" else "CONFIRMACAO"
+            val previewText = buildMessage(previewKey, card.items.map { it.session })
+            Surface(
+                color = ElevatedCharcoal,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            ) {
+                Text(
+                    text = previewText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextPrimaryDark,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+        val ctaLabel = if (card.isCancelledAll) "Responder e abrir WhatsApp" else "Confirmar e abrir WhatsApp"
+        if (isFirst) {
+            GoldPrimaryButton(
+                text = ctaLabel,
+                icon = Icons.Default.Check,
+                enabled = !isLockedByWhatsApp,
+                onClick = onConfirmAll,
+                modifier = Modifier.fillMaxWidth(),
+                testTag = "confirm_first_card_button"
+            )
+        } else {
+            DarkSecondaryButton(
+                text = ctaLabel,
+                icon = Icons.Default.Check,
+                onClick = { if (!isLockedByWhatsApp) onConfirmAll() },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}

@@ -1,0 +1,538 @@
+import React, { useMemo, useState } from 'react';
+import { Dumbbell, Plus, Search, Trash2, X } from 'lucide-react';
+import {
+  ClientRecord,
+  ExerciseRecord,
+  WorkoutPlanItemRecord,
+  WorkoutPlanRecord,
+} from '../types/studio';
+import * as repo from '../services/firestoreRepository';
+import {
+  BrandCard,
+  EmptyState,
+  FieldLabel,
+  GoldButton,
+  Input,
+  Modal,
+  SecondaryButton,
+  StatusPill,
+  Textarea,
+} from './UiPrimitives';
+
+interface PtTrainingSectionProps {
+  uid: string;
+  clients: ClientRecord[];
+  exercises: ExerciseRecord[];
+  workoutPlans: WorkoutPlanRecord[];
+  workoutPlanItems: WorkoutPlanItemRecord[];
+  initialClientId?: string;
+  onBanner: (msg: string) => void;
+}
+
+export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
+  uid,
+  clients,
+  exercises,
+  workoutPlans,
+  workoutPlanItems,
+  initialClientId,
+  onBanner,
+}) => {
+  const [subTab, setSubTab] = useState<'plans' | 'library'>('plans');
+  const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
+  const [selectedClientId, setSelectedClientId] = useState(
+    initialClientId || activeClients[0]?.id || ''
+  );
+
+  const effectiveClient =
+    activeClients.find((c) => c.id === selectedClientId) || activeClients[0] || null;
+
+  const [showNewPlan, setShowNewPlan] = useState(false);
+  const [targetPlan, setTargetPlan] = useState<WorkoutPlanRecord | null>(null);
+
+  const clientPlans = useMemo(
+    () =>
+      effectiveClient
+        ? workoutPlans.filter((p) => p.clientId === effectiveClient.id)
+        : [],
+    [workoutPlans, effectiveClient]
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
+        <button
+          type="button"
+          onClick={() => setSubTab('plans')}
+          className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            subTab === 'plans'
+              ? 'bg-[#EAB308] text-[#121214]'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          Planos de Treino
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('library')}
+          className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            subTab === 'library'
+              ? 'bg-[#EAB308] text-[#121214]'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          Exercícios ({exercises.length})
+        </button>
+      </div>
+
+      {subTab === 'plans' ? (
+        <div className="space-y-4">
+          <BrandCard>
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+              <div className="flex-1">
+                <FieldLabel>Selecionar Aluno</FieldLabel>
+                <select
+                  value={effectiveClient?.id || ''}
+                  onChange={(e) => setSelectedClientId(e.target.value)}
+                  className="w-full rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5 text-sm text-[#F4F4F5] outline-none focus:border-[#EAB308]"
+                >
+                  {activeClients.length === 0 ? (
+                    <option value="">Sem alunos ativos</option>
+                  ) : (
+                    activeClients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+              <GoldButton disabled={!effectiveClient} onClick={() => setShowNewPlan(true)}>
+                <Plus className="h-4 w-4" />
+                Novo Plano de Treino
+              </GoldButton>
+            </div>
+          </BrandCard>
+
+          {clientPlans.length === 0 ? (
+            <EmptyState
+              icon={<Dumbbell className="h-6 w-6" />}
+              title="Sem planos atribuídos"
+              subtitle={`Cria um plano para ${effectiveClient?.name || 'este aluno'} e escolhe exercícios da biblioteca.`}
+            />
+          ) : (
+            <div className="space-y-4">
+              {clientPlans.map((plan) => {
+                const items = workoutPlanItems
+                  .filter((i) => i.planId === plan.id)
+                  .sort((a, b) => a.orderIndex - b.orderIndex);
+                return (
+                  <BrandCard key={plan.id} highlight>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-lg font-bold text-[#F4F4F5]">{plan.title}</h3>
+                        {plan.splitLabel && (
+                          <p className="text-xs font-semibold text-[#FACC15]">{plan.splitLabel}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await repo.deleteWorkoutPlan(uid, plan.id, workoutPlanItems);
+                          onBanner('Plano apagado.');
+                        }}
+                        aria-label="Apagar plano"
+                        className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="my-3 border-t border-[#323238]" />
+
+                    {items.length === 0 ? (
+                      <p className="text-xs text-[#A1A1AA]">Ainda sem exercícios neste plano.</p>
+                    ) : (
+                      <div className="divide-y divide-[#323238]/60">
+                        {items.map((item, idx) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-3 py-2.5"
+                          >
+                            <div>
+                              <p className="text-sm font-bold text-[#F4F4F5]">
+                                {idx + 1}. {item.exerciseName}
+                              </p>
+                              <p className="text-xs font-medium text-[#EAB308]">
+                                {item.sets} séries × {item.reps}
+                                {item.loadKg ? ` · ${item.loadKg}` : ''} · Descanso{' '}
+                                {item.restSeconds}s
+                              </p>
+                              {item.notes && (
+                                <p className="text-xs text-[#A1A1AA]">{item.notes}</p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => repo.removeExerciseFromPlan(uid, item.id)}
+                              className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="mt-3">
+                      <SecondaryButton fullWidth onClick={() => setTargetPlan(plan)}>
+                        <Plus className="h-4 w-4" />
+                        Adicionar Exercício da Biblioteca
+                      </SecondaryButton>
+                    </div>
+                  </BrandCard>
+                );
+              })}
+            </div>
+          )}
+
+          {showNewPlan && effectiveClient && (
+            <NewPlanModal
+              clientName={effectiveClient.name}
+              onClose={() => setShowNewPlan(false)}
+              onCreate={async (title, split) => {
+                await repo.createWorkoutPlan(uid, effectiveClient.id, title, split);
+                setShowNewPlan(false);
+                onBanner('Plano de treino criado!');
+              }}
+            />
+          )}
+
+          {targetPlan && (
+            <AddExerciseToPlanModal
+              planTitle={targetPlan.title}
+              exercises={exercises}
+              onClose={() => setTargetPlan(null)}
+              onAdd={async (exercise, sets, reps, load, rest, notes) => {
+                const count = workoutPlanItems.filter((i) => i.planId === targetPlan.id).length;
+                await repo.addExerciseToPlan(
+                  uid,
+                  targetPlan.id,
+                  exercise,
+                  sets,
+                  reps,
+                  load,
+                  rest,
+                  notes,
+                  count
+                );
+                setTargetPlan(null);
+                onBanner('Exercício adicionado ao plano.');
+              }}
+            />
+          )}
+        </div>
+      ) : (
+        <ExerciseLibraryView uid={uid} exercises={exercises} onBanner={onBanner} />
+      )}
+    </div>
+  );
+};
+
+const ExerciseLibraryView: React.FC<{
+  uid: string;
+  exercises: ExerciseRecord[];
+  onBanner: (msg: string) => void;
+}> = ({ uid, exercises, onBanner }) => {
+  const [search, setSearch] = useState('');
+  const [group, setGroup] = useState('Todos');
+  const [showAdd, setShowAdd] = useState(false);
+
+  const groups = useMemo(
+    () => ['Todos', ...Array.from(new Set(exercises.map((e) => e.muscleGroup))).sort()],
+    [exercises]
+  );
+
+  const filtered = exercises.filter(
+    (e) =>
+      (group === 'Todos' || e.muscleGroup === group) &&
+      (!search.trim() ||
+        e.name.toLowerCase().includes(search.toLowerCase()) ||
+        e.equipment.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-bold text-[#F4F4F5]">Biblioteca de Exercícios</h2>
+        <GoldButton onClick={() => setShowAdd(true)}>
+          <Plus className="h-4 w-4" />
+          Acrescentar
+        </GoldButton>
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#A1A1AA]" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Procurar exercício ou equipamento..."
+          className="pl-9"
+        />
+      </div>
+
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {groups.map((g) => (
+          <button
+            key={g}
+            type="button"
+            onClick={() => setGroup(g)}
+            className={`whitespace-nowrap rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+              group === g
+                ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA]'
+            }`}
+          >
+            {g}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+        {filtered.map((ex) => (
+          <div
+            key={ex.id}
+            className="flex items-start justify-between gap-2 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-4"
+          >
+            <div>
+              <h3 className="text-sm font-bold text-[#F4F4F5]">{ex.name}</h3>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <StatusPill tone="gold">{ex.muscleGroup}</StatusPill>
+                <StatusPill>{ex.equipment}</StatusPill>
+                {ex.custom && <StatusPill tone="blue">Personalizado</StatusPill>}
+              </div>
+              {ex.instructions && (
+                <p className="mt-2 text-xs text-[#A1A1AA]">{ex.instructions}</p>
+              )}
+            </div>
+            {ex.custom && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await repo.deleteExercise(uid, ex.id);
+                  onBanner('Exercício apagado.');
+                }}
+                className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {showAdd && (
+        <AddCustomExerciseModal
+          onClose={() => setShowAdd(false)}
+          onSave={async (name, grp, equip, instr) => {
+            await repo.addCustomExercise(uid, name, grp, equip, instr);
+            setShowAdd(false);
+            onBanner('Exercício acrescentado!');
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+const NewPlanModal: React.FC<{
+  clientName: string;
+  onClose: () => void;
+  onCreate: (title: string, split: string) => Promise<void>;
+}> = ({ clientName, onClose, onCreate }) => {
+  const [title, setTitle] = useState('');
+  const [split, setSplit] = useState('Treino A · Corpo Inteiro');
+  return (
+    <Modal open title={`Novo Plano · ${clientName}`} onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <FieldLabel>Nome do Plano</FieldLabel>
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Ex: Hipertrofia 3x"
+          />
+        </div>
+        <div>
+          <FieldLabel>Divisão / Dia</FieldLabel>
+          <Input value={split} onChange={(e) => setSplit(e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <GoldButton disabled={!title.trim()} onClick={() => onCreate(title, split)}>
+            Criar Plano
+          </GoldButton>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const AddExerciseToPlanModal: React.FC<{
+  planTitle: string;
+  exercises: ExerciseRecord[];
+  onClose: () => void;
+  onAdd: (
+    ex: ExerciseRecord,
+    sets: number,
+    reps: string,
+    load: string,
+    rest: number,
+    notes: string
+  ) => Promise<void>;
+}> = ({ planTitle, exercises, onClose, onAdd }) => {
+  const [search, setSearch] = useState('');
+  const filtered = exercises.filter(
+    (e) =>
+      !search.trim() ||
+      e.name.toLowerCase().includes(search.toLowerCase()) ||
+      e.muscleGroup.toLowerCase().includes(search.toLowerCase())
+  );
+  const [selectedId, setSelectedId] = useState(exercises[0]?.id || '');
+  const [sets, setSets] = useState('3');
+  const [reps, setReps] = useState('10-12');
+  const [load, setLoad] = useState('');
+  const [rest, setRest] = useState('90');
+  const [notes, setNotes] = useState('');
+
+  const selected = exercises.find((e) => e.id === selectedId) || filtered[0] || null;
+
+  return (
+    <Modal open title={`Adicionar a ${planTitle}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filtrar exercício..."
+        />
+        <div className="max-h-44 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
+          {filtered.map((ex) => (
+            <label
+              key={ex.id}
+              className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-xs hover:bg-[#2E2E35]"
+            >
+              <input
+                type="radio"
+                name="ex_pick"
+                checked={selected?.id === ex.id}
+                onChange={() => setSelectedId(ex.id)}
+                className="accent-[#EAB308]"
+              />
+              <div>
+                <p className="font-semibold text-[#F4F4F5]">{ex.name}</p>
+                <p className="text-[11px] text-[#EAB308]">{ex.muscleGroup}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <FieldLabel>Séries</FieldLabel>
+            <Input type="number" value={sets} onChange={(e) => setSets(e.target.value)} />
+          </div>
+          <div>
+            <FieldLabel>Repetições</FieldLabel>
+            <Input value={reps} onChange={(e) => setReps(e.target.value)} />
+          </div>
+          <div>
+            <FieldLabel>Carga (ex: 40 kg)</FieldLabel>
+            <Input value={load} onChange={(e) => setLoad(e.target.value)} />
+          </div>
+          <div>
+            <FieldLabel>Descanso (s)</FieldLabel>
+            <Input type="number" value={rest} onChange={(e) => setRest(e.target.value)} />
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Observações técnicas</FieldLabel>
+          <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <GoldButton
+            disabled={!selected}
+            onClick={() =>
+              selected &&
+              onAdd(
+                selected,
+                Math.max(1, Number(sets) || 3),
+                reps || '10-12',
+                load,
+                Math.max(0, Number(rest) || 90),
+                notes
+              )
+            }
+          >
+            Adicionar
+          </GoldButton>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const AddCustomExerciseModal: React.FC<{
+  onClose: () => void;
+  onSave: (name: string, group: string, equip: string, instructions: string) => Promise<void>;
+}> = ({ onClose, onSave }) => {
+  const groups = ['Peito', 'Costas', 'Pernas', 'Ombros', 'Braços', 'Core', 'Cardio'];
+  const [name, setName] = useState('');
+  const [group, setGroup] = useState('Peito');
+  const [equip, setEquip] = useState('Halteres');
+  const [instr, setInstr] = useState('');
+
+  return (
+    <Modal open title="Acrescentar Exercício" onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <FieldLabel>Nome do exercício</FieldLabel>
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <FieldLabel>Grupo muscular</FieldLabel>
+          <div className="flex flex-wrap gap-1.5">
+            {groups.map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setGroup(g)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${
+                  group === g
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+                }`}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Equipamento</FieldLabel>
+          <Input value={equip} onChange={(e) => setEquip(e.target.value)} />
+        </div>
+        <div>
+          <FieldLabel>Notas / Execução</FieldLabel>
+          <Textarea rows={2} value={instr} onChange={(e) => setInstr(e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <GoldButton disabled={!name.trim()} onClick={() => onSave(name, group, equip, instr)}>
+            Guardar Exercício
+          </GoldButton>
+        </div>
+      </div>
+    </Modal>
+  );
+};

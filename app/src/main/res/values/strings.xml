@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">New Shape</string>
+    <string name="pt_area_title">Área do PT</string>
+    <string name="student_area_title">Área do Aluno</string>
+    <string name="enter_pt_mode">Entrar como Personal Trainer</string>
+    <string name="enter_student_mode">Entrar como Aluno</string>
+    <string name="nav_home">Início</string>
+    <string name="nav_clients">Alunos</string>
+    <string name="nav_training">Treino</string>
+    <string name="nav_nutrition">Nutrição</string>
+    <string name="nav_management">Gestão</string>
+    <string name="nav_agenda">Agenda</string>
+    <string name="nav_billing">Mensalidade</string>
+    <string name="nav_chat">Chat</string>
+    <string name="whatsapp_waiting_banner">Envia a mensagem no WhatsApp e volta aqui</string>
+    <string name="whatsapp_returned_btn">Já voltei</string>
+</resources>

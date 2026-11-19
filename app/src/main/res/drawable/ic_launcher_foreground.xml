@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Top accent slash echoing the New Shape brand banner -->
+    <path
+        android:fillColor="#FACC15"
+        android:pathData="M34,27 L58,27 L54,31 L34,31 Z" />
+    <!-- Upper kinetic S-shape -->
+    <path
+        android:fillColor="#EAB308"
+        android:pathData="M38,35 L70,35 L70,43 L48,43 L48,48 L70,48 L62,53.5 L38,53.5 Z" />
+    <!-- Lower kinetic S-shape with diagonal brand cut -->
+    <path
+        android:fillColor="#EAB308"
+        android:pathData="M46,55.5 L70,55.5 L70,74 L38,74 L38,66 L60,66 L60,60.5 L38,60.5 Z" />
+    <!-- Left & right minimalist plate accents -->
+    <path
+        android:fillColor="#FACC15"
+        android:pathData="M28,43 L32,43 L32,66 L28,66 Z" />
+    <path
+        android:fillColor="#FACC15"
+        android:pathData="M76,43 L80,43 L80,66 L76,66 Z" />
+</vector>
