@@ -13,8 +13,12 @@ import {
 } from 'lucide-react';
 import { ClientRecord, FidelizacaoRecord, PaymentRecord } from '../types/studio';
 import {
+  PAYMENT_METHODS,
+  PaymentMethod,
+  buildConsecutiveMonths,
   buildRecentMonthOptions,
   formatPhoneDisplay,
+  formatRgpdConsentStamp,
   formatShortDate,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
@@ -221,11 +225,26 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         <RegisterPaymentModal
           clientName={payTarget.name}
           defaultAmount={payTarget.monthlyFeeEur > 0 ? payTarget.monthlyFeeEur : 120}
+          defaultDurationMonths={payTarget.fidelizacaoMonths}
           onClose={() => setPayTarget(null)}
-          onConfirm={async (my, ml, amount, note) => {
-            await repo.recordPayment(uid, payTarget.id, my, ml, amount, note);
+          onConfirm={async (my, ml, amount, method, durationMonths) => {
+            await repo.recordPayment(
+              uid,
+              payTarget.id,
+              my,
+              ml,
+              amount,
+              method,
+              durationMonths
+            );
             setPayTarget(null);
-            onBanner('Mensalidade registada!');
+            onBanner(
+              durationMonths > 1
+                ? `Pagamento de ${durationMonths} meses registado (€${(
+                    amount / durationMonths
+                  ).toFixed(2)}/mês)!`
+                : 'Mensalidade registada!'
+            );
           }}
         />
       )}
@@ -291,7 +310,12 @@ const ClientProfileView: React.FC<{
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <h2 className="text-xl font-bold text-[#F4F4F5]">{client.name}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-bold text-[#F4F4F5]">{client.name}</h2>
+              {client.notes.toLowerCase().includes('rgpd aceite') && (
+                <StatusPill tone="green">RGPD ✓</StatusPill>
+              )}
+            </div>
             <p className={`text-xs ${client.active ? 'text-[#22C55E]' : 'text-[#A1A1AA]'}`}>
               {client.active ? 'Aluno ativo' : 'Aluno inativo'}
             </p>
@@ -493,11 +517,18 @@ const ClientProfileView: React.FC<{
         <RegisterPaymentModal
           clientName={client.name}
           defaultAmount={client.monthlyFeeEur > 0 ? client.monthlyFeeEur : 120}
+          defaultDurationMonths={client.fidelizacaoMonths}
           onClose={() => setShowPay(false)}
-          onConfirm={async (my, ml, amt, note) => {
-            await repo.recordPayment(uid, client.id, my, ml, amt, note);
+          onConfirm={async (my, ml, amt, method, durationMonths) => {
+            await repo.recordPayment(uid, client.id, my, ml, amt, method, durationMonths);
             setShowPay(false);
-            onBanner('Pagamento registado!');
+            onBanner(
+              durationMonths > 1
+                ? `Pagamento de ${durationMonths} meses registado (€${(
+                    amt / durationMonths
+                  ).toFixed(2)}/mês)!`
+                : 'Pagamento registado!'
+            );
           }}
         />
       )}
@@ -512,6 +543,7 @@ const NewClientModal: React.FC<{
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
+  const [rgpdAccepted, setRgpdAccepted] = useState(false);
 
   return (
     <Modal open title="Novo Cliente" onClose={onClose}>
@@ -533,9 +565,28 @@ const NewClientModal: React.FC<{
           <FieldLabel>Notas (opcional)</FieldLabel>
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[#323238] bg-[#242429]/80 p-3 text-xs">
+          <input
+            type="checkbox"
+            checked={rgpdAccepted}
+            onChange={(e) => setRgpdAccepted(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[#EAB308]"
+          />
+          <span className="text-[#A1A1AA]">
+            <strong className="text-[#F4F4F5]">Consentimento RGPD obtido</strong> — o aluno
+            autorizou o tratamento dos dados pessoais.
+          </span>
+        </label>
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
-          <GoldButton disabled={!name.trim()} onClick={() => onSave(name, phone, notes)}>
+          <GoldButton
+            disabled={!name.trim()}
+            onClick={() => {
+              const rgpdStamp = rgpdAccepted ? formatRgpdConsentStamp() : '';
+              const combinedNotes = [notes.trim(), rgpdStamp].filter(Boolean).join(' · ');
+              return onSave(name, phone, combinedNotes);
+            }}
+          >
             Adicionar
           </GoldButton>
         </div>
@@ -595,19 +646,44 @@ const ImportClientsModal: React.FC<{
 export const RegisterPaymentModal: React.FC<{
   clientName: string;
   defaultAmount: number;
+  defaultDurationMonths?: number;
   onClose: () => void;
-  onConfirm: (monthYear: string, monthLabel: string, amount: number, note: string) => Promise<void>;
-}> = ({ clientName, defaultAmount, onClose, onConfirm }) => {
+  onConfirm: (
+    monthYear: string,
+    monthLabel: string,
+    amount: number,
+    method: PaymentMethod,
+    durationMonths: 1 | 6 | 12
+  ) => Promise<void>;
+}> = ({ clientName, defaultAmount, defaultDurationMonths = 1, onClose, onConfirm }) => {
+  const initialDuration: 1 | 6 | 12 =
+    defaultDurationMonths === 6 || defaultDurationMonths === 12 ? defaultDurationMonths : 1;
   const monthOptions = useMemo(() => buildRecentMonthOptions(), []);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [amount, setAmount] = useState(String(defaultAmount));
-  const [note, setNote] = useState('MB Way');
+  const [durationMonths, setDurationMonths] = useState<1 | 6 | 12>(initialDuration);
+  const [amount, setAmount] = useState(String(defaultAmount * initialDuration));
+  const [method, setMethod] = useState<PaymentMethod>('MbWay');
+
+  const numericAmount = Math.max(0, Number(amount) || 0);
+  const perMonthValue = numericAmount / durationMonths;
+  const coveredMonths = useMemo(
+    () => buildConsecutiveMonths(monthOptions[selectedIdx].monthYear, durationMonths),
+    [monthOptions, selectedIdx, durationMonths]
+  );
+
+  const handleDurationChange = (nextDuration: 1 | 6 | 12) => {
+    const prevAuto = defaultAmount * durationMonths;
+    if (Math.abs(numericAmount - prevAuto) < 0.01) {
+      setAmount(String(defaultAmount * nextDuration));
+    }
+    setDurationMonths(nextDuration);
+  };
 
   return (
     <Modal open title="Registar Mensalidade" subtitle={`Aluno: ${clientName}`} onClose={onClose}>
       <div className="space-y-3">
         <div>
-          <FieldLabel>Mês</FieldLabel>
+          <FieldLabel>{durationMonths > 1 ? 'Mês inicial da fidelização' : 'Mês'}</FieldLabel>
           <div className="flex flex-wrap gap-1.5">
             {monthOptions.slice(0, 4).map((m, idx) => (
               <button
@@ -625,14 +701,77 @@ export const RegisterPaymentModal: React.FC<{
             ))}
           </div>
         </div>
+
         <div>
-          <FieldLabel>Valor (€)</FieldLabel>
-          <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <FieldLabel>Período / Fidelização paga</FieldLabel>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { m: 1 as const, label: '1 Mês' },
+              { m: 6 as const, label: '6 Meses' },
+              { m: 12 as const, label: '12 Meses' },
+            ]).map((opt) => (
+              <button
+                key={opt.m}
+                type="button"
+                onClick={() => handleDurationChange(opt.m)}
+                className={`rounded-xl border py-2 text-xs font-bold transition ${
+                  durationMonths === opt.m
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
+
         <div>
-          <FieldLabel>Método / Nota</FieldLabel>
-          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="MB Way, Dinheiro..." />
+          <FieldLabel>
+            {durationMonths > 1
+              ? `Valor total pago (${durationMonths} meses) (€)`
+              : 'Valor (€)'}
+          </FieldLabel>
+          <Input
+            type="number"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+          {durationMonths > 1 && (
+            <div className="mt-2 rounded-xl border border-[#EAB308]/40 bg-[#3D3314]/60 p-2.5 text-xs text-[#FACC15]">
+              <p className="font-bold">
+                €{numericAmount.toFixed(2)} ÷ {durationMonths} meses = €
+                {perMonthValue.toFixed(2)}/mês
+              </p>
+              <p className="mt-0.5 text-[11px] text-[#F4F4F5]/80">
+                Conta 1 mensalidade por mês em todo o período ({coveredMonths[0]?.monthLabel} →{' '}
+                {coveredMonths[coveredMonths.length - 1]?.monthLabel}).
+              </p>
+            </div>
+          )}
         </div>
+
+        <div>
+          <FieldLabel>Método de pagamento</FieldLabel>
+          <div className="grid grid-cols-3 gap-2">
+            {PAYMENT_METHODS.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setMethod(opt)}
+                className={`rounded-xl border py-2 text-xs font-bold transition ${
+                  method === opt
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
           <GoldButton
@@ -640,8 +779,9 @@ export const RegisterPaymentModal: React.FC<{
               onConfirm(
                 monthOptions[selectedIdx].monthYear,
                 monthOptions[selectedIdx].monthLabel,
-                Math.max(0, Number(amount) || 0),
-                note
+                numericAmount,
+                method,
+                durationMonths
               )
             }
           >

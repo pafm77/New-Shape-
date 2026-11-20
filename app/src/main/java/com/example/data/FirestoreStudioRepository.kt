@@ -386,14 +386,14 @@ class FirestoreStudioRepository(
             // Payments
             val dayMs = 86_400_000L
             val samplePayments = listOf(
-                listOf("pay_1", "client_ana", "2026-11", "Nov 2026", 120.0, now - dayMs * 5, "MB Way"),
-                listOf("pay_2", "client_bruno", "2026-11", "Nov 2026", 95.0, now - dayMs * 3, "Transferência"),
-                listOf("pay_3", "client_eva", "2026-11", "Nov 2026", 120.0, now - dayMs * 2, "MB Way"),
-                listOf("pay_4", "client_ana", "2026-10", "Out 2026", 120.0, now - dayMs * 35, "MB Way"),
-                listOf("pay_5", "client_bruno", "2026-10", "Out 2026", 95.0, now - dayMs * 34, "Transferência"),
+                listOf("pay_1", "client_ana", "2026-11", "Nov 2026", 120.0, now - dayMs * 5, "MbWay"),
+                listOf("pay_2", "client_bruno", "2026-11", "Nov 2026", 95.0, now - dayMs * 3, "João"),
+                listOf("pay_3", "client_eva", "2026-11", "Nov 2026", 120.0, now - dayMs * 2, "MbWay"),
+                listOf("pay_4", "client_ana", "2026-10", "Out 2026", 120.0, now - dayMs * 35, "MbWay"),
+                listOf("pay_5", "client_bruno", "2026-10", "Out 2026", 95.0, now - dayMs * 34, "João"),
                 listOf("pay_6", "client_filipe", "2026-10", "Out 2026", 110.0, now - dayMs * 33, "Dinheiro"),
-                listOf("pay_7", "client_ana", "2026-09", "Set 2026", 120.0, now - dayMs * 65, "MB Way"),
-                listOf("pay_8", "client_eva", "2026-09", "Set 2026", 120.0, now - dayMs * 62, "MB Way")
+                listOf("pay_7", "client_ana", "2026-09", "Set 2026", 120.0, now - dayMs * 65, "MbWay"),
+                listOf("pay_8", "client_eva", "2026-09", "Set 2026", 120.0, now - dayMs * 62, "Dinheiro")
             )
             samplePayments.forEach { p ->
                 writes += userDoc(uid).collection("payments").document(p[0] as String) to mapOf(
@@ -1108,23 +1108,45 @@ class FirestoreStudioRepository(
     }
 
     // --- Payments ---
-    suspend fun recordPayment(clientId: String, monthYear: String, monthLabel: String, amountEur: Double, note: String): Result<Unit> = try {
+    suspend fun recordPayment(
+        clientId: String,
+        monthYear: String,
+        monthLabel: String,
+        amountEur: Double,
+        note: String,
+        durationMonths: Int = 1
+    ): Result<Unit> = try {
         val uid = requireUserId()
-        val ref = userDoc(uid).collection("payments").document()
-        ref.set(
-            mapOf(
-                "userId" to uid,
-                "clientId" to clientId,
-                "monthYear" to monthYear,
-                "monthLabel" to monthLabel,
-                "amountEur" to amountEur.coerceIn(0.0, 100000.0),
-                "paid" to true,
-                "paidAtMillis" to System.currentTimeMillis(),
-                "note" to note.trim().take(200),
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
+        val validMethod = SeedCatalog.normalizePaymentMethod(note) ?: "MbWay"
+        val monthsCount = if (durationMonths == 6 || durationMonths == 12) durationMonths else 1
+        val totalClamped = amountEur.coerceIn(0.0, 100000.0)
+        val perMonthAmount = kotlin.math.round((totalClamped / monthsCount) * 100.0) / 100.0
+        val targetMonths = if (monthsCount == 1) {
+            listOf(monthYear to monthLabel)
+        } else {
+            SeedCatalog.buildConsecutiveMonths(monthYear, monthsCount)
+        }
+        val now = System.currentTimeMillis()
+        val batch = db.batch()
+        targetMonths.forEach { (mYear, mLabel) ->
+            val ref = userDoc(uid).collection("payments").document()
+            batch.set(
+                ref,
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to clientId,
+                    "monthYear" to mYear,
+                    "monthLabel" to mLabel,
+                    "amountEur" to perMonthAmount,
+                    "paid" to true,
+                    "paidAtMillis" to now,
+                    "note" to validMethod,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
             )
-        ).await()
+        }
+        batch.commit().await()
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e

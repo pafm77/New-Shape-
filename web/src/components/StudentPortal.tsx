@@ -6,15 +6,19 @@ import {
   Dumbbell,
   LogOut,
   MessageCircle,
+  Plus,
   Scale,
   UserCheck,
   Utensils,
+  X,
 } from 'lucide-react';
 import {
   BookingRecord,
   ChatMessageRecord,
   ClientRecord,
   FidelizacaoRecord,
+  FoodItemRecord,
+  MealTypeKey,
   NutritionEntryRecord,
   PaymentRecord,
   PhysicalAssessmentRecord,
@@ -39,8 +43,8 @@ import {
   SecondaryButton,
   StatusPill,
 } from './UiPrimitives';
-import { DailyMacrosSummaryCard } from './PtNutritionSection';
-import { AssessmentDashboard } from './PtAssessmentSection';
+import { AddFoodToMealModal, DailyMacrosSummaryCard } from './PtNutritionSection';
+import { AssessmentDashboard, NewAssessmentModal } from './PtAssessmentSection';
 import { PrivateChatPanel } from './PtManagementSection';
 
 interface StudentPortalProps {
@@ -54,6 +58,7 @@ interface StudentPortalProps {
   fidelizacoes: FidelizacaoRecord[];
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
+  foodItems: FoodItemRecord[];
   nutritionEntries: NutritionEntryRecord[];
   assessments: PhysicalAssessmentRecord[];
   chatMessages: ChatMessageRecord[];
@@ -78,6 +83,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   fidelizacoes,
   workoutPlans,
   workoutPlanItems,
+  foodItems,
   nutritionEntries,
   assessments,
   chatMessages,
@@ -89,6 +95,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   onBanner,
 }) => {
   const [tab, setTab] = useState<StudentTab>('agenda');
+  const [addMealTarget, setAddMealTarget] = useState<{
+    key: MealTypeKey;
+    label: string;
+  } | null>(null);
+  const [showNewAssessmentModal, setShowNewAssessmentModal] = useState(false);
   const firstName = client.name.trim().split(/\s+/)[0] || client.name;
 
   const publishedWeeks = useMemo(
@@ -475,36 +486,64 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
         {tab === 'nutricao' && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-[#F4F4F5]">Plano Alimentar & Macros</h2>
+            <div>
+              <h2 className="text-xl font-bold text-[#F4F4F5]">As Minhas Refeições & Macros</h2>
+              <p className="text-xs text-[#A1A1AA]">
+                Adiciona os teus alimentos em cada refeição — o teu PT acompanha o teu plano
+              </p>
+            </div>
             <DailyMacrosSummaryCard entries={clientNutrition} />
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {MEAL_TYPES.map((meal) => {
                 const entries = clientNutrition.filter((e) => e.mealType === meal.key);
                 const mKcal = entries.reduce((s, e) => s + e.kcal, 0);
+                const mProt = entries.reduce((s, e) => s + e.protein, 0);
+                const mCarbs = entries.reduce((s, e) => s + e.carbs, 0);
+                const mFat = entries.reduce((s, e) => s + e.fat, 0);
                 return (
                   <BrandCard key={meal.key}>
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-base font-bold text-[#F4F4F5]">{meal.label}</h3>
-                      <span className="text-xs font-bold text-[#EAB308]">
-                        {mKcal.toFixed(0)} kcal
-                      </span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-base font-bold text-[#F4F4F5]">{meal.label}</h3>
+                        <p className="text-xs font-medium text-[#EAB308]">
+                          {mKcal.toFixed(0)} kcal · P {mProt.toFixed(0)}g · HC {mCarbs.toFixed(0)}g ·
+                          G {mFat.toFixed(0)}g
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAddMealTarget(meal)}
+                        className="rounded-lg px-2.5 py-1 text-xs font-bold text-[#FACC15] hover:bg-[#242429]"
+                      >
+                        + Alimento
+                      </button>
                     </div>
                     {entries.length === 0 ? (
-                      <p className="mt-2 text-xs text-[#A1A1AA]">Sem alimentos definidos.</p>
+                      <p className="mt-2 text-xs text-[#A1A1AA]">Sem alimentos registados.</p>
                     ) : (
                       <div className="mt-2.5 space-y-2 border-t border-[#323238] pt-2.5">
                         {entries.map((entry) => (
                           <div
                             key={entry.id}
-                            className="rounded-xl bg-[#242429] px-3 py-2 text-xs"
+                            className="flex items-center justify-between gap-2 rounded-xl bg-[#242429] px-3 py-2 text-xs"
                           >
-                            <p className="font-bold text-[#F4F4F5]">
-                              {entry.foodName} ({entry.grams.toFixed(0)}g)
-                            </p>
-                            <p className="text-[#A1A1AA]">
-                              {entry.kcal.toFixed(0)} kcal · P {entry.protein.toFixed(1)}g · HC{' '}
-                              {entry.carbs.toFixed(1)}g · G {entry.fat.toFixed(1)}g
-                            </p>
+                            <div>
+                              <p className="font-bold text-[#F4F4F5]">
+                                {entry.foodName} ({entry.grams.toFixed(0)}g)
+                              </p>
+                              <p className="text-[#A1A1AA]">
+                                {entry.kcal.toFixed(0)} kcal · P {entry.protein.toFixed(1)}g · HC{' '}
+                                {entry.carbs.toFixed(1)}g · G {entry.fat.toFixed(1)}g
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => repo.removeNutritionEntry(uid, entry.id)}
+                              aria-label="Remover alimento"
+                              className="text-[#EF4444] hover:opacity-80"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -513,13 +552,66 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 );
               })}
             </div>
+
+            {addMealTarget && (
+              <AddFoodToMealModal
+                mealLabel={addMealTarget.label}
+                foods={foodItems}
+                onClose={() => setAddMealTarget(null)}
+                onAdd={async (food, grams) => {
+                  await repo.addNutritionEntry(
+                    uid,
+                    client.id,
+                    addMealTarget.key,
+                    food,
+                    grams
+                  );
+                  setAddMealTarget(null);
+                  onBanner('Alimento adicionado!');
+                }}
+              />
+            )}
           </div>
         )}
 
         {tab === 'avaliacao' && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold text-[#F4F4F5]">A Tua Avaliação Física</h2>
-            <AssessmentDashboard assessments={clientAssessments} />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-[#F4F4F5]">A Tua Avaliação Física</h2>
+                <p className="text-xs text-[#A1A1AA]">
+                  Regista as tuas medições (IMC e TMB calculados automaticamente)
+                </p>
+              </div>
+              <GoldButton onClick={() => setShowNewAssessmentModal(true)}>
+                <Plus className="h-4 w-4" />
+                Nova Avaliação
+              </GoldButton>
+            </div>
+            <AssessmentDashboard
+              assessments={clientAssessments}
+              onDelete={async (id) => {
+                await repo.deletePhysicalAssessment(uid, id);
+                onBanner('Avaliação apagada.');
+              }}
+            />
+
+            {showNewAssessmentModal && (
+              <NewAssessmentModal
+                clientName={client.name}
+                latest={clientAssessments[clientAssessments.length - 1] || null}
+                onClose={() => setShowNewAssessmentModal(false)}
+                onSave={async (payload) => {
+                  await repo.addPhysicalAssessment(uid, {
+                    clientId: client.id,
+                    dateMillis: Date.now(),
+                    ...payload,
+                  });
+                  setShowNewAssessmentModal(false);
+                  onBanner('Avaliação física guardada!');
+                }}
+              />
+            )}
           </div>
         )}
 

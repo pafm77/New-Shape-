@@ -124,6 +124,12 @@ data class StudioUiState(
             return "${months[cal.get(Calendar.MONTH)]} ${cal.get(Calendar.YEAR)}"
         }
 
+    val currentMonthRevenueEur: Double
+        get() = payments.filter { it.paid && it.monthYear == currentMonthYear }.sumOf { it.amountEur }
+
+    val currentMonthPaymentsCount: Int
+        get() = payments.count { it.paid && it.monthYear == currentMonthYear }
+
     val totalRevenueEur: Double
         get() = payments.filter { it.paid }.sumOf { it.amountEur }
 
@@ -276,15 +282,18 @@ class NewShapeViewModel(
         _role.value = AppRole.STUDENT
     }
 
-    fun registerAndEnterStudentMode(name: String, phone: String) {
+    fun registerAndEnterStudentMode(name: String, phone: String, rgpdConsentNote: String = "") {
         val existing = currentData?.clients?.find { it.phone == repository.normalizePortuguesePhone(phone) }
         if (existing != null) {
             _activeStudentId.value = existing.id
             _role.value = AppRole.STUDENT
             return
         }
+        val combinedNotes = listOf("Registado pelo aluno", rgpdConsentNote.trim())
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
         viewModelScope.launch {
-            repository.addClient(name, phone, "Registado pelo aluno", newClient = true)
+            repository.addClient(name, phone, combinedNotes, newClient = true)
                 .onSuccess { newId ->
                     _activeStudentId.value = newId
                     _role.value = AppRole.STUDENT
@@ -510,10 +519,25 @@ class NewShapeViewModel(
     }
 
     // --- Payments & Finances ---
-    fun recordPayment(clientId: String, monthYear: String, monthLabel: String, amountEur: Double, note: String) {
+    fun recordPayment(
+        clientId: String,
+        monthYear: String,
+        monthLabel: String,
+        amountEur: Double,
+        note: String,
+        durationMonths: Int = 1
+    ) {
+        val months = if (durationMonths == 6 || durationMonths == 12) durationMonths else 1
         viewModelScope.launch {
-            repository.recordPayment(clientId, monthYear, monthLabel, amountEur, note)
-                .onSuccess { _statusBanner.value = "Mensalidade de €${String.format("%.2f", amountEur)} registada!" }
+            repository.recordPayment(clientId, monthYear, monthLabel, amountEur, note, months)
+                .onSuccess {
+                    _statusBanner.value = if (months > 1) {
+                        val perMonth = amountEur / months
+                        "Pagamento de $months meses registado (€${String.format("%.2f", perMonth)}/mês)!"
+                    } else {
+                        "Mensalidade de €${String.format("%.2f", amountEur)} registada!"
+                    }
+                }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }

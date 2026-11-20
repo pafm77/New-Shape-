@@ -171,7 +171,9 @@ private fun AppNavigation() {
                         onSignOut = performSignOut,
                         onEnterPt = { studioViewModel.enterPtMode() },
                         onEnterStudent = { id -> studioViewModel.enterStudentMode(id) },
-                        onRegisterNewStudent = { name, phone -> studioViewModel.registerAndEnterStudentMode(name, phone) }
+                        onRegisterNewStudent = { name, phone, rgpdNote ->
+                            studioViewModel.registerAndEnterStudentMode(name, phone, rgpdNote)
+                        }
                     )
 
                     AppRole.PT -> PtMainScaffold(

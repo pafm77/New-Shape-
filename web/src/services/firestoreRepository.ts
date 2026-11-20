@@ -36,6 +36,7 @@ import {
   WorkoutPlanRecord,
 } from '../types/studio';
 import {
+  buildConsecutiveMonths,
   calculateBmi,
   calculateBmrMifflinStJeor,
   createSessionModel,
@@ -46,6 +47,7 @@ import {
   formatWeekRangeLabel,
   getMondayOfWeek,
   isValidPortuguesePhone,
+  normalizePaymentMethod,
   normalizePortuguesePhone,
 } from '../data/seedCatalog';
 
@@ -630,14 +632,14 @@ export async function ensureSeeded(uid: string): Promise<void> {
   void recentMonths;
 
   [
-    ['pay_1', 'client_ana', m0, l0, 120, now - dayMs * 5, 'MB Way'],
-    ['pay_2', 'client_bruno', m0, l0, 95, now - dayMs * 3, 'Transferência'],
-    ['pay_3', 'client_eva', m0, l0, 120, now - dayMs * 2, 'MB Way'],
-    ['pay_4', 'client_ana', m1, l1, 120, now - dayMs * 35, 'MB Way'],
-    ['pay_5', 'client_bruno', m1, l1, 95, now - dayMs * 34, 'Transferência'],
+    ['pay_1', 'client_ana', m0, l0, 120, now - dayMs * 5, 'MbWay'],
+    ['pay_2', 'client_bruno', m0, l0, 95, now - dayMs * 3, 'João'],
+    ['pay_3', 'client_eva', m0, l0, 120, now - dayMs * 2, 'MbWay'],
+    ['pay_4', 'client_ana', m1, l1, 120, now - dayMs * 35, 'MbWay'],
+    ['pay_5', 'client_bruno', m1, l1, 95, now - dayMs * 34, 'João'],
     ['pay_6', 'client_filipe', m1, l1, 110, now - dayMs * 33, 'Dinheiro'],
-    ['pay_7', 'client_ana', m2, l2, 120, now - dayMs * 65, 'MB Way'],
-    ['pay_8', 'client_eva', m2, l2, 120, now - dayMs * 62, 'MB Way'],
+    ['pay_7', 'client_ana', m2, l2, 120, now - dayMs * 65, 'MbWay'],
+    ['pay_8', 'client_eva', m2, l2, 120, now - dayMs * 62, 'MbWay'],
   ].forEach(([pid, cid, my, ml, amt, paidAt, note]) => {
     writes.push([
       doc(subcol(uid, 'payments'), String(pid)),
@@ -1219,20 +1221,36 @@ export async function recordPayment(
   monthYear: string,
   monthLabel: string,
   amountEur: number,
-  note: string
+  note: string,
+  durationMonths: 1 | 6 | 12 = 1
 ): Promise<void> {
-  await setDoc(doc(subcol(uid, 'payments')), {
-    userId: uid,
-    clientId,
-    monthYear,
-    monthLabel,
-    amountEur: Math.max(0, Math.min(100000, amountEur)),
-    paid: true,
-    paidAtMillis: Date.now(),
-    note: note.trim().slice(0, 200),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  const validMethod = normalizePaymentMethod(note) || 'MbWay';
+  const monthsCount: 1 | 6 | 12 = durationMonths === 6 || durationMonths === 12 ? durationMonths : 1;
+  const totalClamped = Math.max(0, Math.min(100000, amountEur));
+  const perMonthAmount = Number((totalClamped / monthsCount).toFixed(2));
+  const targetMonths =
+    monthsCount === 1
+      ? [{ monthYear, monthLabel }]
+      : buildConsecutiveMonths(monthYear, monthsCount);
+  const now = Date.now();
+  const batch = writeBatch(db);
+
+  targetMonths.forEach((m) => {
+    batch.set(doc(subcol(uid, 'payments')), {
+      userId: uid,
+      clientId,
+      monthYear: m.monthYear,
+      monthLabel: m.monthLabel,
+      amountEur: perMonthAmount,
+      paid: true,
+      paidAtMillis: now,
+      note: validMethod,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   });
+
+  await batch.commit();
 }
 
 export async function deletePayment(uid: string, paymentId: string): Promise<void> {

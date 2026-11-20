@@ -77,8 +77,6 @@ private fun NutritionPlanBuilderSection(
     val selectedClient = activeClients.find { it.id == selectedClientId } ?: activeClients.firstOrNull()
     var dropdownExpanded by remember { mutableStateOf(false) }
 
-    var addMealTarget by remember { mutableStateOf<MealType?>(null) }
-
     val clientEntries = remember(state.nutritionEntries, selectedClient?.id) {
         if (selectedClient == null) emptyList()
         else state.nutritionEntries.filter { it.clientId == selectedClient.id }
@@ -127,27 +125,24 @@ private fun NutritionPlanBuilderSection(
             DailyMacrosSummaryCard(entries = clientEntries)
         }
 
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Refeições do Aluno", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                Text("Apenas leitura · Preenchido pelo aluno", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+            }
+        }
+
         items(MealType.entries.toList(), key = { it.name }) { meal ->
             val mealEntries = clientEntries.filter { it.mealType == meal.name }
             MealCard(
                 meal = meal,
                 entries = mealEntries,
-                onAddFood = if (selectedClient != null) { { addMealTarget = meal } } else null,
-                onRemoveEntry = { entryId -> viewModel.removeNutritionEntry(entryId) }
-            )
-        }
-    }
-
-    addMealTarget?.let { meal ->
-        selectedClient?.let { client ->
-            AddFoodToMealDialog(
-                mealLabel = meal.label,
-                foods = state.foodItems,
-                onDismiss = { addMealTarget = null },
-                onAdd = { food, grams ->
-                    viewModel.addNutritionEntry(client.id, meal, food, grams)
-                    addMealTarget = null
-                }
+                onAddFood = null,
+                onRemoveEntry = null
             )
         }
     }
@@ -367,7 +362,7 @@ private fun FoodCatalogSection(
 }
 
 @Composable
-private fun AddFoodToMealDialog(
+fun AddFoodToMealDialog(
     mealLabel: String,
     foods: List<FoodItemRecord>,
     onDismiss: () -> Unit,

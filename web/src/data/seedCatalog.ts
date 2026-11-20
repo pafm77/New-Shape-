@@ -126,11 +126,52 @@ export function createSessionModel(
   };
 }
 
+export const PAYMENT_METHODS = ['MbWay', 'Dinheiro', 'João'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+export function normalizePaymentMethod(raw: string): PaymentMethod | null {
+  const clean = raw.trim().toLowerCase();
+  if (clean === 'mbway' || clean === 'mb way') return 'MbWay';
+  if (clean === 'dinheiro') return 'Dinheiro';
+  if (clean === 'joão' || clean === 'joao') return 'João';
+  return null;
+}
+
+export function formatRgpdConsentStamp(ts: number = Date.now()): string {
+  const d = new Date(ts);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `RGPD aceite em ${dd}/${mm}/${yyyy} às ${hh}:${min}`;
+}
+
 export function buildRecentMonthOptions(): { monthYear: string; monthLabel: string }[] {
   const out: { monthYear: string; monthLabel: string }[] = [];
   const now = new Date();
   for (let offset = 0; offset >= -5; offset--) {
     const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    out.push({
+      monthYear: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      monthLabel: `${MONTHS_PT[d.getMonth()]} ${d.getFullYear()}`,
+    });
+  }
+  return out;
+}
+
+export function buildConsecutiveMonths(
+  startMonthYear: string,
+  count: number
+): { monthYear: string; monthLabel: string }[] {
+  const [yStr, mStr] = startMonthYear.split('-');
+  const now = new Date();
+  const startYear = Number(yStr) || now.getFullYear();
+  const startMonthIdx = Math.max(0, (Number(mStr) || now.getMonth() + 1) - 1);
+  const total = Math.max(1, count);
+  const out: { monthYear: string; monthLabel: string }[] = [];
+  for (let i = 0; i < total; i++) {
+    const d = new Date(startYear, startMonthIdx + i, 1);
     out.push({
       monthYear: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
       monthLabel: `${MONTHS_PT[d.getMonth()]} ${d.getFullYear()}`,

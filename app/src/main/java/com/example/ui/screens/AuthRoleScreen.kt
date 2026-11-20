@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
 import com.example.ui.components.BrandCard
 import com.example.ui.components.GoldPrimaryButton
@@ -37,13 +38,14 @@ fun AuthRoleScreen(
     onSignOut: () -> Unit,
     onEnterPt: () -> Unit,
     onEnterStudent: (String) -> Unit,
-    onRegisterNewStudent: (String, String) -> Unit
+    onRegisterNewStudent: (String, String, String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = PT, 1 = Aluno
     var isRegisterMode by remember { mutableStateOf(false) }
     var studentPhone by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
+    var rgpdAccepted by remember { mutableStateOf(false) }
     var studentError by remember { mutableStateOf<String?>(null) }
     var studentInfo by remember { mutableStateOf<String?>(null) }
 
@@ -246,6 +248,57 @@ fun AuthRoleScreen(
                         colors = darkFieldColors()
                     )
 
+                    if (isRegisterMode) {
+                        Spacer(Modifier.height(12.dp))
+                        Surface(
+                            color = ElevatedCharcoal,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (rgpdAccepted) NewShapeGold else HairlineBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    rgpdAccepted = !rgpdAccepted
+                                    studentError = null
+                                }
+                                .testTag("student_rgpd_card")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Checkbox(
+                                    checked = rgpdAccepted,
+                                    onCheckedChange = {
+                                        rgpdAccepted = it
+                                        studentError = null
+                                    },
+                                    modifier = Modifier.testTag("student_rgpd_checkbox"),
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = NewShapeGold,
+                                        checkmarkColor = TextOnGold,
+                                        uncheckedColor = TextSecondaryDark
+                                    )
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Consentimento RGPD (Obrigatório)",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimaryDark
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "Autorizo o tratamento dos meus dados pessoais (nome, telemóvel, marcações, treinos, nutrição e avaliações físicas) pelo estúdio New Shape, nos termos do RGPD.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondaryDark
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     if (studentError != null) {
                         Spacer(Modifier.height(8.dp))
                         Text(studentError!!, color = DangerRed, style = MaterialTheme.typography.bodySmall)
@@ -304,8 +357,14 @@ fun AuthRoleScreen(
                                 val existing = clients.find { it.phone == clean }
                                 if (existing != null) {
                                     onEnterStudent(existing.id)
+                                } else if (!rgpdAccepted) {
+                                    studentError = "Tens de aceitar o consentimento RGPD para concluir o registo."
                                 } else {
-                                    onRegisterNewStudent("$fName $lName", clean)
+                                    onRegisterNewStudent(
+                                        "$fName $lName",
+                                        clean,
+                                        SeedCatalog.formatRgpdConsentStamp()
+                                    )
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),

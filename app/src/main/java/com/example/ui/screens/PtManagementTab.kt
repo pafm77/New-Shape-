@@ -21,8 +21,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
 import com.example.data.model.FidelizacaoRecord
+import com.example.data.model.PaymentRecord
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
@@ -88,14 +90,36 @@ private fun FinancesSection(
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
     var showAddPaymentChooser by remember { mutableStateOf(false) }
     var chosenClient by remember { mutableStateOf<ClientRecord?>(null) }
+    var methodFilter by remember { mutableStateOf("ALL") }
 
-    val monthlyTotals = remember(state.payments) {
-        state.payments
-            .filter { it.paid }
+    val paidPayments = remember(state.payments) { state.payments.filter { it.paid } }
+
+    val groupedByMethod = remember(paidPayments) {
+        val groups = linkedMapOf(
+            "MbWay" to mutableListOf<PaymentRecord>(),
+            "Dinheiro" to mutableListOf<PaymentRecord>(),
+            "João" to mutableListOf<PaymentRecord>()
+        )
+        val other = mutableListOf<PaymentRecord>()
+        paidPayments.forEach { p ->
+            val m = SeedCatalog.normalizePaymentMethod(p.note)
+            if (m != null) groups[m]?.add(p) else other.add(p)
+        }
+        groups to other
+    }
+    val methodGroups = groupedByMethod.first
+    val otherMethodPayments = groupedByMethod.second
+
+    val monthlyTotals = remember(paidPayments) {
+        paidPayments
             .groupBy { it.monthYear to it.monthLabel }
             .map { (key, list) -> Triple(key.first, key.second, list.sumOf { it.amountEur }) }
             .sortedBy { it.first }
-            .takeLast(6)
+            .takeLast(12)
+    }
+
+    val visibleMethods = remember(methodFilter) {
+        if (methodFilter == "ALL") SeedCatalog.PAYMENT_METHODS else listOf(methodFilter)
     }
 
     LazyColumn(
@@ -109,7 +133,14 @@ private fun FinancesSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Finanças", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Finanças", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                    Text(
+                        "Fidelizações de 6/12 meses divididas por mês",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark
+                    )
+                }
                 GoldPrimaryButton(
                     text = "+ Pagamento",
                     onClick = { showAddPaymentChooser = true },
@@ -118,38 +149,49 @@ private fun FinancesSection(
             }
         }
 
-        // 3 KPI Metric Cards requested by user
+        // KPI Metric Cards (Current Month + Monthly Average + Count + Total)
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                FinanceMetricCard(
-                    title = "Total Faturação",
-                    value = "€${String.format("%.2f", state.totalRevenueEur)}",
-                    accent = NewShapeGoldBright,
-                    modifier = Modifier.weight(1f)
-                )
-                FinanceMetricCard(
-                    title = "Mensalidades Pagas",
-                    value = state.paidPaymentsCount.toString(),
-                    accent = ConfirmedGreen,
-                    modifier = Modifier.weight(1f)
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    FinanceMetricCard(
+                        title = "Faturação (${state.currentMonthLabel})",
+                        value = "€${String.format("%.2f", state.currentMonthRevenueEur)}",
+                        subtitle = "${state.currentMonthPaymentsCount} mensalidade(s)",
+                        accent = NewShapeGoldBright,
+                        modifier = Modifier.weight(1f)
+                    )
+                    FinanceMetricCard(
+                        title = "Média Mensal",
+                        value = "€${String.format("%.2f", state.monthlyAverageRevenueEur)}",
+                        subtitle = "por mês com registo",
+                        accent = InfoBlue,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    FinanceMetricCard(
+                        title = "Mensalidades Pagas",
+                        value = state.paidPaymentsCount.toString(),
+                        subtitle = "1/mês na fidelização",
+                        accent = ConfirmedGreen,
+                        modifier = Modifier.weight(1f)
+                    )
+                    FinanceMetricCard(
+                        title = "Total Faturação",
+                        value = "€${String.format("%.2f", state.totalRevenueEur)}",
+                        subtitle = "soma de todos os meses",
+                        accent = NewShapeGold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
-        }
-
-        item {
-            FinanceMetricCard(
-                title = "Média Mensal de Faturação",
-                value = "€${String.format("%.2f", state.monthlyAverageRevenueEur)} / mês",
-                accent = InfoBlue,
-                modifier = Modifier.fillMaxWidth()
-            )
         }
 
         // Native Compose Canvas Bar Chart
         if (monthlyTotals.isNotEmpty()) {
             item {
                 BrandCard {
-                    Text("Evolução Mensal (€)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                    Text("Evolução Mensal (€ / mês)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
                     Spacer(Modifier.height(12.dp))
                     val maxVal = (monthlyTotals.maxOfOrNull { it.third } ?: 1.0).coerceAtLeast(1.0)
                     Canvas(
@@ -159,7 +201,7 @@ private fun FinancesSection(
                     ) {
                         val barCount = monthlyTotals.size
                         val slotWidth = size.width / barCount
-                        val barWidth = (slotWidth * 0.52f).coerceAtMost(48.dp.toPx())
+                        val barWidth = (slotWidth * 0.52f).coerceAtMost(44.dp.toPx())
                         monthlyTotals.forEachIndexed { idx, (_, _, amount) ->
                             val ratio = (amount / maxVal).toFloat().coerceIn(0.05f, 1f)
                             val barHeight = size.height * ratio
@@ -185,11 +227,69 @@ private fun FinancesSection(
             }
         }
 
+        // Summary by Method & Filter Chips
         item {
-            Text("Registo de Mensalidades (${state.payments.size})", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Faturação por Método", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    SeedCatalog.PAYMENT_METHODS.forEach { method ->
+                        val list = methodGroups[method].orEmpty()
+                        val subtotal = list.sumOf { it.amountEur }
+                        val selected = methodFilter == method
+                        Surface(
+                            color = if (selected) NewShapeGoldMuted else CharcoalSurface,
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(1.dp, if (selected) NewShapeGold else HairlineBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(MaterialTheme.shapes.medium)
+                                .clickable { methodFilter = if (selected) "ALL" else method }
+                                .testTag("finance_method_summary_$method")
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(method, style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    "€${String.format("%.0f", subtotal)}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NewShapeGoldBright
+                                )
+                                Text(
+                                    "${list.size} reg.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondaryDark
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    FilterChip(
+                        selected = methodFilter == "ALL",
+                        onClick = { methodFilter = "ALL" },
+                        label = { Text("Todas (${paidPayments.size})") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold
+                        )
+                    )
+                    SeedCatalog.PAYMENT_METHODS.forEach { method ->
+                        FilterChip(
+                            selected = methodFilter == method,
+                            onClick = { methodFilter = method },
+                            label = { Text("$method (${methodGroups[method]?.size ?: 0})") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
+            }
         }
 
-        if (state.payments.isEmpty()) {
+        if (paidPayments.isEmpty()) {
             item {
                 EmptyStateBox(
                     icon = Icons.Default.AccountBalanceWallet,
@@ -198,38 +298,85 @@ private fun FinancesSection(
                 )
             }
         } else {
-            items(state.payments, key = { it.id }) { payment ->
-                val clientName = clientMap[payment.clientId]?.name ?: "Aluno"
-                Surface(
-                    color = CharcoalSurface,
-                    shape = MaterialTheme.shapes.medium,
-                    border = BorderStroke(1.dp, HairlineBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+            visibleMethods.forEach { methodName ->
+                val methodList = methodGroups[methodName].orEmpty()
+                val subtotal = methodList.sumOf { it.amountEur }
+                val listTitle = if (methodName == "Dinheiro") {
+                    "Pagamentos em Dinheiro"
+                } else {
+                    "Pagamentos por $methodName"
+                }
+
+                item(key = "header_$methodName") {
                     Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(clientName, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                        Column {
+                            Text(listTitle, style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
                             Text(
-                                text = "${payment.monthLabel} · ${formatShortDate(payment.paidAtMillis)}${if (payment.note.isNotBlank()) " · ${payment.note}" else ""}",
+                                "${methodList.size} mensalidade(s) registada(s)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondaryDark
                             )
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            StatusPill(
-                                text = "€${String.format("%.2f", payment.amountEur)}",
-                                textColor = ConfirmedGreen,
-                                containerColor = ConfirmedGreenContainer
+                        StatusPill(
+                            text = "€${String.format("%.2f", subtotal)}",
+                            textColor = NewShapeGoldBright,
+                            containerColor = NewShapeGoldMuted
+                        )
+                    }
+                }
+
+                if (methodList.isEmpty()) {
+                    item(key = "empty_$methodName") {
+                        Surface(
+                            color = CharcoalSurface,
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(1.dp, HairlineBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Sem pagamentos registados por $methodName.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark,
+                                modifier = Modifier.padding(14.dp)
                             )
-                            IconButton(onClick = { viewModel.deletePayment(payment.id) }) {
-                                Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
-                            }
                         }
                     }
+                } else {
+                    items(methodList, key = { "${methodName}_${it.id}" }) { payment ->
+                        val clientName = clientMap[payment.clientId]?.name ?: "Aluno"
+                        PaymentRowCard(
+                            clientName = clientName,
+                            monthLabel = payment.monthLabel,
+                            paidAtMillis = payment.paidAtMillis,
+                            amountEur = payment.amountEur,
+                            onDelete = { viewModel.deletePayment(payment.id) }
+                        )
+                    }
+                }
+            }
+
+            if (methodFilter == "ALL" && otherMethodPayments.isNotEmpty()) {
+                item(key = "header_other") {
+                    Text(
+                        "Outros Registos (histórico antigo)",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimaryDark,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                items(otherMethodPayments, key = { "other_${it.id}" }) { payment ->
+                    val clientName = clientMap[payment.clientId]?.name ?: "Aluno"
+                    PaymentRowCard(
+                        clientName = clientName,
+                        monthLabel = "${payment.monthLabel}${if (payment.note.isNotBlank()) " · ${payment.note}" else ""}",
+                        paidAtMillis = payment.paidAtMillis,
+                        amountEur = payment.amountEur,
+                        onDelete = { viewModel.deletePayment(payment.id) }
+                    )
                 }
             }
         }
@@ -288,9 +435,11 @@ private fun FinancesSection(
             clientName = client.name,
             defaultMonthYear = state.currentMonthYear,
             defaultMonthLabel = state.currentMonthLabel,
+            defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
+            defaultDurationMonths = client.fidelizacaoMonths,
             onDismiss = { chosenClient = null },
-            onConfirm = { my, ml, amt, note ->
-                viewModel.recordPayment(client.id, my, ml, amt, note)
+            onConfirm = { my, ml, amt, method, durationMonths ->
+                viewModel.recordPayment(client.id, my, ml, amt, method, durationMonths)
                 chosenClient = null
             }
         )
@@ -298,9 +447,51 @@ private fun FinancesSection(
 }
 
 @Composable
+private fun PaymentRowCard(
+    clientName: String,
+    monthLabel: String,
+    paidAtMillis: Long,
+    amountEur: Double,
+    onDelete: () -> Unit
+) {
+    Surface(
+        color = CharcoalSurface,
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, HairlineBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(clientName, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                Text(
+                    text = "$monthLabel · ${formatShortDate(paidAtMillis)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusPill(
+                    text = "€${String.format("%.2f", amountEur)}",
+                    textColor = ConfirmedGreen,
+                    containerColor = ConfirmedGreenContainer
+                )
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun FinanceMetricCard(
     title: String,
     value: String,
+    subtitle: String? = null,
     accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier
 ) {
@@ -314,6 +505,10 @@ private fun FinanceMetricCard(
             Text(title, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
             Spacer(Modifier.height(6.dp))
             Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = accent)
+            if (subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+            }
         }
     }
 }

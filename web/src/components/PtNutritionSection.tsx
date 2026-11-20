@@ -1,9 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Upload, X } from 'lucide-react';
+import { Plus, Search, Upload } from 'lucide-react';
 import {
   ClientRecord,
   FoodItemRecord,
-  MealTypeKey,
   NutritionEntryRecord,
 } from '../types/studio';
 import { MEAL_TYPES } from '../data/seedCatalog';
@@ -43,10 +42,6 @@ export const PtNutritionSection: React.FC<PtNutritionSectionProps> = ({
   );
   const effectiveClient =
     activeClients.find((c) => c.id === selectedClientId) || activeClients[0] || null;
-  const [addMealTarget, setAddMealTarget] = useState<{
-    key: MealTypeKey;
-    label: string;
-  } | null>(null);
 
   const clientEntries = useMemo(
     () =>
@@ -106,6 +101,11 @@ export const PtNutritionSection: React.FC<PtNutritionSectionProps> = ({
 
           <DailyMacrosSummaryCard entries={clientEntries} />
 
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-[#F4F4F5]">Refeições do Aluno</h3>
+            <span className="text-xs text-[#A1A1AA]">Apenas leitura · Preenchido pelo aluno</span>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {MEAL_TYPES.map((meal) => {
               const mealEntries = clientEntries.filter((e) => e.mealType === meal.key);
@@ -124,15 +124,6 @@ export const PtNutritionSection: React.FC<PtNutritionSectionProps> = ({
                         {mFat.toFixed(0)}g
                       </p>
                     </div>
-                    {effectiveClient && (
-                      <button
-                        type="button"
-                        onClick={() => setAddMealTarget(meal)}
-                        className="rounded-lg px-2.5 py-1 text-xs font-bold text-[#FACC15] hover:bg-[#242429]"
-                      >
-                        + Alimento
-                      </button>
-                    )}
                   </div>
 
                   {mealEntries.length === 0 ? (
@@ -155,13 +146,6 @@ export const PtNutritionSection: React.FC<PtNutritionSectionProps> = ({
                               {entry.carbs.toFixed(1)}g · G {entry.fat.toFixed(1)}g
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => repo.removeNutritionEntry(uid, entry.id)}
-                            className="text-[#EF4444] hover:opacity-80"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
                         </div>
                       ))}
                     </div>
@@ -170,25 +154,6 @@ export const PtNutritionSection: React.FC<PtNutritionSectionProps> = ({
               );
             })}
           </div>
-
-          {addMealTarget && effectiveClient && (
-            <AddFoodToMealModal
-              mealLabel={addMealTarget.label}
-              foods={foodItems}
-              onClose={() => setAddMealTarget(null)}
-              onAdd={async (food, grams) => {
-                await repo.addNutritionEntry(
-                  uid,
-                  effectiveClient.id,
-                  addMealTarget.key,
-                  food,
-                  grams
-                );
-                setAddMealTarget(null);
-                onBanner('Alimento adicionado!');
-              }}
-            />
-          )}
         </div>
       ) : (
         <FoodCatalogView uid={uid} foodItems={foodItems} onBanner={onBanner} />
@@ -333,7 +298,7 @@ const FoodCatalogView: React.FC<{
   );
 };
 
-const AddFoodToMealModal: React.FC<{
+export const AddFoodToMealModal: React.FC<{
   mealLabel: string;
   foods: FoodItemRecord[];
   onClose: () => void;

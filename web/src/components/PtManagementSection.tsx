@@ -16,10 +16,13 @@ import {
   PaymentRecord,
 } from '../types/studio';
 import {
+  PAYMENT_METHODS,
+  PaymentMethod,
   buildRecentMonthOptions,
   formatPhoneDisplay,
   formatShortDate,
   formatTimeAgo,
+  normalizePaymentMethod,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
 import {
@@ -130,9 +133,24 @@ const FinanceSubTab: React.FC<{
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [pickClientModal, setPickClientModal] = useState(false);
   const [payClient, setPayClient] = useState<ClientRecord | null>(null);
+  const [methodFilter, setMethodFilter] = useState<'ALL' | PaymentMethod>('ALL');
 
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const paidPayments = useMemo(() => payments.filter((p) => p.paid), [payments]);
+
+  const recentMonths = useMemo(() => buildRecentMonthOptions(), []);
+  const currentMonthYear = recentMonths[0]?.monthYear || '';
+  const currentMonthLabel = recentMonths[0]?.monthLabel || '';
+
+  const currentMonthPayments = useMemo(
+    () => paidPayments.filter((p) => p.monthYear === currentMonthYear),
+    [paidPayments, currentMonthYear]
+  );
+
+  const currentMonthRevenue = useMemo(
+    () => currentMonthPayments.reduce((s, p) => s + p.amountEur, 0),
+    [currentMonthPayments]
+  );
 
   const totalRevenue = useMemo(
     () => paidPayments.reduce((s, p) => s + p.amountEur, 0),
@@ -140,14 +158,42 @@ const FinanceSubTab: React.FC<{
   );
 
   const monthBuckets = useMemo(() => {
-    const opts = buildRecentMonthOptions().slice().reverse();
-    return opts.map((m) => {
-      const sum = paidPayments
-        .filter((p) => p.monthYear === m.monthYear)
-        .reduce((s, p) => s + p.amountEur, 0);
-      return { ...m, total: sum };
+    const bucketMap = new Map<
+      string,
+      { monthYear: string; monthLabel: string; total: number; count: number }
+    >();
+    recentMonths
+      .slice()
+      .reverse()
+      .forEach((m) => {
+        bucketMap.set(m.monthYear, {
+          monthYear: m.monthYear,
+          monthLabel: m.monthLabel,
+          total: 0,
+          count: 0,
+        });
+      });
+
+    paidPayments.forEach((p) => {
+      if (!p.monthYear) return;
+      const existing = bucketMap.get(p.monthYear);
+      if (existing) {
+        existing.total += p.amountEur;
+        existing.count += 1;
+      } else {
+        bucketMap.set(p.monthYear, {
+          monthYear: p.monthYear,
+          monthLabel: p.monthLabel || p.monthYear,
+          total: p.amountEur,
+          count: 1,
+        });
+      }
     });
-  }, [paidPayments]);
+
+    return Array.from(bucketMap.values())
+      .sort((a, b) => a.monthYear.localeCompare(b.monthYear))
+      .slice(-12);
+  }, [paidPayments, recentMonths]);
 
   const activeMonthsCount = Math.max(
     1,
@@ -156,13 +202,34 @@ const FinanceSubTab: React.FC<{
   const monthlyAvg = totalRevenue / activeMonthsCount;
   const maxBucket = Math.max(100, ...monthBuckets.map((b) => b.total));
 
+  const groupedByMethod = useMemo(() => {
+    const groups: Record<PaymentMethod, PaymentRecord[]> = {
+      MbWay: [],
+      Dinheiro: [],
+      João: [],
+    };
+    const other: PaymentRecord[] = [];
+    paidPayments.forEach((p) => {
+      const m = normalizePaymentMethod(p.note);
+      if (m) {
+        groups[m].push(p);
+      } else {
+        other.push(p);
+      }
+    });
+    return { groups, other };
+  }, [paidPayments]);
+
+  const visibleMethods: PaymentMethod[] =
+    methodFilter === 'ALL' ? [...PAYMENT_METHODS] : [methodFilter];
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-[#F4F4F5]">Finanças & Faturação</h2>
           <p className="text-xs text-[#A1A1AA]">
-            Controlo de mensalidades recebidas e receita mensal
+            Controlo mensal (fidelizações de 6/12 meses divididas por mês) e listas por método
           </p>
         </div>
         <GoldButton
@@ -174,11 +241,23 @@ const FinanceSubTab: React.FC<{
         </GoldButton>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <BrandCard highlight>
-          <p className="text-xs text-[#A1A1AA]">Total Faturação</p>
+          <p className="text-xs text-[#A1A1AA]">Faturação ({currentMonthLabel})</p>
           <p className="mt-1 text-2xl font-extrabold text-[#FACC15]">
-            €{totalRevenue.toFixed(0)}
+            €{currentMonthRevenue.toFixed(2)}
+          </p>
+          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+            {currentMonthPayments.length} mensalidade(s) este mês
+          </p>
+        </BrandCard>
+        <BrandCard>
+          <p className="text-xs text-[#A1A1AA]">Média Mensal</p>
+          <p className="mt-1 text-2xl font-extrabold text-[#F4F4F5]">
+            €{monthlyAvg.toFixed(2)}
+          </p>
+          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+            {activeMonthsCount} mês(es) com registo
           </p>
         </BrandCard>
         <BrandCard>
@@ -186,35 +265,52 @@ const FinanceSubTab: React.FC<{
           <p className="mt-1 text-2xl font-extrabold text-[#22C55E]">
             {paidPayments.length}
           </p>
+          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">1 por mês de fidelização</p>
         </BrandCard>
         <BrandCard>
-          <p className="text-xs text-[#A1A1AA]">Média Mensal de Faturação</p>
-          <p className="mt-1 text-2xl font-extrabold text-[#F4F4F5]">
-            €{monthlyAvg.toFixed(0)}
+          <p className="text-xs text-[#A1A1AA]">Total Faturação</p>
+          <p className="mt-1 text-2xl font-extrabold text-[#FACC15]">
+            €{totalRevenue.toFixed(2)}
           </p>
+          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">Soma de todos os meses</p>
         </BrandCard>
       </div>
 
       <BrandCard>
-        <h3 className="text-sm font-bold text-[#F4F4F5]">Receita dos Últimos 6 Meses</h3>
-        <div className="mt-4 grid grid-cols-6 items-end gap-2 h-40 pt-4">
+        <h3 className="text-sm font-bold text-[#F4F4F5]">Receita Mensal (€ / mês)</h3>
+        <div className="mt-4 flex items-end gap-2 h-44 pt-4 overflow-x-auto pb-1">
           {monthBuckets.map((b) => {
             const pct = Math.max(4, Math.round((b.total / maxBucket) * 100));
+            const isCurrent = b.monthYear === currentMonthYear;
             return (
-              <div key={b.monthYear} className="flex h-full flex-col items-center justify-end gap-1">
+              <div
+                key={b.monthYear}
+                className="flex h-full min-w-[54px] flex-1 flex-col items-center justify-end gap-1"
+              >
                 <span className="text-[11px] font-bold text-[#FACC15]">
                   {b.total > 0 ? `€${b.total.toFixed(0)}` : '—'}
                 </span>
                 <div className="flex w-full flex-1 items-end justify-center">
                   <div
                     style={{ height: `${b.total > 0 ? pct : 4}%` }}
-                    className={`w-full max-w-[40px] rounded-t-lg transition-all ${
-                      b.total > 0 ? 'bg-[#EAB308]' : 'bg-[#242429]'
+                    className={`w-full max-w-[38px] rounded-t-lg transition-all ${
+                      b.total > 0
+                        ? isCurrent
+                          ? 'bg-[#FACC15]'
+                          : 'bg-[#EAB308]/80'
+                        : 'bg-[#242429]'
                     }`}
                   />
                 </div>
-                <span className="text-[11px] text-[#A1A1AA] truncate max-w-full">
-                  {b.monthLabel.split(' ')[0]}
+                <span
+                  className={`text-[11px] truncate max-w-full ${
+                    isCurrent ? 'font-bold text-[#FACC15]' : 'text-[#A1A1AA]'
+                  }`}
+                >
+                  {b.monthLabel}
+                </span>
+                <span className="text-[10px] text-[#A1A1AA]">
+                  {b.count > 0 ? `${b.count} mens.` : ''}
                 </span>
               </div>
             );
@@ -222,50 +318,192 @@ const FinanceSubTab: React.FC<{
         </div>
       </BrandCard>
 
-      <div className="space-y-2.5">
-        <h3 className="text-base font-bold text-[#F4F4F5]">
-          Histórico de Pagamentos ({paidPayments.length})
-        </h3>
-        {paidPayments.length === 0 ? (
-          <EmptyState
-            icon={<CreditCard className="h-6 w-6" />}
-            title="Sem pagamentos registados"
-            subtitle="Clica em + Pagamento para registar a primeira mensalidade."
-          />
-        ) : (
-          <div className="space-y-2">
-            {paidPayments.map((p) => {
-              const client = clientMap.get(p.clientId);
-              return (
-                <BrandCard key={p.id}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-bold text-[#F4F4F5]">
-                        {client?.name || 'Aluno'} ·{' '}
-                        <span className="text-[#FACC15]">€{p.amountEur.toFixed(2)}</span>
-                      </p>
-                      <p className="text-xs text-[#A1A1AA]">
-                        {p.monthLabel} · {formatShortDate(p.paidAtMillis)}
-                        {p.note ? ` · ${p.note}` : ''}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await repo.deletePayment(uid, p.id);
-                        onBanner('Pagamento removido.');
-                      }}
-                      className="rounded-lg p-2 text-[#EF4444] hover:bg-[#3B1518]"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </BrandCard>
-              );
-            })}
+      {/* Totais por Método de Pagamento + Filtro */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-base font-bold text-[#F4F4F5]">
+            Faturação por Método de Pagamento
+          </h3>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setMethodFilter('ALL')}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                methodFilter === 'ALL'
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+              }`}
+            >
+              Todas as Listas ({paidPayments.length})
+            </button>
+            {PAYMENT_METHODS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMethodFilter(m)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                  methodFilter === m
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {m} ({groupedByMethod.groups[m].length})
+              </button>
+            ))}
           </div>
-        )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {PAYMENT_METHODS.map((m) => {
+            const list = groupedByMethod.groups[m];
+            const sum = list.reduce((s, p) => s + p.amountEur, 0);
+            const active = methodFilter === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMethodFilter(active ? 'ALL' : m)}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  active
+                    ? 'border-[#EAB308] bg-[#3D3314]/50'
+                    : 'border-[#323238] bg-[#1B1B1E] hover:border-[#EAB308]/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wide text-[#A1A1AA]">
+                    {m}
+                  </span>
+                  <StatusPill tone="gold">{list.length} reg.</StatusPill>
+                </div>
+                <p className="mt-1.5 text-xl font-extrabold text-[#FACC15]">
+                  €{sum.toFixed(2)}
+                </p>
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {/* Listas separadas por MbWay, Dinheiro e João */}
+      {paidPayments.length === 0 ? (
+        <EmptyState
+          icon={<CreditCard className="h-6 w-6" />}
+          title="Sem pagamentos registados"
+          subtitle="Clica em + Pagamento para registar a primeira mensalidade."
+        />
+      ) : (
+        <div className="space-y-4">
+          {visibleMethods.map((methodName) => {
+            const list = groupedByMethod.groups[methodName];
+            const subtotal = list.reduce((s, p) => s + p.amountEur, 0);
+            const title =
+              methodName === 'Dinheiro'
+                ? 'Pagamentos em Dinheiro'
+                : `Pagamentos por ${methodName}`;
+
+            return (
+              <BrandCard key={methodName}>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#323238] pb-3">
+                  <div>
+                    <h4 className="text-base font-bold text-[#F4F4F5]">{title}</h4>
+                    <p className="text-xs text-[#A1A1AA]">
+                      {list.length} mensalidade(s) registada(s)
+                    </p>
+                  </div>
+                  <StatusPill tone="gold">Subtotal: €{subtotal.toFixed(2)}</StatusPill>
+                </div>
+
+                {list.length === 0 ? (
+                  <p className="pt-3 text-xs text-[#A1A1AA]">
+                    Sem pagamentos registados por {methodName}.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {list.map((p) => {
+                      const client = clientMap.get(p.clientId);
+                      return (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-bold text-[#F4F4F5]">
+                              {client?.name || 'Aluno'} ·{' '}
+                              <span className="text-[#FACC15]">€{p.amountEur.toFixed(2)}</span>
+                            </p>
+                            <p className="text-xs text-[#A1A1AA]">
+                              {p.monthLabel} · {formatShortDate(p.paidAtMillis)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await repo.deletePayment(uid, p.id);
+                              onBanner('Pagamento removido.');
+                            }}
+                            aria-label="Apagar pagamento"
+                            className="rounded-lg p-2 text-[#EF4444] hover:bg-[#3B1518]"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </BrandCard>
+            );
+          })}
+
+          {methodFilter === 'ALL' && groupedByMethod.other.length > 0 && (
+            <BrandCard>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#323238] pb-3">
+                <div>
+                  <h4 className="text-base font-bold text-[#F4F4F5]">
+                    Outros Registos (histórico antigo)
+                  </h4>
+                  <p className="text-xs text-[#A1A1AA]">
+                    {groupedByMethod.other.length} registo(s) anteriores
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {groupedByMethod.other.map((p) => {
+                  const client = clientMap.get(p.clientId);
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-[#F4F4F5]">
+                          {client?.name || 'Aluno'} ·{' '}
+                          <span className="text-[#FACC15]">€{p.amountEur.toFixed(2)}</span>
+                        </p>
+                        <p className="text-xs text-[#A1A1AA]">
+                          {p.monthLabel} · {formatShortDate(p.paidAtMillis)}
+                          {p.note ? ` · ${p.note}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await repo.deletePayment(uid, p.id);
+                          onBanner('Pagamento removido.');
+                        }}
+                        aria-label="Apagar pagamento"
+                        className="rounded-lg p-2 text-[#EF4444] hover:bg-[#3B1518]"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </BrandCard>
+          )}
+        </div>
+      )}
 
       {pickClientModal && (
         <Modal
@@ -301,11 +539,18 @@ const FinanceSubTab: React.FC<{
         <RegisterPaymentModal
           clientName={payClient.name}
           defaultAmount={payClient.monthlyFeeEur > 0 ? payClient.monthlyFeeEur : 120}
+          defaultDurationMonths={payClient.fidelizacaoMonths}
           onClose={() => setPayClient(null)}
-          onConfirm={async (my, ml, amt, note) => {
-            await repo.recordPayment(uid, payClient.id, my, ml, amt, note);
+          onConfirm={async (my, ml, amt, method, durationMonths) => {
+            await repo.recordPayment(uid, payClient.id, my, ml, amt, method, durationMonths);
             setPayClient(null);
-            onBanner('Mensalidade registada!');
+            onBanner(
+              durationMonths > 1
+                ? `Pagamento de ${durationMonths} meses registado (€${(
+                    amt / durationMonths
+                  ).toFixed(2)}/mês)!`
+                : 'Mensalidade registada!'
+            );
           }}
         />
       )}

@@ -74,7 +74,6 @@ fun PtAssessmentTab(
     }
     val selectedClient = activeClients.find { it.id == selectedClientId } ?: activeClients.firstOrNull()
     var dropdownExpanded by remember { mutableStateOf(false) }
-    var showNewDialog by remember { mutableStateOf(false) }
 
     val clientAssessments = remember(state.physicalAssessments, selectedClient?.id) {
         if (selectedClient == null) emptyList()
@@ -89,22 +88,9 @@ fun PtAssessmentTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("Avaliação Física", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-                    Text("Composição corporal, IMC, TMB e evolução", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
-                }
-                GoldPrimaryButton(
-                    text = "+ Nova",
-                    icon = Icons.Default.Add,
-                    enabled = selectedClient != null,
-                    onClick = { showNewDialog = true },
-                    testTag = "add_assessment_button"
-                )
+            Column {
+                Text("Avaliação Física", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                Text("Apenas leitura · Preenchido pelo aluno", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
             }
         }
 
@@ -144,30 +130,7 @@ fun PtAssessmentTab(
 
         assessmentDashboardItems(
             assessments = clientAssessments,
-            onDelete = { id -> viewModel.deletePhysicalAssessment(id) }
-        )
-    }
-
-    if (showNewDialog && selectedClient != null) {
-        NewAssessmentDialog(
-            clientName = selectedClient.name,
-            latest = clientAssessments.lastOrNull(),
-            onDismiss = { showNewDialog = false },
-            onSave = { weight, age, height, sex, fat, muscle, visceral, notes ->
-                viewModel.addPhysicalAssessment(
-                    clientId = selectedClient.id,
-                    dateMillis = System.currentTimeMillis(),
-                    weightKg = weight,
-                    ageYears = age,
-                    heightCm = height,
-                    sex = sex,
-                    bodyFatPct = fat,
-                    muscleMassKg = muscle,
-                    visceralFat = visceral,
-                    notes = notes
-                )
-                showNewDialog = false
-            }
+            onDelete = null
         )
     }
 }
@@ -458,7 +421,7 @@ private fun deltaText(current: Double, previous: Double?, unit: String, decimals
 }
 
 @Composable
-private fun NewAssessmentDialog(
+fun NewAssessmentDialog(
     clientName: String,
     latest: PhysicalAssessmentRecord?,
     onDismiss: () -> Unit,

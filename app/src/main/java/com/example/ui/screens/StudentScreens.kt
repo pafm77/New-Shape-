@@ -190,8 +190,8 @@ fun StudentMainScaffold(
                         when (selectedTab) {
                             0 -> StudentBookingScreen(student = student, state = state, viewModel = viewModel)
                             1 -> StudentWorkoutScreen(student = student, state = state)
-                            2 -> StudentNutritionScreen(student = student, state = state)
-                            3 -> StudentAssessmentScreen(student = student, state = state)
+                            2 -> StudentNutritionScreen(student = student, state = state, viewModel = viewModel)
+                            3 -> StudentAssessmentScreen(student = student, state = state, viewModel = viewModel)
                             4 -> StudentBillingScreen(student = student, state = state)
                             5 -> PrivateChatScreen(
                                 client = student,
@@ -493,11 +493,13 @@ private fun StudentWorkoutScreen(
 @Composable
 private fun StudentNutritionScreen(
     student: ClientRecord,
-    state: StudioUiState
+    state: StudioUiState,
+    viewModel: NewShapeViewModel
 ) {
     val entries = remember(state.nutritionEntries, student.id) {
         state.nutritionEntries.filter { it.clientId == student.id }
     }
+    var addMealTarget by remember { mutableStateOf<MealType?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -505,8 +507,8 @@ private fun StudentNutritionScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("A Minha Nutrição", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-            Text("Plano alimentar e macros diárias", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            Text("As Minhas Refeições", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+            Text("Adiciona os teus alimentos em cada refeição", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
         }
         item {
             DailyMacrosSummaryCard(entries = entries)
@@ -515,23 +517,37 @@ private fun StudentNutritionScreen(
             MealCard(
                 meal = meal,
                 entries = entries.filter { it.mealType == meal.name },
-                onAddFood = null,
-                onRemoveEntry = null
+                onAddFood = { addMealTarget = meal },
+                onRemoveEntry = { entryId -> viewModel.removeNutritionEntry(entryId) }
             )
         }
+    }
+
+    addMealTarget?.let { meal ->
+        AddFoodToMealDialog(
+            mealLabel = meal.label,
+            foods = state.foodItems,
+            onDismiss = { addMealTarget = null },
+            onAdd = { food, grams ->
+                viewModel.addNutritionEntry(student.id, meal, food, grams)
+                addMealTarget = null
+            }
+        )
     }
 }
 
 @Composable
 private fun StudentAssessmentScreen(
     student: ClientRecord,
-    state: StudioUiState
+    state: StudioUiState,
+    viewModel: NewShapeViewModel
 ) {
     val assessments = remember(state.physicalAssessments, student.id) {
         state.physicalAssessments
             .filter { it.clientId == student.id }
             .sortedBy { it.dateMillis }
     }
+    var showNewDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -539,12 +555,49 @@ private fun StudentAssessmentScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("A Minha Avaliação Física", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-            Text("Peso, composição corporal, IMC, TMB e evolução", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("A Minha Avaliação Física", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                    Text("Regista peso, IMC, TMB e evolução", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                }
+                GoldPrimaryButton(
+                    text = "+ Nova",
+                    icon = Icons.Default.Add,
+                    onClick = { showNewDialog = true },
+                    testTag = "student_add_assessment_button"
+                )
+            }
         }
         assessmentDashboardItems(
             assessments = assessments,
-            onDelete = null
+            onDelete = { id -> viewModel.deletePhysicalAssessment(id) }
+        )
+    }
+
+    if (showNewDialog) {
+        NewAssessmentDialog(
+            clientName = student.name,
+            latest = assessments.lastOrNull(),
+            onDismiss = { showNewDialog = false },
+            onSave = { weight, age, height, sex, fat, muscle, visceral, notes ->
+                viewModel.addPhysicalAssessment(
+                    clientId = student.id,
+                    dateMillis = System.currentTimeMillis(),
+                    weightKg = weight,
+                    ageYears = age,
+                    heightCm = height,
+                    sex = sex,
+                    bodyFatPct = fat,
+                    muscleMassKg = muscle,
+                    visceralFat = visceral,
+                    notes = notes
+                )
+                showNewDialog = false
+            }
         )
     }
 }

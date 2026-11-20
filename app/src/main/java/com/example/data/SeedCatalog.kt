@@ -272,4 +272,48 @@ object SeedCatalog {
         val dayName = days[cal.get(Calendar.DAY_OF_WEEK)] ?: "Dia"
         return "$dayName, ${cal.get(Calendar.DAY_OF_MONTH)} ${months[cal.get(Calendar.MONTH)]}"
     }
+
+    val PAYMENT_METHODS: List<String> = listOf("MbWay", "Dinheiro", "João")
+
+    fun normalizePaymentMethod(raw: String): String? {
+        val clean = raw.trim().lowercase()
+        return when {
+            clean == "mbway" || clean == "mb way" || clean.contains("mbway") || clean.contains("mb way") -> "MbWay"
+            clean == "dinheiro" || clean.contains("dinheiro") -> "Dinheiro"
+            clean == "joão" || clean == "joao" || clean.contains("joão") || clean.contains("joao") -> "João"
+            else -> null
+        }
+    }
+
+    fun formatRgpdConsentStamp(ts: Long = System.currentTimeMillis()): String {
+        val c = Calendar.getInstance().apply { timeInMillis = ts }
+        return String.format(
+            "RGPD aceite em %02d/%02d/%04d às %02d:%02d",
+            c.get(Calendar.DAY_OF_MONTH),
+            c.get(Calendar.MONTH) + 1,
+            c.get(Calendar.YEAR),
+            c.get(Calendar.HOUR_OF_DAY),
+            c.get(Calendar.MINUTE)
+        )
+    }
+
+    fun buildConsecutiveMonths(startMonthYear: String, count: Int): List<Pair<String, String>> {
+        val months = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+        val parts = startMonthYear.split("-")
+        val now = Calendar.getInstance()
+        val startYear = parts.getOrNull(0)?.toIntOrNull() ?: now.get(Calendar.YEAR)
+        val startMonthIdx = ((parts.getOrNull(1)?.toIntOrNull() ?: (now.get(Calendar.MONTH) + 1)) - 1).coerceIn(0, 11)
+        val total = count.coerceAtLeast(1)
+        return (0 until total).map { offset ->
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.YEAR, startYear)
+                set(Calendar.MONTH, startMonthIdx)
+                set(Calendar.DAY_OF_MONTH, 1)
+                add(Calendar.MONTH, offset)
+            }
+            val key = String.format("%04d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
+            val lbl = "${months[cal.get(Calendar.MONTH)]} ${cal.get(Calendar.YEAR)}"
+            key to lbl
+        }
+    }
 }

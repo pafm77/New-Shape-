@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Scale, Trash2 } from 'lucide-react';
+import { Scale, Trash2 } from 'lucide-react';
 import { ClientRecord, PhysicalAssessmentRecord } from '../types/studio';
 import {
   bmiClassification,
@@ -7,7 +7,6 @@ import {
   calculateBmrMifflinStJeor,
   formatShortDate,
 } from '../data/seedCatalog';
-import * as repo from '../services/firestoreRepository';
 import {
   BrandCard,
   EmptyState,
@@ -32,16 +31,13 @@ const METRICS: { key: MetricKey; label: string; unit: string; decimals: number }
 ];
 
 export const PtAssessmentSection: React.FC<{
-  uid: string;
   clients: ClientRecord[];
   assessments: PhysicalAssessmentRecord[];
-  onBanner: (msg: string) => void;
-}> = ({ uid, clients, assessments, onBanner }) => {
+}> = ({ clients, assessments }) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [selectedClientId, setSelectedClientId] = useState(activeClients[0]?.id || '');
   const effectiveClient =
     activeClients.find((c) => c.id === selectedClientId) || activeClients[0] || null;
-  const [showNewModal, setShowNewModal] = useState(false);
 
   const clientAssessments = useMemo(
     () =>
@@ -55,17 +51,11 @@ export const PtAssessmentSection: React.FC<{
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold text-[#F4F4F5]">Avaliação Física</h2>
-          <p className="text-xs text-[#A1A1AA]">
-            Composição corporal, IMC e TMB automáticos + gráfico de evolução
-          </p>
-        </div>
-        <GoldButton disabled={!effectiveClient} onClick={() => setShowNewModal(true)}>
-          <Plus className="h-4 w-4" />
-          Nova Avaliação
-        </GoldButton>
+      <div>
+        <h2 className="text-xl font-bold text-[#F4F4F5]">Avaliação Física</h2>
+        <p className="text-xs text-[#A1A1AA]">
+          Apenas leitura · Preenchido pelo aluno (IMC, TMB e gráfico de evolução)
+        </p>
       </div>
 
       <BrandCard>
@@ -87,30 +77,7 @@ export const PtAssessmentSection: React.FC<{
         </select>
       </BrandCard>
 
-      <AssessmentDashboard
-        assessments={clientAssessments}
-        onDelete={async (id) => {
-          await repo.deletePhysicalAssessment(uid, id);
-          onBanner('Avaliação apagada.');
-        }}
-      />
-
-      {showNewModal && effectiveClient && (
-        <NewAssessmentModal
-          clientName={effectiveClient.name}
-          latest={clientAssessments[clientAssessments.length - 1] || null}
-          onClose={() => setShowNewModal(false)}
-          onSave={async (payload) => {
-            await repo.addPhysicalAssessment(uid, {
-              clientId: effectiveClient.id,
-              dateMillis: Date.now(),
-              ...payload,
-            });
-            setShowNewModal(false);
-            onBanner('Avaliação física guardada!');
-          }}
-        />
-      )}
+      <AssessmentDashboard assessments={clientAssessments} />
     </div>
   );
 };
@@ -392,7 +359,7 @@ const EvolutionChartCard: React.FC<{ assessments: PhysicalAssessmentRecord[] }> 
   );
 };
 
-const NewAssessmentModal: React.FC<{
+export const NewAssessmentModal: React.FC<{
   clientName: string;
   latest: PhysicalAssessmentRecord | null;
   onClose: () => void;

@@ -334,17 +334,17 @@ export function App() {
           setStudentId(cid);
           setRole('STUDENT');
         }}
-        onRegisterNewStudent={async (fullName, cleanPhone) => {
+        onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote) => {
           const newId = await repo.addClient(authUser.uid, {
             name: fullName,
             phone: cleanPhone,
-            notes: '',
+            notes: rgpdConsentNote,
             newClient: true,
           });
           localStorage.setItem('newshape_student_id', newId);
           setStudentId(newId);
           setRole('STUDENT');
-          showBanner('Conta criada! Bem-vindo ao New Shape.');
+          showBanner('Conta criada com consentimento RGPD! Bem-vindo ao New Shape.');
         }}
       />
     );
@@ -364,6 +364,7 @@ export function App() {
           fidelizacoes={fidelizacoes}
           workoutPlans={workoutPlans}
           workoutPlanItems={workoutPlanItems}
+          foodItems={foods}
           nutritionEntries={nutritionEntries}
           assessments={assessments}
           chatMessages={chatMessages}
@@ -591,10 +592,8 @@ export function App() {
 
           {ptTab === 'assessment' && (
             <PtAssessmentSection
-              uid={authUser.uid}
               clients={clients}
               assessments={assessments}
-              onBanner={showBanner}
             />
           )}
 

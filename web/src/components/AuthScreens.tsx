@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { Dumbbell, LogOut, User, UserPlus, AlertCircle, ShieldCheck } from 'lucide-react';
 import { ClientRecord } from '../types/studio';
-import { isValidPortuguesePhone, normalizePortuguesePhone } from '../data/seedCatalog';
+import {
+  formatRgpdConsentStamp,
+  isValidPortuguesePhone,
+  normalizePortuguesePhone,
+} from '../data/seedCatalog';
 import { NewShapeLogo } from './NewShapeLogo';
 import { BrandCard, FieldLabel, GoldButton, Input, SecondaryButton } from './UiPrimitives';
 
@@ -66,7 +70,11 @@ export const AuthRoleScreen: React.FC<{
   onSignOut: () => void;
   onEnterPt: () => void;
   onEnterStudent: (clientId: string) => void;
-  onRegisterNewStudent: (fullName: string, cleanPhone: string) => Promise<void>;
+  onRegisterNewStudent: (
+    fullName: string,
+    cleanPhone: string,
+    rgpdConsentNote: string
+  ) => Promise<void>;
 }> = ({
   clients,
   userEmail,
@@ -82,6 +90,7 @@ export const AuthRoleScreen: React.FC<{
   const [phone, setPhone] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [rgpdAccepted, setRgpdAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -122,9 +131,13 @@ export const AuthRoleScreen: React.FC<{
       onEnterStudent(existing.id);
       return;
     }
+    if (!rgpdAccepted) {
+      setError('Tens de aceitar o consentimento RGPD para concluir o registo.');
+      return;
+    }
     setSubmitting(true);
     try {
-      await onRegisterNewStudent(`${f} ${l}`, clean);
+      await onRegisterNewStudent(`${f} ${l}`, clean, formatRgpdConsentStamp());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao registar aluno.');
     } finally {
@@ -267,6 +280,30 @@ export const AuthRoleScreen: React.FC<{
                   placeholder="912 345 678"
                 />
               </div>
+
+              {isRegisterMode && (
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#323238] bg-[#242429]/80 p-3 text-xs transition hover:border-[#EAB308]/60">
+                  <input
+                    type="checkbox"
+                    checked={rgpdAccepted}
+                    onChange={(e) => {
+                      setRgpdAccepted(e.target.checked);
+                      setError(null);
+                    }}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#EAB308]"
+                  />
+                  <span className="space-y-1">
+                    <span className="block font-bold text-[#F4F4F5]">
+                      Consentimento RGPD (Obrigatório)
+                    </span>
+                    <span className="block leading-relaxed text-[#A1A1AA]">
+                      Autorizo o tratamento dos meus dados pessoais (nome, telemóvel, marcações,
+                      treinos, nutrição e avaliações físicas) pelo estúdio New Shape, nos termos
+                      do Regulamento Geral sobre a Proteção de Dados (RGPD).
+                    </span>
+                  </span>
+                </label>
+              )}
 
               {error && <p className="text-xs font-medium text-[#EF4444]">{error}</p>}
 

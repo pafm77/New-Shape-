@@ -6,8 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -21,6 +23,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
 import com.example.data.model.FidelizacaoRecord
 import com.example.ui.NewShapeViewModel
@@ -254,9 +257,10 @@ fun PtClientsTab(
             defaultMonthYear = state.currentMonthYear,
             defaultMonthLabel = state.currentMonthLabel,
             defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
+            defaultDurationMonths = client.fidelizacaoMonths,
             onDismiss = { paymentTargetClient = null },
-            onConfirm = { monthYear, monthLabel, amount, note ->
-                viewModel.recordPayment(client.id, monthYear, monthLabel, amount, note)
+            onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
+                viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
                 paymentTargetClient = null
             }
         )
@@ -315,7 +319,15 @@ fun PtClientProfileScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar aos alunos", tint = NewShapeGold)
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(client.name, style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(client.name, style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                        if (client.notes.contains("rgpd aceite", ignoreCase = true)) {
+                            StatusPill("RGPD ✓", ConfirmedGreen, ConfirmedGreenContainer)
+                        }
+                    }
                     Text(
                         text = if (client.active) "Aluno ativo" else "Aluno inativo",
                         style = MaterialTheme.typography.bodySmall,
@@ -566,9 +578,10 @@ fun PtClientProfileScreen(
             defaultMonthYear = state.currentMonthYear,
             defaultMonthLabel = state.currentMonthLabel,
             defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
+            defaultDurationMonths = client.fidelizacaoMonths,
             onDismiss = { showPayDialog = false },
-            onConfirm = { monthYear, monthLabel, amount, note ->
-                viewModel.recordPayment(client.id, monthYear, monthLabel, amount, note)
+            onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
+                viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
                 showPayDialog = false
             }
         )
@@ -643,6 +656,7 @@ private fun NewClientDialog(
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
+    var rgpdAccepted by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -671,13 +685,43 @@ private fun NewClientDialog(
                     label = { Text("Notas (opcional)") },
                     colors = darkFieldColors()
                 )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { rgpdAccepted = !rgpdAccepted }
+                        .padding(vertical = 4.dp)
+                ) {
+                    Checkbox(
+                        checked = rgpdAccepted,
+                        onCheckedChange = { rgpdAccepted = it },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = NewShapeGold,
+                            checkmarkColor = TextOnGold,
+                            uncheckedColor = TextSecondaryDark
+                        )
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Consentimento RGPD obtido do aluno",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextPrimaryDark
+                    )
+                }
             }
         },
         confirmButton = {
             GoldPrimaryButton(
                 text = "Adicionar",
                 enabled = name.isNotBlank(),
-                onClick = { onSave(name, phone, notes) }
+                onClick = {
+                    val rgpdStamp = if (rgpdAccepted) SeedCatalog.formatRgpdConsentStamp() else ""
+                    val combinedNotes = listOf(notes.trim(), rgpdStamp)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · ")
+                    onSave(name, phone, combinedNotes)
+                }
             )
         },
         dismissButton = {
@@ -739,26 +783,43 @@ fun RegisterPaymentDialog(
     defaultMonthYear: String,
     defaultMonthLabel: String,
     defaultAmountEur: Double = 120.0,
+    defaultDurationMonths: Int = 1,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, Double, String) -> Unit
+    onConfirm: (String, String, Double, String, Int) -> Unit
 ) {
-    var amountText by remember(defaultAmountEur) {
-        mutableStateOf(
-            if (defaultAmountEur % 1.0 == 0.0) defaultAmountEur.toInt().toString()
-            else String.format("%.2f", defaultAmountEur)
-        )
+    val initialDuration = if (defaultDurationMonths == 6 || defaultDurationMonths == 12) defaultDurationMonths else 1
+    var durationMonths by remember(defaultDurationMonths) { mutableIntStateOf(initialDuration) }
+    fun formatAmt(v: Double): String = if (v % 1.0 == 0.0) v.toInt().toString() else String.format("%.2f", v)
+
+    var amountText by remember(defaultAmountEur, initialDuration) {
+        mutableStateOf(formatAmt(defaultAmountEur * initialDuration))
     }
-    var note by remember { mutableStateOf("MB Way") }
+    var selectedMethod by remember { mutableStateOf("MbWay") }
+    val paymentMethods = SeedCatalog.PAYMENT_METHODS
     val monthOptions = remember(defaultMonthYear) { buildRecentMonthOptions() }
     var selectedMonth by remember { mutableStateOf(monthOptions.firstOrNull() ?: (defaultMonthYear to defaultMonthLabel)) }
+
+    val numericAmount = amountText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+    val perMonthAmount = numericAmount / durationMonths
+    val coveredMonths = remember(selectedMonth, durationMonths) {
+        SeedCatalog.buildConsecutiveMonths(selectedMonth.first, durationMonths)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = CharcoalSurface,
         title = { Text("Registar Mensalidade", color = TextPrimaryDark) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text("Aluno: $clientName", style = MaterialTheme.typography.titleSmall, color = NewShapeGoldBright)
+                Text(
+                    text = if (durationMonths > 1) "Mês inicial da fidelização" else "Mês",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondaryDark
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     monthOptions.take(3).forEach { opt ->
                         FilterChip(
@@ -772,29 +833,85 @@ fun RegisterPaymentDialog(
                         )
                     }
                 }
+                Text("Período / Fidelização paga", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(1 to "1 Mês", 6 to "6 Meses", 12 to "12 Meses").forEach { (m, label) ->
+                        FilterChip(
+                            selected = durationMonths == m,
+                            onClick = {
+                                val prevAuto = defaultAmountEur * durationMonths
+                                if (kotlin.math.abs(numericAmount - prevAuto) < 0.01) {
+                                    amountText = formatAmt(defaultAmountEur * m)
+                                }
+                                durationMonths = m
+                            },
+                            label = { Text(label) },
+                            modifier = Modifier.weight(1f).testTag("payment_duration_$m"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = amountText,
-                    onValueChange = { amountText = it.filter { ch -> ch.isDigit() || ch == '.' } },
-                    label = { Text("Valor (€)") },
+                    onValueChange = { amountText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                    label = {
+                        Text(
+                            if (durationMonths > 1) "Valor total pago ($durationMonths meses) (€)"
+                            else "Valor (€)"
+                        )
+                    },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
                     colors = darkFieldColors()
                 )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("Método / Nota (ex: MB Way, Dinheiro)") },
-                    singleLine = true,
-                    colors = darkFieldColors()
-                )
+                if (durationMonths > 1) {
+                    Surface(
+                        color = NewShapeGoldMuted,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "€${String.format("%.2f", numericAmount)} ÷ $durationMonths meses = €${String.format("%.2f", perMonthAmount)}/mês",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = NewShapeGoldBright
+                            )
+                            Text(
+                                text = "Conta 1 mensalidade/mês (${coveredMonths.firstOrNull()?.second.orEmpty()} → ${coveredMonths.lastOrNull()?.second.orEmpty()})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark
+                            )
+                        }
+                    }
+                }
+                Text("Método de pagamento", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    paymentMethods.forEach { method ->
+                        FilterChip(
+                            selected = selectedMethod == method,
+                            onClick = { selectedMethod = method },
+                            label = { Text(method) },
+                            modifier = Modifier.weight(1f).testTag("payment_method_$method"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             GoldPrimaryButton(
                 text = "Marcar como Pago",
                 onClick = {
-                    val amount = amountText.toDoubleOrNull() ?: 0.0
-                    onConfirm(selectedMonth.first, selectedMonth.second, amount, note)
+                    onConfirm(selectedMonth.first, selectedMonth.second, numericAmount, selectedMethod, durationMonths)
                 },
                 testTag = "confirm_payment_dialog_btn"
             )
