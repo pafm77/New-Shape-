@@ -745,16 +745,73 @@ fun MensagensSettingsSection(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val context = LocalContext.current
     var clientsCanEdit by remember(state.settings) { mutableStateOf(state.settings.clientsCanEdit) }
     var cutoffHoursText by remember(state.settings) { mutableStateOf(state.settings.cutoffHours.toString()) }
     var whatsappWeb by remember(state.settings) { mutableStateOf(state.settings.whatsappWebMode) }
     var siteBaseUrl by remember(state.settings) { mutableStateOf(state.settings.siteBaseUrl) }
+
+    val cleanBaseUrl = state.settings.siteBaseUrl.trimEnd('/').ifBlank { "https://newshape.vercel.app" }
+    val ptLink = "$cleanBaseUrl/painel"
+    val studentLink = remember(state.settings, state.currentUserId) {
+        val ptUid = state.settings.userId.ifBlank { state.currentUserId }
+        val code = state.settings.studentPortalCode
+        if (ptUid.isNotBlank() && code.isNotBlank()) "$cleanBaseUrl/aluno?pt=$ptUid&code=$code"
+        else if (ptUid.isNotBlank()) "$cleanBaseUrl/aluno?pt=$ptUid"
+        else "$cleanBaseUrl/aluno"
+    }
+    val studentInviteText = "Olá! 💪 Já podes aceder ao teu Portal de Aluno New Shape (marcações, treinos, nutrição e avaliações) através deste link:\n$studentLink\n\nEntras apenas com o teu número de telemóvel!"
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            BrandCard(highlightBorder = true) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Links de Acesso (PT e Aluno)",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = NewShapeGoldBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                    TextButton(onClick = { viewModel.regenerateStudentPortalCode() }) {
+                        Text("Renovar código", color = TextSecondaryDark, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("Link do PT (Painel Web)", style = MaterialTheme.typography.labelMedium, color = TextPrimaryDark)
+                Text(ptLink, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                Spacer(Modifier.height(6.dp))
+                DarkSecondaryButton(
+                    text = "Copiar Link do PT",
+                    onClick = { copyToClipboard(context, ptLink, "Link do PT copiado!") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("Link do Aluno (só telemóvel)", style = MaterialTheme.typography.labelMedium, color = NewShapeGoldBright)
+                Text(studentLink, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DarkSecondaryButton(
+                        text = "Copiar Aluno",
+                        onClick = { copyToClipboard(context, studentLink, "Link do Aluno copiado!") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    GoldPrimaryButton(
+                        text = "WhatsApp",
+                        onClick = { openWhatsApp(context, null, studentInviteText, state.settings.whatsappWebMode) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
         item {
             Text("Mensagens WhatsApp", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
             Text(
@@ -793,10 +850,16 @@ fun MensagensSettingsSection(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                 ) {
+                    val ptUid = state.settings.userId.ifBlank { state.currentUserId }
+                    val previewLink = if (ptUid.isNotBlank() && state.settings.studentPortalCode.isNotBlank()) {
+                        "$cleanBaseUrl/s/2026-w47?pt=$ptUid&code=${state.settings.studentPortalCode}"
+                    } else {
+                        "$cleanBaseUrl/s/2026-w47"
+                    }
                     val samplePreview = bodyText
                         .replace("{nome}", "Ana")
                         .replace("{treinos}", "• Segunda, 16 Nov – 18h00\n• Quarta, 18 Nov – 19h00")
-                        .replace("{link}", "${state.settings.siteBaseUrl}/s/2026-w47")
+                        .replace("{link}", previewLink)
                         .replace("{semana}", state.activeWeek?.label ?: "16–22 Nov")
                     Text(samplePreview, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark, modifier = Modifier.padding(10.dp))
                 }
@@ -883,7 +946,7 @@ fun MensagensSettingsSection(
                                 clientsCanEdit = clientsCanEdit,
                                 cutoffHours = cutoffHoursText.toIntOrNull()?.coerceIn(0, 72) ?: 12,
                                 whatsappWebMode = whatsappWeb,
-                                siteBaseUrl = siteBaseUrl.trim().ifBlank { "https://new-shape-treinos.vercel.app" },
+                                siteBaseUrl = siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" },
                                 seeded = true
                             )
                         )

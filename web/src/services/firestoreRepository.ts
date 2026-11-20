@@ -43,8 +43,10 @@ import {
   DEFAULT_EXERCISES,
   DEFAULT_FOODS,
   DEFAULT_TEMPLATES,
+  DEFAULT_WEB_BASE_URL,
   formatWeekKey,
   formatWeekRangeLabel,
+  generatePortalCode,
   getMondayOfWeek,
   isValidPortuguesePhone,
   normalizePaymentMethod,
@@ -369,7 +371,8 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
           clientsCanEdit: Boolean(d.clientsCanEdit ?? true),
           cutoffHours: Number(d.cutoffHours ?? 12),
           whatsappWebMode: Boolean(d.whatsappWebMode ?? false),
-          siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin),
+          siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin ?? DEFAULT_WEB_BASE_URL),
+          studentPortalCode: String(d.studentPortalCode ?? ''),
           seeded: Boolean(d.seeded ?? false),
         });
       },
@@ -450,6 +453,13 @@ export async function ensureSeeded(uid: string): Promise<void> {
     }
 
     if (writes.length > 0) await commitWrites(writes);
+    const currentCode = settingsSnap.data()?.studentPortalCode;
+    if (typeof currentCode !== 'string' || currentCode.length < 8) {
+      await updateDoc(settingsRef, {
+        studentPortalCode: generatePortalCode(),
+        updatedAt: serverTimestamp(),
+      });
+    }
     return;
   }
 
@@ -800,7 +810,8 @@ export async function ensureSeeded(uid: string): Promise<void> {
       clientsCanEdit: true,
       cutoffHours: 12,
       whatsappWebMode: false,
-      siteBaseUrl: window.location.origin || 'https://new-shape-treinos.vercel.app',
+      siteBaseUrl: window.location.origin || DEFAULT_WEB_BASE_URL,
+      studentPortalCode: generatePortalCode(),
       seeded: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1583,18 +1594,76 @@ export async function saveStudioSettings(
   uid: string,
   settings: StudioSettingsRecord
 ): Promise<void> {
-  await setDoc(
-    doc(subcol(uid, 'settings'), 'studio'),
-    {
+  const ref = doc(subcol(uid, 'settings'), 'studio');
+  const snap = await getDoc(ref);
+  const cleanUrl = (settings.siteBaseUrl.trim() || window.location.origin || DEFAULT_WEB_BASE_URL).slice(0, 300);
+  const code =
+    settings.studentPortalCode && settings.studentPortalCode.length >= 8
+      ? settings.studentPortalCode.slice(0, 64)
+      : generatePortalCode();
+
+  if (snap.exists()) {
+    await updateDoc(ref, {
+      clientsCanEdit: settings.clientsCanEdit,
+      cutoffHours: Math.max(0, Math.min(72, Math.round(settings.cutoffHours))),
+      whatsappWebMode: settings.whatsappWebMode,
+      siteBaseUrl: cleanUrl,
+      studentPortalCode: code,
+      seeded: true,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    await setDoc(ref, {
       userId: uid,
       clientsCanEdit: settings.clientsCanEdit,
       cutoffHours: Math.max(0, Math.min(72, Math.round(settings.cutoffHours))),
       whatsappWebMode: settings.whatsappWebMode,
-      siteBaseUrl: (settings.siteBaseUrl.trim() || window.location.origin).slice(0, 300),
+      siteBaseUrl: cleanUrl,
+      studentPortalCode: code,
       seeded: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+    });
+  }
+}
+
+export async function regenerateStudentPortalCode(uid: string): Promise<string> {
+  const newCode = generatePortalCode();
+  await updateDoc(doc(subcol(uid, 'settings'), 'studio'), {
+    studentPortalCode: newCode,
+    updatedAt: serverTimestamp(),
+  });
+  return newCode;
+}
+
+export async function joinStudioPortal(
+  ptUid: string,
+  inviteCode: string,
+  memberUid: string
+): Promise<void> {
+  const ref = doc(subcol(ptUid, 'portal_members'), memberUid);
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    if (snap.data()?.inviteCode === inviteCode) return;
+    await deleteDoc(ref);
+  }
+  await setDoc(ref, {
+    userId: ptUid,
+    memberUid,
+    inviteCode,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updatePortalMemberClientId(
+  ptUid: string,
+  memberUid: string,
+  clientId: string
+): Promise<void> {
+  const ref = doc(subcol(ptUid, 'portal_members'), memberUid);
+  await updateDoc(ref, {
+    clientId,
+    updatedAt: serverTimestamp(),
+  });
 }

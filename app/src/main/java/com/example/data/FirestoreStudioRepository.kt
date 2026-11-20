@@ -203,6 +203,15 @@ class FirestoreStudioRepository(
                 chunk.forEach { (ref, payload) -> batch.set(ref, payload) }
                 batch.commit().await()
             }
+            val existingCode = settingsSnap.getString("studentPortalCode").orEmpty()
+            if (existingCode.length < 8) {
+                settingsRef.update(
+                    mapOf(
+                        "studentPortalCode" to generatePortalCode(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
             Result.success(Unit)
         } else {
             val writes = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
@@ -556,7 +565,8 @@ class FirestoreStudioRepository(
                 "clientsCanEdit" to true,
                 "cutoffHours" to 12,
                 "whatsappWebMode" to false,
-                "siteBaseUrl" to "https://new-shape-treinos.vercel.app",
+                "siteBaseUrl" to "https://newshape.vercel.app",
+                "studentPortalCode" to generatePortalCode(),
                 "seeded" to true,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -1578,12 +1588,14 @@ class FirestoreStudioRepository(
 
     suspend fun saveSettings(settings: StudioSettingsRecord): Result<Unit> = try {
         val uid = requireUserId()
+        val code = settings.studentPortalCode.takeIf { it.length >= 8 } ?: generatePortalCode()
         userDoc(uid).collection("settings").document("studio").update(
             mapOf(
                 "clientsCanEdit" to settings.clientsCanEdit,
                 "cutoffHours" to settings.cutoffHours.coerceIn(0, 72),
                 "whatsappWebMode" to settings.whatsappWebMode,
-                "siteBaseUrl" to settings.siteBaseUrl.trim().ifBlank { "https://new-shape-treinos.vercel.app" }.take(300),
+                "siteBaseUrl" to settings.siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" }.take(300),
+                "studentPortalCode" to code.take(64),
                 "seeded" to true,
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -1596,6 +1608,40 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
+    suspend fun regenerateStudentPortalCode(): Result<String> = try {
+        val uid = requireUserId()
+        val newCode = generatePortalCode()
+        userDoc(uid).collection("settings").document("studio").update(
+            mapOf(
+                "studentPortalCode" to newCode,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(newCode)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/settings/studio")
+        Result.failure(e)
+    }
+
+    fun buildStudentPortalLink(
+        settings: StudioSettingsRecord,
+        weekSlug: String? = null
+    ): String {
+        val baseUrl = settings.siteBaseUrl.trimEnd('/').ifBlank { "https://newshape.vercel.app" }
+        val path = if (!weekSlug.isNullOrBlank()) "/s/${weekSlug.lowercase()}" else "/aluno"
+        val ptUid = settings.userId.ifBlank { auth.currentUser?.uid.orEmpty() }
+        val code = settings.studentPortalCode
+        return if (ptUid.isNotBlank() && code.isNotBlank()) {
+            "$baseUrl$path?pt=$ptUid&code=$code"
+        } else if (ptUid.isNotBlank()) {
+            "$baseUrl$path?pt=$ptUid"
+        } else {
+            "$baseUrl$path"
+        }
+    }
+
     fun formatMessage(
         templateBody: String,
         clientName: String = "",
@@ -1605,13 +1651,21 @@ class FirestoreStudioRepository(
     ): String {
         val firstName = clientName.trim().split(" ").firstOrNull().orEmpty()
         val sessionsList = sessions.joinToString("\n") { "• ${it.dateLabel} – ${it.timeLabel.replace(":", "h")}" }
-        val baseUrl = settings.siteBaseUrl.trimEnd('/').ifBlank { "https://new-shape-treinos.vercel.app" }
-        val weekLink = if (week != null) "$baseUrl/s/${week.weekKey.lowercase()}" else baseUrl
+        val weekLink = if (week != null) {
+            buildStudentPortalLink(settings, week.weekKey)
+        } else {
+            buildStudentPortalLink(settings)
+        }
         return templateBody
             .replace("{nome}", firstName)
             .replace("{treinos}", sessionsList)
             .replace("{link}", weekLink)
             .replace("{semana}", week?.label.orEmpty())
+    }
+
+    private fun generatePortalCode(): String {
+        val chars = "abcdefghjkmnpqrstuvwxyz23456789"
+        return "ns_" + (1..14).map { chars.random() }.joinToString("")
     }
 
     private val uidOrUnknown: String

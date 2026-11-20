@@ -223,6 +223,36 @@ export function buildWhatsAppUrl(
     : `https://wa.me/?text=${encoded}`;
 }
 
+export const DEFAULT_WEB_BASE_URL = 'https://newshape.vercel.app';
+
+export function generatePortalCode(): string {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let out = 'ns_';
+  for (let i = 0; i < 14; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+export function buildPtPortalLink(siteBaseUrl: string): string {
+  const baseUrl = (siteBaseUrl || window.location.origin || DEFAULT_WEB_BASE_URL).replace(/\/$/, '');
+  return `${baseUrl}/painel`;
+}
+
+export function buildStudentPortalLink(
+  siteBaseUrl: string,
+  ptUid: string,
+  studentPortalCode?: string,
+  weekSlug?: string
+): string {
+  const baseUrl = (siteBaseUrl || window.location.origin || DEFAULT_WEB_BASE_URL).replace(/\/$/, '');
+  const path = weekSlug ? `/s/${weekSlug.toLowerCase()}` : '/aluno';
+  if (!ptUid) return `${baseUrl}${path}`;
+  const params = new URLSearchParams({ pt: ptUid });
+  if (studentPortalCode) params.set('code', studentPortalCode);
+  return `${baseUrl}${path}?${params.toString()}`;
+}
+
 export function buildMessageFromTemplate(
   templates: MessageTemplateRecord[],
   templateKey: string,
@@ -231,6 +261,8 @@ export function buildMessageFromTemplate(
     clientName?: string;
     sessions?: TrainingSessionRecord[];
     week?: TrainingWeekRecord | null;
+    ptUid?: string;
+    studentPortalCode?: string;
   }
 ): string {
   const found =
@@ -241,9 +273,13 @@ export function buildMessageFromTemplate(
   const sessionsText = (opts.sessions || [])
     .map((s) => `• ${s.dateLabel} – ${s.timeLabel.replace(':', 'h')}`)
     .join('\n');
-  const baseUrl = (siteBaseUrl || window.location.origin).replace(/\/$/, '');
   const weekSlug = (opts.week?.weekKey || '2026-w47').toLowerCase();
-  const link = `${baseUrl}/s/${weekSlug}`;
+  const link = buildStudentPortalLink(
+    siteBaseUrl,
+    opts.ptUid || '',
+    opts.studentPortalCode,
+    weekSlug
+  );
   const weekLabel = opts.week?.label || '';
 
   return body

@@ -751,6 +751,14 @@ class NewShapeViewModel(
         }
     }
 
+    fun regenerateStudentPortalCode() {
+        viewModelScope.launch {
+            repository.regenerateStudentPortalCode()
+                .onSuccess { _statusBanner.value = "Novo código do Link do Aluno gerado!" }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     // --- Formatters ---
     fun buildMessage(
         templateKey: String,

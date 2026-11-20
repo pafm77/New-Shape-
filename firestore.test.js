@@ -440,3 +440,103 @@ test("Security bounds: reject ghost fields, extra @DocumentId id, immutable crea
     })
   );
 });
+
+test("Student portal link access: requires valid studentPortalCode and enforces student permissions", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const studentDb = testEnv.authenticatedContext("student_portal_789").firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const created = new Date(Date.now() - 10000);
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").set({
+      userId: ALICE_UID,
+      clientsCanEdit: true,
+      cutoffHours: 12,
+      whatsappWebMode: false,
+      siteBaseUrl: "https://newshape.vercel.app",
+      studentPortalCode: "ns_invite_2026_abc",
+      seeded: true,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Wrong invite code fails
+  await assertFails(
+    bobDb.collection(`users/${ALICE_UID}/portal_members`).doc(BOB_UID).set({
+      userId: ALICE_UID,
+      memberUid: BOB_UID,
+      inviteCode: "wrong_code_123",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Valid invite code succeeds
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/portal_members`).doc("student_portal_789").set({
+      userId: ALICE_UID,
+      memberUid: "student_portal_789",
+      inviteCode: "ns_invite_2026_abc",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Student can register self, book as PENDING, log nutrition/assessment/chat
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/clients`).doc("c_student").set({
+      userId: ALICE_UID,
+      name: "Beatriz Silva",
+      phone: "919111222",
+      notes: "RGPD aceite",
+      active: true,
+      newClient: true,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/bookings`).doc("bk_stu_1").set({
+      userId: ALICE_UID,
+      sessionId: "ses_1",
+      weekKey: "2026-W47",
+      clientId: "c_student",
+      status: "PENDING",
+      requestedAtMillis: 1794900000000,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Student CANNOT self-confirm a booking
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/bookings`).doc("bk_stu_bad").set({
+      userId: ALICE_UID,
+      sessionId: "ses_1",
+      weekKey: "2026-W47",
+      clientId: "c_student",
+      status: "CONFIRMED",
+      requestedAtMillis: 1794900000000,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Student CANNOT create payments or sessions
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/payments`).doc("pay_bad").set({
+      userId: ALICE_UID,
+      clientId: "c_student",
+      monthYear: "2026-11",
+      monthLabel: "Nov 2026",
+      amountEur: 0,
+      paid: true,
+      paidAtMillis: 1794900000000,
+      note: "MbWay",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+});
+

@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
 import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  User,
+} from 'firebase/auth';
+import {
+  AlertCircle,
   Briefcase,
   Dumbbell,
   Home,
@@ -34,12 +43,13 @@ import {
 } from './types/studio';
 import {
   DEFAULT_TEMPLATES,
+  DEFAULT_WEB_BASE_URL,
   getMondayOfWeek,
   formatWeekKey,
 } from './data/seedCatalog';
 import * as repo from './services/firestoreRepository';
 import { NewShapeLogo } from './components/NewShapeLogo';
-import { AuthRoleScreen, GoogleSignInScreen } from './components/AuthScreens';
+import { AuthRoleScreen, PtEmailSignInScreen } from './components/AuthScreens';
 import { PtHomeSection } from './components/PtHomeSection';
 import { PtClientsSection } from './components/PtClientsSection';
 import { PtTrainingSection } from './components/PtTrainingSection';
@@ -47,39 +57,115 @@ import { PtNutritionSection } from './components/PtNutritionSection';
 import { PtAssessmentSection } from './components/PtAssessmentSection';
 import { PtManagementSection } from './components/PtManagementSection';
 import { StudentPortal } from './components/StudentPortal';
+import { BrandCard, GoldButton } from './components/UiPrimitives';
 
 type PtMainTab = 'home' | 'clients' | 'training' | 'nutrition' | 'assessment' | 'management';
+
+const LS_PORTAL_PT_UID = 'newshape_portal_pt_uid';
+const LS_PORTAL_CODE = 'newshape_portal_code';
+const LS_PORTAL_CRED = 'newshape_portal_cred';
+
+function generatePortalCredential(): { email: string; password: string } {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const rand = (len: number) =>
+    Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  return {
+    email: `aluno_${rand(12)}@portal.newshape.local`,
+    password: `Ns!${rand(18)}9`,
+  };
+}
+
+function mapFirebaseAuthError(err: unknown): string {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: unknown }).code)
+      : '';
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'E-mail ou palavra-passe incorretos.';
+    case 'auth/email-already-in-use':
+      return 'Já existe uma conta registada com este e-mail. Usa "Iniciar sessão".';
+    case 'auth/weak-password':
+      return 'A palavra-passe tem de ter pelo menos 6 caracteres.';
+    case 'auth/invalid-email':
+      return 'O endereço de e-mail não é válido.';
+    case 'auth/too-many-requests':
+      return 'Demasiadas tentativas seguidas. Aguarda uns minutos e tenta novamente.';
+    case 'auth/operation-not-allowed':
+      return 'O login por E-mail/Palavra-passe ainda não está ativado na Consola Firebase (Authentication → Sign-in method → E-mail/palavra-passe).';
+    case 'auth/unauthorized-domain':
+      return 'Domínio não autorizado no Firebase (Authentication → Settings → Authorized domains).';
+    default:
+      return err instanceof Error ? err.message : 'Erro ao autenticar.';
+  }
+}
 
 export function App() {
   const pathInfo = useMemo(() => {
     const p = window.location.pathname.toLowerCase();
+    const search = new URLSearchParams(window.location.search);
+    const urlPt = search.get('pt')?.trim() || '';
+    const urlCode = search.get('code')?.trim() || '';
+    if (urlPt) localStorage.setItem(LS_PORTAL_PT_UID, urlPt);
+    if (urlCode) localStorage.setItem(LS_PORTAL_CODE, urlCode);
+
+    const savedPt = urlPt || localStorage.getItem(LS_PORTAL_PT_UID) || '';
+    const savedCode = urlCode || localStorage.getItem(LS_PORTAL_CODE) || '';
+
     if (p.startsWith('/s/')) {
       return {
         routeType: 'STUDENT_WEEK' as const,
         weekSlug: p.slice(3).split('/')[0] || undefined,
+        portalPtUid: savedPt,
+        portalCode: savedCode,
       };
     }
     if (p.startsWith('/aluno')) {
-      return { routeType: 'STUDENT' as const, weekSlug: undefined };
+      return {
+        routeType: 'STUDENT' as const,
+        weekSlug: undefined,
+        portalPtUid: savedPt,
+        portalCode: savedCode,
+      };
     }
     if (p.startsWith('/painel')) {
-      return { routeType: 'PT' as const, weekSlug: undefined };
+      return {
+        routeType: 'PT' as const,
+        weekSlug: undefined,
+        portalPtUid: '',
+        portalCode: '',
+      };
     }
-    return { routeType: 'ROLE' as const, weekSlug: undefined };
+    return {
+      routeType: 'ROLE' as const,
+      weekSlug: undefined,
+      portalPtUid: savedPt,
+      portalCode: savedCode,
+    };
   }, []);
+
+  const isStudentRoute =
+    pathInfo.routeType === 'STUDENT' || pathInfo.routeType === 'STUDENT_WEEK';
+  const hasStudentInviteParams = Boolean(pathInfo.portalPtUid && pathInfo.portalCode);
+  const isExternalStudentPortal = isStudentRoute && hasStudentInviteParams;
 
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authInfo, setAuthInfo] = useState<string | null>(null);
+
+  const [portalJoinState, setPortalJoinState] = useState<'idle' | 'joining' | 'joined' | 'error'>(
+    'idle'
+  );
+  const [portalJoinError, setPortalJoinError] = useState<string | null>(null);
 
   const [role, setRole] = useState<'NONE' | 'PT' | 'STUDENT'>(() => {
     if (pathInfo.routeType === 'PT') return 'PT';
     const savedStudent = localStorage.getItem('newshape_student_id');
-    if (
-      (pathInfo.routeType === 'STUDENT' || pathInfo.routeType === 'STUDENT_WEEK') &&
-      savedStudent
-    ) {
+    if (isStudentRoute && savedStudent) {
       return 'STUDENT';
     }
     return 'NONE';
@@ -137,18 +223,102 @@ export function App() {
     return unsub;
   }, []);
 
+  // Automatic portal session & studio join when opening a Student Link (/aluno?pt=...&code=...)
   useEffect(() => {
-    if (!authUser) {
+    if (!authReady || !isExternalStudentPortal) return;
+    let cancelled = false;
+
+    const connectPortal = async () => {
+      setPortalJoinState('joining');
+      setPortalJoinError(null);
+      try {
+        let user = auth.currentUser;
+        if (!user) {
+          let cred: { email: string; password: string } | null = null;
+          try {
+            const raw = localStorage.getItem(LS_PORTAL_CRED);
+            if (raw) cred = JSON.parse(raw) as { email: string; password: string };
+          } catch {
+            cred = null;
+          }
+          if (!cred?.email || !cred?.password) {
+            cred = generatePortalCredential();
+            localStorage.setItem(LS_PORTAL_CRED, JSON.stringify(cred));
+          }
+          try {
+            const res = await signInWithEmailAndPassword(auth, cred.email, cred.password);
+            user = res.user;
+          } catch (err) {
+            const code =
+              typeof err === 'object' && err !== null && 'code' in err
+                ? String((err as { code?: unknown }).code)
+                : '';
+            if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
+              try {
+                const res = await createUserWithEmailAndPassword(auth, cred.email, cred.password);
+                user = res.user;
+              } catch (createErr) {
+                const createCode =
+                  typeof createErr === 'object' && createErr !== null && 'code' in createErr
+                    ? String((createErr as { code?: unknown }).code)
+                    : '';
+                if (createCode === 'auth/email-already-in-use') {
+                  cred = generatePortalCredential();
+                  localStorage.setItem(LS_PORTAL_CRED, JSON.stringify(cred));
+                  const res = await createUserWithEmailAndPassword(auth, cred.email, cred.password);
+                  user = res.user;
+                } else {
+                  throw createErr;
+                }
+              }
+            } else {
+              throw err;
+            }
+          }
+        }
+
+        if (user && user.uid !== pathInfo.portalPtUid) {
+          await repo.joinStudioPortal(pathInfo.portalPtUid, pathInfo.portalCode, user.uid);
+        }
+        if (!cancelled) {
+          setPortalJoinState('joined');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPortalJoinState('error');
+          setPortalJoinError(mapFirebaseAuthError(err));
+        }
+      }
+    };
+
+    connectPortal();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, isExternalStudentPortal, pathInfo.portalPtUid, pathInfo.portalCode]);
+
+  const studioUid = useMemo(() => {
+    if (isExternalStudentPortal) {
+      return portalJoinState === 'joined' ? pathInfo.portalPtUid : '';
+    }
+    return authUser?.uid || '';
+  }, [isExternalStudentPortal, portalJoinState, pathInfo.portalPtUid, authUser?.uid]);
+
+  const isStudioOwner = Boolean(authUser && studioUid && authUser.uid === studioUid);
+
+  useEffect(() => {
+    if (!studioUid) {
       setDataLoaded(false);
       return;
     }
 
-    const uid = authUser.uid;
-    repo.ensureSeeded(uid).catch((e) => {
-      showBanner(e?.message || 'Erro ao inicializar base de dados.');
-    });
+    if (isStudioOwner) {
+      repo.ensureSeeded(studioUid).catch((e) => {
+        showBanner(e?.message || 'Erro ao inicializar base de dados.');
+      });
+    }
 
-    const unsub = repo.subscribeStudioData(uid, {
+    const unsub = repo.subscribeStudioData(studioUid, {
       clients: (list) => {
         setClients(list);
         setDataLoaded(true);
@@ -172,26 +342,27 @@ export function App() {
     });
 
     return unsub;
-  }, [authUser]);
+  }, [studioUid, isStudioOwner]);
 
   const effectiveSettings: StudioSettingsRecord = useMemo(
     () =>
       settingsState || {
         id: 'studio',
-        userId: authUser?.uid || '',
+        userId: studioUid,
         clientsCanEdit: true,
         cutoffHours: 12,
         whatsappWebMode: false,
-        siteBaseUrl: window.location.origin,
+        siteBaseUrl: window.location.origin || DEFAULT_WEB_BASE_URL,
+        studentPortalCode: pathInfo.portalCode || '',
         seeded: true,
       },
-    [settingsState, authUser?.uid]
+    [settingsState, studioUid, pathInfo.portalCode]
   );
 
   const effectiveTemplates: MessageTemplateRecord[] = useMemo(() => {
     if (templates.length > 0) return templates;
-    return DEFAULT_TEMPLATES.map((t) => ({ ...t, userId: authUser?.uid || '' }));
-  }, [templates, authUser?.uid]);
+    return DEFAULT_TEMPLATES.map((t) => ({ ...t, userId: studioUid }));
+  }, [templates, studioUid]);
 
   const activeWeekKey = useMemo(
     () => formatWeekKey(new Date(activeMondayMs)),
@@ -207,11 +378,11 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!authUser) return;
+    if (!isStudioOwner || !studioUid) return;
     if (!weeks.some((w) => w.weekKey === activeWeekKey)) {
-      repo.ensureWeekExists(authUser.uid, activeMondayMs).catch(() => {});
+      repo.ensureWeekExists(studioUid, activeMondayMs).catch(() => {});
     }
-  }, [authUser, activeWeekKey, activeMondayMs, weeks]);
+  }, [isStudioOwner, studioUid, activeWeekKey, activeMondayMs, weeks]);
 
   const pendingQueue: PendingConfirmationCard[] = useMemo(() => {
     const clientMap = new Map(clients.map((c) => [c.id, c]));
@@ -259,39 +430,83 @@ export function App() {
     return cards.sort((a, b) => a.requestedAtMillis - b.requestedAtMillis);
   }, [bookings, clients, weeks, sessions]);
 
+  const handleEmailSignIn = async (email: string, password: string) => {
+    setAuthBusy(true);
+    setAuthError(null);
+    setAuthInfo(null);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      if (pathInfo.routeType === 'PT') setRole('PT');
+    } catch (err) {
+      setAuthError(mapFirebaseAuthError(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleEmailSignUp = async (email: string, password: string) => {
+    setAuthBusy(true);
+    setAuthError(null);
+    setAuthInfo(null);
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      setRole('PT');
+    } catch (err) {
+      setAuthError(mapFirebaseAuthError(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleResetPassword = async (email: string) => {
+    setAuthBusy(true);
+    setAuthError(null);
+    setAuthInfo(null);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setAuthInfo(`Enviámos um e-mail de recuperação para ${email}. Verifica a caixa de entrada e o spam.`);
+    } catch (err) {
+      setAuthError(mapFirebaseAuthError(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setAuthBusy(true);
     setAuthError(null);
+    setAuthInfo(null);
     try {
       await signInWithPopup(auth, googleProvider);
+      if (pathInfo.routeType === 'PT') setRole('PT');
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'Não foi possível iniciar sessão com Google.'
-      );
+      setAuthError(mapFirebaseAuthError(err));
     } finally {
       setAuthBusy(false);
     }
   };
 
   const handleSignOut = async () => {
-    await signOut(auth);
     localStorage.removeItem('newshape_student_id');
-    setRole('NONE');
     setStudentId(null);
+    setRole('NONE');
+    if (!isExternalStudentPortal) {
+      await signOut(auth);
+    }
   };
 
   const handleConfirmCard = async (card: PendingConfirmationCard) => {
-    if (!authUser) return;
+    if (!studioUid) return;
     const snapshots = card.items.map((i) => ({ ...i.booking }));
-    await repo.confirmClientBookings(authUser.uid, snapshots);
+    await repo.confirmClientBookings(studioUid, snapshots);
     setUndoSnapshot({ clientName: card.client.name, bookings: snapshots });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setUndoSnapshot(null), 10000);
   };
 
   const handleUndoConfirmation = async () => {
-    if (!authUser || !undoSnapshot) return;
-    await repo.restoreBookings(authUser.uid, undoSnapshot.bookings);
+    if (!studioUid || !undoSnapshot) return;
+    await repo.restoreBookings(studioUid, undoSnapshot.bookings);
     setUndoSnapshot(null);
     showBanner('Confirmação desfeita.');
   };
@@ -304,28 +519,145 @@ export function App() {
     );
   }
 
-  if (!authUser) {
+  // Student Link connecting state
+  if (isExternalStudentPortal && portalJoinState !== 'joined') {
+    if (portalJoinState === 'error') {
+      return (
+        <div className="min-h-screen bg-[#121214] px-4 py-10 flex items-center justify-center">
+          <div className="w-full max-w-md space-y-5">
+            <NewShapeLogo />
+            <BrandCard highlight>
+              <div className="flex items-start gap-2.5 text-[#FCA5A5]">
+                <AlertCircle className="h-5 w-5 shrink-0 text-[#EF4444] mt-0.5" />
+                <div className="space-y-1.5 text-sm">
+                  <p className="font-bold text-[#F4F4F5]">Não foi possível abrir o Portal do Aluno</p>
+                  <p className="text-xs leading-relaxed text-[#FCA5A5]">
+                    {portalJoinError ||
+                      'O link pode estar desatualizado ou inválido. Pede ao teu Personal Trainer o Link do Aluno atualizado.'}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <GoldButton fullWidth onClick={() => window.location.reload()}>
+                  Tentar novamente
+                </GoldButton>
+              </div>
+            </BrandCard>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <GoogleSignInScreen
+      <div className="min-h-screen bg-[#121214] flex items-center justify-center text-sm text-[#A1A1AA]">
+        A ligar ao teu estúdio New Shape...
+      </div>
+    );
+  }
+
+  // Bare /aluno or /s/... without ?pt=...&code=... and no PT login
+  if (isStudentRoute && !hasStudentInviteParams && !authUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#1A1811] via-[#121214] to-[#121214] px-4 py-10 flex items-center justify-center">
+        <div className="w-full max-w-md space-y-5">
+          <div className="h-1.5 w-24 rounded-full bg-[#EAB308]" />
+          <NewShapeLogo />
+          <BrandCard highlight>
+            <h1 className="text-xl font-bold text-[#F4F4F5]">Link do Estúdio necessário</h1>
+            <p className="mt-2 text-sm text-[#A1A1AA]">
+              Para entrares como aluno, abre o link personalizado enviado pelo teu Personal Trainer
+              (contém o código do estúdio).
+            </p>
+            <div className="mt-4">
+              <GoldButton
+                fullWidth
+                onClick={() => {
+                  window.location.href = '/painel';
+                }}
+              >
+                <Dumbbell className="h-4 w-4" />
+                Sou Personal Trainer · Ir para Login PT
+              </GoldButton>
+            </div>
+          </BrandCard>
+        </div>
+      </div>
+    );
+  }
+
+  // PT login screen (Email + Password, no Google required)
+  if (!isExternalStudentPortal && !authUser) {
+    return (
+      <PtEmailSignInScreen
         loading={authBusy}
         error={authError}
-        onSignIn={handleGoogleSignIn}
+        info={authInfo}
+        isPtRoute={pathInfo.routeType === 'PT'}
+        onEmailSignIn={handleEmailSignIn}
+        onEmailSignUp={handleEmailSignUp}
+        onResetPassword={handleResetPassword}
+        onGoogleSignIn={handleGoogleSignIn}
       />
     );
   }
 
   const activeStudent = studentId ? clients.find((c) => c.id === studentId) || null : null;
+  const lockedStudentOnly = isExternalStudentPortal;
+
+  if (
+    lockedStudentOnly &&
+    (role !== 'STUDENT' || !activeStudent)
+  ) {
+    if (!dataLoaded) {
+      return (
+        <div className="min-h-screen bg-[#121214] flex items-center justify-center text-sm text-[#A1A1AA]">
+          A carregar dados do estúdio...
+        </div>
+      );
+    }
+
+    return (
+      <AuthRoleScreen
+        clients={clients}
+        userEmail={authUser?.email || ''}
+        initialRoleTab="STUDENT"
+        lockedStudentOnly
+        weekSlugLabel={pathInfo.weekSlug}
+        onSignOut={handleSignOut}
+        onEnterPt={() => setRole('PT')}
+        onEnterStudent={(cid) => {
+          localStorage.setItem('newshape_student_id', cid);
+          setStudentId(cid);
+          setRole('STUDENT');
+          if (authUser && !isStudioOwner) {
+            repo.updatePortalMemberClientId(studioUid, authUser.uid, cid).catch(() => {});
+          }
+        }}
+        onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote) => {
+          const newId = await repo.addClient(studioUid, {
+            name: fullName,
+            phone: cleanPhone,
+            notes: rgpdConsentNote,
+            newClient: true,
+          });
+          localStorage.setItem('newshape_student_id', newId);
+          setStudentId(newId);
+          setRole('STUDENT');
+          if (authUser && !isStudioOwner) {
+            repo.updatePortalMemberClientId(studioUid, authUser.uid, newId).catch(() => {});
+          }
+          showBanner('Conta criada com consentimento RGPD! Bem-vindo ao New Shape.');
+        }}
+      />
+    );
+  }
 
   if (role === 'NONE' || (role === 'STUDENT' && !activeStudent && dataLoaded)) {
     return (
       <AuthRoleScreen
         clients={clients}
-        userEmail={authUser.email || ''}
-        initialRoleTab={
-          pathInfo.routeType === 'STUDENT' || pathInfo.routeType === 'STUDENT_WEEK'
-            ? 'STUDENT'
-            : 'PT'
-        }
+        userEmail={authUser?.email || ''}
+        initialRoleTab={isStudentRoute ? 'STUDENT' : 'PT'}
         weekSlugLabel={pathInfo.weekSlug}
         onSignOut={handleSignOut}
         onEnterPt={() => setRole('PT')}
@@ -335,7 +667,7 @@ export function App() {
           setRole('STUDENT');
         }}
         onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote) => {
-          const newId = await repo.addClient(authUser.uid, {
+          const newId = await repo.addClient(studioUid, {
             name: fullName,
             phone: cleanPhone,
             notes: rgpdConsentNote,
@@ -354,7 +686,7 @@ export function App() {
     return (
       <>
         <StudentPortal
-          uid={authUser.uid}
+          uid={studioUid}
           client={activeStudent}
           weeks={weeks}
           sessions={sessions}
@@ -375,7 +707,7 @@ export function App() {
             setStudentId(null);
             setRole('NONE');
           }}
-          onSwitchToPt={() => setRole('PT')}
+          onSwitchToPt={lockedStudentOnly ? undefined : () => setRole('PT')}
           onSignOut={handleSignOut}
           onBanner={showBanner}
         />
@@ -409,7 +741,7 @@ export function App() {
       <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 border-r border-[#323238] bg-[#18181B] p-4">
         <div className="mb-6">
           <NewShapeLogo compact />
-          <p className="mt-2 truncate text-xs text-[#A1A1AA]">{authUser.email}</p>
+          <p className="mt-2 truncate text-xs text-[#A1A1AA]">{authUser?.email}</p>
         </div>
 
         <nav className="flex-1 space-y-1">
@@ -522,7 +854,7 @@ export function App() {
 
           {ptTab === 'home' && (
             <PtHomeSection
-              uid={authUser.uid}
+              uid={studioUid}
               clients={clients}
               weeks={weeks}
               activeWeek={activeWeek}
@@ -546,7 +878,7 @@ export function App() {
 
           {ptTab === 'clients' && (
             <PtClientsSection
-              uid={authUser.uid}
+              uid={studioUid}
               clients={clients}
               payments={payments}
               fidelizacoes={fidelizacoes}
@@ -569,7 +901,7 @@ export function App() {
 
           {ptTab === 'training' && (
             <PtTrainingSection
-              uid={authUser.uid}
+              uid={studioUid}
               clients={clients}
               exercises={exercises}
               workoutPlans={workoutPlans}
@@ -581,7 +913,7 @@ export function App() {
 
           {ptTab === 'nutrition' && (
             <PtNutritionSection
-              uid={authUser.uid}
+              uid={studioUid}
               clients={clients}
               foodItems={foods}
               nutritionEntries={nutritionEntries}
@@ -599,7 +931,7 @@ export function App() {
 
           {ptTab === 'management' && (
             <PtManagementSection
-              uid={authUser.uid}
+              uid={studioUid}
               clients={clients}
               payments={payments}
               fidelizacoes={fidelizacoes}

@@ -68,7 +68,7 @@ interface StudentPortalProps {
   settings: StudioSettingsRecord;
   initialWeekSlug?: string;
   onSwitchStudent: () => void;
-  onSwitchToPt: () => void;
+  onSwitchToPt?: () => void;
   onSignOut: () => void;
   onBanner: (msg: string) => void;
 }
@@ -298,14 +298,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             <Users className="h-4 w-4 text-[#EAB308]" />
             Mudar de aluno
           </button>
-          <button
-            type="button"
-            onClick={onSwitchToPt}
-            className="flex w-full items-center gap-2 rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
-          >
-            <UserCheck className="h-4 w-4 text-[#EAB308]" />
-            Vista PT
-          </button>
+          {onSwitchToPt && (
+            <button
+              type="button"
+              onClick={onSwitchToPt}
+              className="flex w-full items-center gap-2 rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
+            >
+              <UserCheck className="h-4 w-4 text-[#EAB308]" />
+              Vista PT
+            </button>
+          )}
           <button
             type="button"
             onClick={onSignOut}
@@ -330,13 +332,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             >
               {firstName}
             </button>
-            <button
-              type="button"
-              onClick={onSwitchToPt}
-              className="rounded-xl border border-[#323238] bg-[#1B1B1E] px-2.5 py-1.5 text-xs font-bold text-[#FACC15]"
-            >
-              Vista PT
-            </button>
+            {onSwitchToPt && (
+              <button
+                type="button"
+                onClick={onSwitchToPt}
+                className="rounded-xl border border-[#323238] bg-[#1B1B1E] px-2.5 py-1.5 text-xs font-bold text-[#FACC15]"
+              >
+                Vista PT
+              </button>
+            )}
             <button
               type="button"
               onClick={onSignOut}

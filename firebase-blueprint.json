@@ -248,11 +248,26 @@
         "cutoffHours": { "type": "integer" },
         "whatsappWebMode": { "type": "boolean" },
         "siteBaseUrl": { "type": "string" },
+        "studentPortalCode": { "type": "string" },
         "seeded": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "clientsCanEdit", "cutoffHours", "whatsappWebMode", "siteBaseUrl", "seeded", "createdAt", "updatedAt"]
+    },
+    "StudioMember": {
+      "title": "StudioMember",
+      "description": "Ligação autorizada de um aluno ao portal do estúdio via código de convite",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "memberUid": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "clientId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "memberUid", "inviteCode", "createdAt", "updatedAt"]
     },
     "PhysicalAssessment": {
       "title": "PhysicalAssessment",
@@ -342,6 +357,10 @@
     "/users/{userId}/physical_assessments/{assessmentId}": {
       "schema": { "$ref": "#/entities/PhysicalAssessment" },
       "description": "Avaliações físicas e evolução corporal dos alunos"
+    },
+    "/users/{userId}/portal_members/{memberUid}": {
+      "schema": { "$ref": "#/entities/StudioMember" },
+      "description": "Membros autenticados via Link do Aluno autorizado"
     }
   }
 }

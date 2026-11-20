@@ -9,12 +9,14 @@ import {
   Edit3,
   MessageSquare,
   Plus,
+  RefreshCw,
   RotateCcw,
   Share2,
   Trash2,
   Calendar,
   CheckCheck,
   Clock,
+  Link2,
 } from 'lucide-react';
 import {
   BookingRecord,
@@ -29,7 +31,10 @@ import {
 } from '../types/studio';
 import {
   buildMessageFromTemplate,
+  buildPtPortalLink,
+  buildStudentPortalLink,
   buildWhatsAppUrl,
+  DEFAULT_WEB_BASE_URL,
   formatPhoneDisplay,
   formatTimeAgo,
 } from '../data/seedCatalog';
@@ -234,6 +239,13 @@ const PorConfirmarView: React.FC<{
 
   return (
     <div className="space-y-4">
+      <PortalLinksCard
+        uid={uid}
+        settings={settings}
+        onOpenWhatsApp={onOpenWhatsApp}
+        onBanner={onBanner}
+      />
+
       {activeWeek && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#EAB308]/40 bg-[#3D3314]/70 p-4">
           <div>
@@ -281,6 +293,8 @@ const PorConfirmarView: React.FC<{
                   clientName: card.client.name,
                   sessions: card.items.map((i) => i.session),
                   week: card.week,
+                  ptUid: uid,
+                  studentPortalCode: settings.studentPortalCode,
                 });
                 await onConfirmCard(card);
                 onOpenWhatsApp(card.client.phone, msg);
@@ -290,6 +304,8 @@ const PorConfirmarView: React.FC<{
                   clientName: card.client.name,
                   sessions: [item.session],
                   week: card.week,
+                  ptUid: uid,
+                  studentPortalCode: settings.studentPortalCode,
                 });
                 await repo.removeBooking(uid, item.booking.id);
                 onBanner('Horário recusado e removido.');
@@ -300,6 +316,8 @@ const PorConfirmarView: React.FC<{
                   clientName: card.client.name,
                   sessions: [targetSession],
                   week: card.week,
+                  ptUid: uid,
+                  studentPortalCode: settings.studentPortalCode,
                 });
                 await repo.moveBooking(uid, item.booking.id, targetSession.id);
                 onBanner(`Movido para ${targetSession.dateLabel} · ${targetSession.timeLabel}`);
@@ -348,6 +366,8 @@ const PendingCardItem: React.FC<{
       clientName: card.client.name,
       sessions: card.items.map((i) => i.session),
       week: card.week,
+      ptUid: card.client.userId,
+      studentPortalCode: settings.studentPortalCode,
     }
   );
 
@@ -536,7 +556,11 @@ const SemanasView: React.FC<{
   const detailSession = detailSessionId ? sessions.find((s) => s.id === detailSessionId) || null : null;
 
   const inviteMsg = activeWeek
-    ? buildMessageFromTemplate(templates, 'CONVITE', settings.siteBaseUrl, { week: activeWeek })
+    ? buildMessageFromTemplate(templates, 'CONVITE', settings.siteBaseUrl, {
+        week: activeWeek,
+        ptUid: uid,
+        studentPortalCode: settings.studentPortalCode,
+      })
     : '';
 
   const handleDuplicatePrev = async () => {
@@ -1190,7 +1214,12 @@ const RespostasView: React.FC<{
                           templates,
                           'LEMBRETE',
                           settings.siteBaseUrl,
-                          { clientName: c.name, week: activeWeek }
+                          {
+                            clientName: c.name,
+                            week: activeWeek,
+                            ptUid: uid,
+                            studentPortalCode: settings.studentPortalCode,
+                          }
                         );
                         await repo.markClientReminded(uid, activeWeek.weekKey, c.id);
                         onOpenWhatsApp(c.phone, msg);
@@ -1241,6 +1270,17 @@ const MensagensSettingsView: React.FC<{
 
   return (
     <div className="space-y-4">
+      <PortalLinksCard
+        uid={uid}
+        settings={settings}
+        showRegenerate
+        onOpenWhatsApp={(phone, msg) => {
+          const url = buildWhatsAppUrl(phone, msg, settings.whatsappWebMode);
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }}
+        onBanner={onBanner}
+      />
+
       <div>
         <h2 className="text-xl font-bold text-[#F4F4F5]">Mensagens WhatsApp</h2>
         <p className="text-xs text-[#A1A1AA]">
@@ -1254,7 +1294,8 @@ const MensagensSettingsView: React.FC<{
           <TemplateEditorCard
             key={tpl.templateKey}
             template={tpl}
-            siteBaseUrl={settings.siteBaseUrl}
+            uid={uid}
+            settings={settings}
             activeWeekLabel={activeWeek?.label || '16–22 Nov'}
             onSave={async (body) => {
               await repo.saveMessageTemplate(uid, tpl.templateKey, body);
@@ -1317,7 +1358,7 @@ const MensagensSettingsView: React.FC<{
             <Input
               value={siteBaseUrl}
               onChange={(e) => setSiteBaseUrl(e.target.value)}
-              placeholder="https://new-shape-treinos.vercel.app"
+              placeholder={DEFAULT_WEB_BASE_URL}
             />
           </div>
 
@@ -1329,7 +1370,7 @@ const MensagensSettingsView: React.FC<{
                 clientsCanEdit,
                 cutoffHours: Math.max(0, Math.min(72, Number(cutoffHours) || 12)),
                 whatsappWebMode,
-                siteBaseUrl: siteBaseUrl.trim() || window.location.origin,
+                siteBaseUrl: siteBaseUrl.trim() || window.location.origin || DEFAULT_WEB_BASE_URL,
                 seeded: true,
               });
               onBanner('Definições guardadas!');
@@ -1343,19 +1384,122 @@ const MensagensSettingsView: React.FC<{
   );
 };
 
+const PortalLinksCard: React.FC<{
+  uid: string;
+  settings: StudioSettingsRecord;
+  showRegenerate?: boolean;
+  onOpenWhatsApp: (phone: string | null, msg: string) => void;
+  onBanner: (msg: string) => void;
+}> = ({ uid, settings, showRegenerate = false, onOpenWhatsApp, onBanner }) => {
+  const [regenerating, setRegenerating] = useState(false);
+  const ptLink = buildPtPortalLink(settings.siteBaseUrl);
+  const studentLink = buildStudentPortalLink(
+    settings.siteBaseUrl,
+    uid,
+    settings.studentPortalCode
+  );
+  const studentInviteText = `Olá! 💪 Já podes aceder ao teu Portal de Aluno New Shape (marcações, treinos, nutrição e avaliações) através deste link:\n${studentLink}\n\nEntras apenas com o teu número de telemóvel!`;
+
+  return (
+    <BrandCard highlight>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Link2 className="h-4 w-4 text-[#EAB308]" />
+          <h3 className="text-sm font-bold text-[#FACC15]">Links de Acesso (PT e Aluno)</h3>
+        </div>
+        {showRegenerate && (
+          <button
+            type="button"
+            disabled={regenerating}
+            onClick={async () => {
+              setRegenerating(true);
+              try {
+                await repo.regenerateStudentPortalCode(uid);
+                onBanner('Novo código do Link do Aluno gerado!');
+              } finally {
+                setRegenerating(false);
+              }
+            }}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#323238] bg-[#242429] px-2.5 py-1 text-[11px] font-semibold text-[#A1A1AA] hover:border-[#EAB308] hover:text-white"
+          >
+            <RefreshCw className="h-3 w-3" />
+            {regenerating ? 'A gerar...' : 'Renovar código aluno'}
+          </button>
+        )}
+      </div>
+
+      <div className="mt-3 space-y-3">
+        <div className="rounded-xl border border-[#323238] bg-[#242429]/70 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-[#F4F4F5]">Link do PT (Painel de Gestão)</p>
+              <p className="mt-0.5 truncate text-[11px] font-mono text-[#A1A1AA]">{ptLink}</p>
+            </div>
+            <SecondaryButton
+              onClick={async () => {
+                await navigator.clipboard.writeText(ptLink);
+                onBanner('Link do PT copiado!');
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copiar PT
+            </SecondaryButton>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#EAB308]/40 bg-[#242429]/80 p-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-[#FACC15]">
+              Link do Aluno (Entrada direta só com telemóvel)
+            </p>
+            <p className="mt-0.5 break-all text-[11px] font-mono text-[#F4F4F5]">
+              {settings.studentPortalCode
+                ? studentLink
+                : 'A gerar código de acesso do aluno...'}
+            </p>
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <SecondaryButton
+              disabled={!settings.studentPortalCode}
+              onClick={async () => {
+                await navigator.clipboard.writeText(studentLink);
+                onBanner('Link do Aluno copiado!');
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copiar Link Aluno
+            </SecondaryButton>
+            <GoldButton
+              disabled={!settings.studentPortalCode}
+              onClick={() => onOpenWhatsApp(null, studentInviteText)}
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              Enviar no WhatsApp
+            </GoldButton>
+          </div>
+        </div>
+      </div>
+    </BrandCard>
+  );
+};
+
 const TemplateEditorCard: React.FC<{
   template: MessageTemplateRecord;
-  siteBaseUrl: string;
+  uid: string;
+  settings: StudioSettingsRecord;
   activeWeekLabel: string;
   onSave: (body: string) => Promise<void>;
   onReset: () => Promise<void>;
-}> = ({ template, siteBaseUrl, activeWeekLabel, onSave, onReset }) => {
+}> = ({ template, uid, settings, activeWeekLabel, onSave, onReset }) => {
   const [body, setBody] = useState(template.body);
 
   const preview = body
     .replaceAll('{nome}', 'Ana')
     .replaceAll('{treinos}', '• Segunda, 16 Nov – 18h00\n• Quarta, 18 Nov – 19h00')
-    .replaceAll('{link}', `${(siteBaseUrl || window.location.origin).replace(/\/$/, '')}/s/2026-w47`)
+    .replaceAll(
+      '{link}',
+      buildStudentPortalLink(settings.siteBaseUrl, uid, settings.studentPortalCode, '2026-w47')
+    )
     .replaceAll('{semana}', activeWeekLabel);
 
   return (

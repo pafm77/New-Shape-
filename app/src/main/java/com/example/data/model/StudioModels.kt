@@ -237,7 +237,8 @@ data class StudioSettingsRecord(
     val clientsCanEdit: Boolean = true,
     val cutoffHours: Int = 12,
     val whatsappWebMode: Boolean = false,
-    val siteBaseUrl: String = "https://new-shape-treinos.vercel.app",
+    val siteBaseUrl: String = "https://newshape.vercel.app",
+    val studentPortalCode: String = "",
     val seeded: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null

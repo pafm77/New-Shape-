@@ -169,6 +169,7 @@ export interface StudioSettingsRecord {
   cutoffHours: number;
   whatsappWebMode: boolean;
   siteBaseUrl: string;
+  studentPortalCode?: string;
   seeded: boolean;
 }
 

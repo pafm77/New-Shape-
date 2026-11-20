@@ -26,6 +26,15 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isStudioMember(userId) {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/users/$(userId)/portal_members/$(request.auth.uid));
+    }
+
+    function canAccessStudio(userId) {
+      return isOwner(userId) || isStudioMember(userId);
+    }
+
     function isValidTimestamp(ts) {
       return ts is timestamp && ts <= request.time;
     }
@@ -177,6 +186,7 @@ service cloud.firestore {
              data.cutoffHours is int && data.cutoffHours >= 0 && data.cutoffHours <= 72 &&
              data.whatsappWebMode is bool &&
              data.siteBaseUrl is string && data.siteBaseUrl.size() >= 1 && data.siteBaseUrl.size() <= 300 &&
+             (!('studentPortalCode' in data) || (data.studentPortalCode is string && data.studentPortalCode.size() <= 64)) &&
              data.seeded is bool;
     }
 
@@ -201,10 +211,10 @@ service cloud.firestore {
       allow read, write: if false;
 
       match /clients/{clientId} {
-        allow get: if isOwner(userId) && isValidId(clientId);
-        allow list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(clientId) &&
-                         incoming().userId == request.auth.uid &&
+        allow get: if canAccessStudio(userId) && isValidId(clientId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(clientId) &&
+                         incoming().userId == userId &&
                          incoming().keys().hasAll(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
@@ -219,8 +229,8 @@ service cloud.firestore {
       }
 
       match /weeks/{weekId} {
-        allow get: if isOwner(userId) && isValidId(weekId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(weekId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(weekId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'weekKey', 'label', 'startDateMillis', 'published', 'createdAt', 'updatedAt']) &&
@@ -237,8 +247,8 @@ service cloud.firestore {
       }
 
       match /sessions/{sessionId} {
-        allow get: if isOwner(userId) && isValidId(sessionId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(sessionId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(sessionId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'weekKey', 'dayOfWeek', 'dateLabel', 'timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'createdAt', 'updatedAt']) &&
@@ -255,44 +265,48 @@ service cloud.firestore {
       }
 
       match /bookings/{bookingId} {
-        allow get: if isOwner(userId) && isValidId(bookingId);
-        allow list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(bookingId) &&
-                         incoming().userId == request.auth.uid &&
+        allow get: if canAccessStudio(userId) && isValidId(bookingId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(bookingId) &&
+                         incoming().userId == userId &&
+                         (isOwner(userId) || incoming().status in ['PENDING', 'ALTERED']) &&
                          incoming().keys().hasAll(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidBooking(incoming());
-        allow update: if isOwner(userId) && isValidId(bookingId) &&
+        allow update: if canAccessStudio(userId) && isValidId(bookingId) &&
                          isValidBooking(incoming()) &&
+                         (isOwner(userId) || incoming().status in ['ALTERED', 'CANCELLED']) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['sessionId', 'status', 'requestedAtMillis', 'updatedAt']);
-        allow delete: if isOwner(userId) && isValidId(bookingId);
+        allow delete: if canAccessStudio(userId) && isValidId(bookingId);
       }
 
       match /week_responses/{responseId} {
-        allow get: if isOwner(userId) && isValidId(responseId);
-        allow list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(responseId) &&
-                         incoming().userId == request.auth.uid &&
+        allow get: if canAccessStudio(userId) && isValidId(responseId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(responseId) &&
+                         incoming().userId == userId &&
+                         (isOwner(userId) || incoming().status == 'UNAVAILABLE') &&
                          incoming().keys().hasAll(['userId', 'weekKey', 'clientId', 'status', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['userId', 'weekKey', 'clientId', 'status', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidWeekResponse(incoming());
-        allow update: if isOwner(userId) && isValidId(responseId) &&
+        allow update: if canAccessStudio(userId) && isValidId(responseId) &&
                          isValidWeekResponse(incoming()) &&
+                         (isOwner(userId) || incoming().status == 'UNAVAILABLE') &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
-        allow delete: if isOwner(userId) && isValidId(responseId);
+        allow delete: if canAccessStudio(userId) && isValidId(responseId);
       }
 
       match /payments/{paymentId} {
-        allow get: if isOwner(userId) && isValidId(paymentId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(paymentId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(paymentId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientId', 'monthYear', 'monthLabel', 'amountEur', 'paid', 'paidAtMillis', 'note', 'createdAt', 'updatedAt']) &&
@@ -309,8 +323,8 @@ service cloud.firestore {
       }
 
       match /fidelizacoes/{fidelizacaoId} {
-        allow get: if isOwner(userId) && isValidId(fidelizacaoId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(fidelizacaoId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(fidelizacaoId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientId', 'durationMonths', 'startDateMillis', 'endDateMillis', 'notes', 'createdAt', 'updatedAt']) &&
@@ -327,8 +341,8 @@ service cloud.firestore {
       }
 
       match /exercises/{exerciseId} {
-        allow get: if isOwner(userId) && isValidId(exerciseId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(exerciseId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(exerciseId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'name', 'muscleGroup', 'equipment', 'instructions', 'custom', 'createdAt', 'updatedAt']) &&
@@ -345,8 +359,8 @@ service cloud.firestore {
       }
 
       match /workout_plans/{planId} {
-        allow get: if isOwner(userId) && isValidId(planId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(planId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(planId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientId', 'title', 'splitLabel', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
@@ -363,8 +377,8 @@ service cloud.firestore {
       }
 
       match /workout_plan_items/{itemId} {
-        allow get: if isOwner(userId) && isValidId(itemId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(itemId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(itemId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
@@ -381,8 +395,8 @@ service cloud.firestore {
       }
 
       match /foods/{foodId} {
-        allow get: if isOwner(userId) && isValidId(foodId);
-        allow list: if isOwner(userId);
+        allow get: if canAccessStudio(userId) && isValidId(foodId);
+        allow list: if canAccessStudio(userId);
         allow create: if isOwner(userId) && isValidId(foodId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'name', 'category', 'kcalPer100g', 'proteinPer100g', 'carbsPer100g', 'fatPer100g', 'custom', 'createdAt', 'updatedAt']) &&
@@ -399,28 +413,29 @@ service cloud.firestore {
       }
 
       match /nutrition_entries/{entryId} {
-        allow get: if isOwner(userId) && isValidId(entryId);
-        allow list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(entryId) &&
-                         incoming().userId == request.auth.uid &&
+        allow get: if canAccessStudio(userId) && isValidId(entryId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(entryId) &&
+                         incoming().userId == userId &&
                          incoming().keys().hasAll(['userId', 'clientId', 'mealType', 'foodId', 'foodName', 'grams', 'kcal', 'protein', 'carbs', 'fat', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['userId', 'clientId', 'mealType', 'foodId', 'foodName', 'grams', 'kcal', 'protein', 'carbs', 'fat', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidNutritionEntry(incoming());
-        allow update: if isOwner(userId) && isValidId(entryId) &&
+        allow update: if canAccessStudio(userId) && isValidId(entryId) &&
                          isValidNutritionEntry(incoming()) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['grams', 'kcal', 'protein', 'carbs', 'fat', 'updatedAt']);
-        allow delete: if isOwner(userId) && isValidId(entryId);
+        allow delete: if canAccessStudio(userId) && isValidId(entryId);
       }
 
       match /chat_messages/{messageId} {
-        allow get: if isOwner(userId) && isValidId(messageId);
-        allow list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(messageId) &&
-                         incoming().userId == request.auth.uid &&
+        allow get: if canAccessStudio(userId) && isValidId(messageId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(messageId) &&
+                         incoming().userId == userId &&
+                         (isOwner(userId) || incoming().senderRole == 'STUDENT') &&
                          incoming().keys().hasAll(['userId', 'clientId', 'senderRole', 'text', 'timestampMillis', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['userId', 'clientId', 'senderRole', 'text', 'timestampMillis', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
@@ -448,12 +463,12 @@ service cloud.firestore {
       }
 
       match /settings/{settingId} {
-        allow get: if isOwner(userId) && isValidId(settingId);
+        allow get: if canAccessStudio(userId) && isValidId(settingId);
         allow list: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(settingId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidStudioSettings(incoming());
         allow update: if isOwner(userId) && isValidId(settingId) &&
@@ -461,26 +476,52 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(settingId);
       }
 
       match /physical_assessments/{assessmentId} {
-        allow get: if isOwner(userId) && isValidId(assessmentId);
-        allow list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(assessmentId) &&
-                         incoming().userId == request.auth.uid &&
+        allow get: if canAccessStudio(userId) && isValidId(assessmentId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(assessmentId) &&
+                         incoming().userId == userId &&
                          incoming().keys().hasAll(['userId', 'clientId', 'dateMillis', 'weightKg', 'ageYears', 'heightCm', 'sex', 'bodyFatPct', 'muscleMassKg', 'visceralFat', 'bmi', 'bmrKcal', 'notes', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['userId', 'clientId', 'dateMillis', 'weightKg', 'ageYears', 'heightCm', 'sex', 'bodyFatPct', 'muscleMassKg', 'visceralFat', 'bmi', 'bmrKcal', 'notes', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidPhysicalAssessment(incoming());
-        allow update: if isOwner(userId) && isValidId(assessmentId) &&
+        allow update: if canAccessStudio(userId) && isValidId(assessmentId) &&
                          isValidPhysicalAssessment(incoming()) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['dateMillis', 'weightKg', 'ageYears', 'heightCm', 'sex', 'bodyFatPct', 'muscleMassKg', 'visceralFat', 'bmi', 'bmrKcal', 'notes', 'updatedAt']);
-        allow delete: if isOwner(userId) && isValidId(assessmentId);
+        allow delete: if canAccessStudio(userId) && isValidId(assessmentId);
+      }
+
+      match /portal_members/{memberUid} {
+        allow get: if isOwner(userId) || (isSignedIn() && request.auth.uid == memberUid);
+        allow list: if isOwner(userId);
+        allow create: if isSignedIn() && request.auth.uid == memberUid && isValidId(memberUid) &&
+                         incoming().userId == userId &&
+                         incoming().memberUid == request.auth.uid &&
+                         incoming().keys().hasAll(['userId', 'memberUid', 'inviteCode', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'memberUid', 'inviteCode', 'clientId', 'createdAt', 'updatedAt']) &&
+                         incoming().inviteCode is string && incoming().inviteCode.size() >= 8 && incoming().inviteCode.size() <= 64 &&
+                         (!('clientId' in incoming()) || (incoming().clientId is string && incoming().clientId.size() <= 128)) &&
+                         exists(/databases/$(database)/documents/users/$(userId)/settings/studio) &&
+                         get(/databases/$(database)/documents/users/$(userId)/settings/studio).data.studentPortalCode is string &&
+                         get(/databases/$(database)/documents/users/$(userId)/settings/studio).data.studentPortalCode.size() >= 8 &&
+                         incoming().inviteCode == get(/databases/$(database)/documents/users/$(userId)/settings/studio).data.studentPortalCode &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt);
+        allow update: if isSignedIn() && request.auth.uid == memberUid &&
+                         incoming().userId == existing().userId &&
+                         incoming().memberUid == existing().memberUid &&
+                         incoming().inviteCode == existing().inviteCode &&
+                         incoming().createdAt == existing().createdAt &&
+                         (!('clientId' in incoming()) || (incoming().clientId is string && incoming().clientId.size() <= 128)) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['clientId', 'updatedAt']);
+        allow delete: if isOwner(userId) || (isSignedIn() && request.auth.uid == memberUid);
       }
     }
   }
