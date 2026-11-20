@@ -1519,6 +1519,16 @@ const PortalLinksCard: React.FC<{
               <Share2 className="h-3.5 w-3.5" />
               Enviar no WhatsApp
             </GoldButton>
+            <a
+              href="/guia-do-aluno-new-shape.pdf"
+              download="Guia-do-Aluno-New-Shape.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-[#323238] bg-[#242429] px-4 py-2.5 text-xs sm:text-sm font-semibold text-[#F4F4F5] transition hover:border-[#EAB308] hover:text-[#FACC15]"
+            >
+              <Download className="h-3.5 w-3.5 text-[#EAB308]" />
+              Guia do Aluno (PDF)
+            </a>
           </div>
         </div>
       </div>
