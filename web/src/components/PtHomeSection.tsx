@@ -376,10 +376,10 @@ const PendingCardItem: React.FC<{
           const isMoveOpen = moveOpenId === item.booking.id;
           const availableTargets = weekSessions.filter((s) => {
             if (s.id === item.session.id) return false;
-            const taken = allBookings.filter(
-              (b) => b.sessionId === s.id && b.status !== 'CANCELLED'
+            const confirmedTaken = allBookings.filter(
+              (b) => b.sessionId === s.id && b.status === 'CONFIRMED'
             ).length;
-            return s.capacity - taken > 0;
+            return s.capacity - confirmedTaken > 0;
           });
 
           return (
@@ -431,13 +431,13 @@ const PendingCardItem: React.FC<{
                         className="w-full rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs text-[#F4F4F5] outline-none focus:border-[#EAB308]"
                       >
                         {availableTargets.map((t) => {
-                          const taken = allBookings.filter(
-                            (b) => b.sessionId === t.id && b.status !== 'CANCELLED'
+                          const confirmedTaken = allBookings.filter(
+                            (b) => b.sessionId === t.id && b.status === 'CONFIRMED'
                           ).length;
                           return (
                             <option key={t.id} value={t.id}>
-                              {t.dateLabel} – {t.timeLabel.replace(':', 'h')} ({t.capacity - taken}{' '}
-                              vagas)
+                              {t.dateLabel} – {t.timeLabel.replace(':', 'h')} (
+                              {t.capacity - confirmedTaken} vagas)
                             </option>
                           );
                         })}
@@ -682,10 +682,13 @@ const SemanasView: React.FC<{
             const sBookings = bookings.filter(
               (b) => b.sessionId === session.id && b.status !== 'CANCELLED'
             );
+            const confirmedCount = sBookings.filter(
+              (b) => b.status === 'CONFIRMED'
+            ).length;
             const pendingCount = sBookings.filter(
               (b) => b.status === 'PENDING' || b.status === 'ALTERED'
             ).length;
-            const isFull = sBookings.length >= session.capacity;
+            const isFull = confirmedCount >= session.capacity;
 
             return (
               <div
@@ -712,7 +715,7 @@ const SemanasView: React.FC<{
                   onClick={(e) => e.stopPropagation()}
                 >
                   <StatusPill tone={isFull ? 'red' : 'gold'}>
-                    {sBookings.length}/{session.capacity}
+                    {confirmedCount}/{session.capacity}
                   </StatusPill>
                   <button
                     type="button"
@@ -1002,11 +1005,13 @@ const SessionDetailModal: React.FC<{
   const availableClients = clients.filter((c) => c.active && !enrolledIds.has(c.id));
   const [selectedClientId, setSelectedClientId] = useState(availableClients[0]?.id || '');
 
+  const confirmedCount = bookings.filter((b) => b.status === 'CONFIRMED').length;
+
   return (
     <Modal
       open
       title={`${session.dateLabel} · ${session.timeLabel.replace(':', 'h')}`}
-      subtitle={`${bookings.length}/${session.capacity} inscritos · ${session.durationMinutes} min`}
+      subtitle={`${confirmedCount}/${session.capacity} vagas preenchidas (${bookings.length} pedidos) · ${session.durationMinutes} min`}
       onClose={onClose}
     >
       <div className="space-y-4">

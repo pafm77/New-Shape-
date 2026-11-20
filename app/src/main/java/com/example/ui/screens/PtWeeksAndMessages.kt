@@ -219,9 +219,10 @@ fun SemanasSection(
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val isFull = sessionBookings.size >= session.capacity
+                            val confirmedCount = sessionBookings.count { it.status == BookingStatus.CONFIRMED.name }
+                            val isFull = confirmedCount >= session.capacity
                             StatusPill(
-                                text = "${sessionBookings.size}/${session.capacity}",
+                                text = "$confirmedCount/${session.capacity}",
                                 textColor = if (isFull) DangerRed else NewShapeGoldBright,
                                 containerColor = if (isFull) DangerRedContainer else NewShapeGoldMuted
                             )
@@ -519,10 +520,11 @@ private fun SessionDetailDialog(
         onDismissRequest = onDismiss,
         containerColor = CharcoalSurface,
         title = {
+            val confirmedCount = bookings.count { it.status == BookingStatus.CONFIRMED.name }
             Column {
                 Text("${session.dateLabel} · ${session.timeLabel.replace(":", "h")}", color = TextPrimaryDark)
                 Text(
-                    "${bookings.size}/${session.capacity} inscritos · ${session.durationMinutes} min",
+                    "$confirmedCount/${session.capacity} vagas preenchidas (${bookings.size} pedidos) · ${session.durationMinutes} min",
                     style = MaterialTheme.typography.bodySmall,
                     color = NewShapeGold
                 )

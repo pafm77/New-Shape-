@@ -200,6 +200,27 @@ const FinanceSubTab: React.FC<{
     new Set(paidPayments.map((p) => p.monthYear).filter(Boolean)).size
   );
   const monthlyAvg = totalRevenue / activeMonthsCount;
+
+  const studentMonthPairsCount = useMemo(() => {
+    const keys = new Set(
+      paidPayments.map((p) => `${p.clientId}__${p.monthYear}`)
+    );
+    return keys.size;
+  }, [paidPayments]);
+
+  const avgMonthlyPerStudent =
+    studentMonthPairsCount > 0 ? totalRevenue / studentMonthPairsCount : 0;
+
+  const currentMonthUniqueStudents = useMemo(
+    () => new Set(currentMonthPayments.map((p) => p.clientId)).size,
+    [currentMonthPayments]
+  );
+
+  const currentMonthAvgPerStudent =
+    currentMonthUniqueStudents > 0
+      ? currentMonthRevenue / currentMonthUniqueStudents
+      : 0;
+
   const maxBucket = Math.max(100, ...monthBuckets.map((b) => b.total));
 
   const groupedByMethod = useMemo(() => {
@@ -241,7 +262,7 @@ const FinanceSubTab: React.FC<{
         </GoldButton>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <BrandCard highlight>
           <p className="text-xs text-[#A1A1AA]">Faturação ({currentMonthLabel})</p>
           <p className="mt-1 text-2xl font-extrabold text-[#FACC15]">
@@ -261,13 +282,24 @@ const FinanceSubTab: React.FC<{
           </p>
         </BrandCard>
         <BrandCard>
+          <p className="text-xs text-[#A1A1AA]">Média Mensal / Aluno</p>
+          <p className="mt-1 text-2xl font-extrabold text-[#60A5FA]">
+            €{avgMonthlyPerStudent.toFixed(2)}
+          </p>
+          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+            {currentMonthUniqueStudents > 0
+              ? `Este mês: €${currentMonthAvgPerStudent.toFixed(2)} (${currentMonthUniqueStudents} al.)`
+              : `${studentMonthPairsCount} mensalidade(s)/aluno`}
+          </p>
+        </BrandCard>
+        <BrandCard>
           <p className="text-xs text-[#A1A1AA]">Mensalidades Pagas</p>
           <p className="mt-1 text-2xl font-extrabold text-[#22C55E]">
             {paidPayments.length}
           </p>
           <p className="mt-0.5 text-[11px] text-[#A1A1AA]">1 por mês de fidelização</p>
         </BrandCard>
-        <BrandCard>
+        <BrandCard className="col-span-2 lg:col-span-1">
           <p className="text-xs text-[#A1A1AA]">Total Faturação</p>
           <p className="mt-1 text-2xl font-extrabold text-[#FACC15]">
             €{totalRevenue.toFixed(2)}

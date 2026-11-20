@@ -83,28 +83,34 @@ fun StudentMainScaffold(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                NewShapeLogo(compact = true)
-                                Column {
-                                    Text("Olá, $firstName! 👋", style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
-                                    Text(
-                                        text = "Não és tu?",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = NewShapeGold,
-                                        modifier = Modifier.clickable { viewModel.backToRoleSelector() }
-                                    )
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            NewShapeLogo(compact = true)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 TextButton(
                                     onClick = { viewModel.enterPtMode() },
                                     modifier = Modifier.testTag("switch_to_pt_btn")
                                 ) {
-                                    Icon(Icons.Default.SwapHoriz, contentDescription = "Vista PT", tint = NewShapeGold, modifier = Modifier.size(18.dp))
+                                    Icon(
+                                        Icons.Default.SwapHoriz,
+                                        contentDescription = "Vista PT",
+                                        tint = NewShapeGold,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                     Spacer(Modifier.width(4.dp))
                                     Text("PT", color = NewShapeGold, fontWeight = FontWeight.Bold)
                                 }
-                                IconButton(onClick = onSignOut) {
+                                IconButton(
+                                    onClick = { viewModel.backToRoleSelector() },
+                                    modifier = Modifier.testTag("student_role_selector_btn")
+                                ) {
+                                    Icon(Icons.Default.SwitchAccount, contentDescription = "Trocar perfil", tint = TextSecondaryDark)
+                                }
+                                IconButton(
+                                    onClick = onSignOut,
+                                    modifier = Modifier.testTag("student_sign_out_btn")
+                                ) {
                                     Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Terminar sessão Google", tint = TextSecondaryDark)
                                 }
                             }
@@ -112,8 +118,7 @@ fun StudentMainScaffold(
 
                         state.statusBannerMessage?.let { msg ->
                             Surface(
-                                color = ConfirmedGreenContainer,
-                                border = BorderStroke(1.dp, ConfirmedGreen),
+                                color = ElevatedCharcoal,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
@@ -122,9 +127,9 @@ fun StudentMainScaffold(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(msg, style = MaterialTheme.typography.bodySmall, color = ConfirmedGreen, modifier = Modifier.weight(1f))
+                                    Text(msg, style = MaterialTheme.typography.bodySmall, color = NewShapeGoldBright, modifier = Modifier.weight(1f))
                                     IconButton(onClick = { viewModel.clearBanner() }, modifier = Modifier.size(32.dp)) {
-                                        Icon(Icons.Default.Close, contentDescription = "Fechar", tint = ConfirmedGreen, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Close, contentDescription = "Fechar aviso", tint = TextSecondaryDark, modifier = Modifier.size(16.dp))
                                     }
                                 }
                             }
@@ -214,6 +219,7 @@ private fun StudentBookingScreen(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val firstName = student.name.trim().split(" ").firstOrNull().orEmpty()
     val publishedWeeks = remember(state.weeks) { state.weeks.filter { it.published } }
     var weekIndex by remember(publishedWeeks.size) { mutableIntStateOf(0) }
     val currentWeek = publishedWeeks.getOrNull(weekIndex.coerceIn(0, (publishedWeeks.size - 1).coerceAtLeast(0)))
@@ -246,6 +252,13 @@ private fun StudentBookingScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            Column {
+                Text("Olá, $firstName! 👋", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                Text("Escolhe os teus treinos da semana", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            }
+        }
+
         if (publishedWeeks.isEmpty()) {
             item {
                 EmptyStateBox(
@@ -272,7 +285,7 @@ private fun StudentBookingScreen(
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Semana anterior", tint = if (weekIndex > 0) NewShapeGold else TextSecondaryDark)
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Escolhe os teus treinos", style = MaterialTheme.typography.labelSmall, color = NewShapeGold)
+                        Text("Semana", style = MaterialTheme.typography.labelSmall, color = NewShapeGold)
                         Text(currentWeek?.label ?: "", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
                     }
                     IconButton(
@@ -329,7 +342,7 @@ private fun StudentBookingScreen(
                             )
                         }
                         StatusPill(
-                            text = if (anyPending) "Pendente" else "Confirmado",
+                            text = if (anyPending) "Por confirmar" else "Confirmado",
                             textColor = if (anyPending) PendingAmber else ConfirmedGreen,
                             containerColor = ObsidianBg.copy(alpha = 0.5f)
                         )
@@ -338,16 +351,16 @@ private fun StudentBookingScreen(
             }
         }
 
-        // Session Cards
+        // Session Cards (No vacancy numbers exposed to students; slots fill only on PT confirmation)
         items(weekSessions, key = { it.id }) { session ->
-            val sessionBookings = state.bookings.filter {
-                it.sessionId == session.id && it.status != BookingStatus.CANCELLED.name
+            val confirmedCount = state.bookings.count {
+                it.sessionId == session.id && it.status == BookingStatus.CONFIRMED.name
             }
-            val spotsLeft = (session.capacity - sessionBookings.size).coerceAtLeast(0)
+            val isFull = confirmedCount >= session.capacity
             val isSelected = session.id in selectedSessionIds
             val isPastCutoff = session.startMillis > 0 && (session.startMillis - nowMs) < cutoffMs
             val existingForSession = existingBookings.find { it.sessionId == session.id }
-            val isFullForNew = spotsLeft <= 0 && !isSelected
+            val isFullForNew = isFull && !isSelected
             val canToggle = canEditExisting && !isPastCutoff && !isFullForNew
 
             Surface(
@@ -394,15 +407,15 @@ private fun StudentBookingScreen(
                         if (existingForSession != null) {
                             val conf = existingForSession.status == BookingStatus.CONFIRMED.name
                             StatusPill(
-                                text = if (conf) "Confirmado" else "Pendente",
+                                text = if (conf) "Confirmado" else "Por confirmar",
                                 textColor = if (conf) ConfirmedGreen else PendingAmber,
                                 containerColor = if (conf) ConfirmedGreenContainer else PendingAmberContainer
                             )
                         } else {
                             StatusPill(
-                                text = if (spotsLeft == 0) "Lotado" else "$spotsLeft vagas",
-                                textColor = if (spotsLeft == 0) DangerRed else TextPrimaryDark,
-                                containerColor = ElevatedCharcoal
+                                text = if (isFull) "Esgotado" else "Disponível",
+                                textColor = if (isFull) DangerRed else TextPrimaryDark,
+                                containerColor = if (isFull) DangerRedContainer else ElevatedCharcoal
                             )
                         }
                         Icon(

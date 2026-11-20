@@ -276,10 +276,10 @@ private fun PendingConfirmationCardView(
             val availableTargets = remember(allWeekSessions, allBookings, item.session.id) {
                 allWeekSessions.filter { s ->
                     if (s.id == item.session.id) return@filter false
-                    val bookedCount = allBookings.count {
-                        it.sessionId == s.id && it.status != BookingStatus.CANCELLED.name
+                    val confirmedCount = allBookings.count {
+                        it.sessionId == s.id && it.status == BookingStatus.CONFIRMED.name
                     }
-                    s.capacity - bookedCount > 0
+                    s.capacity - confirmedCount > 0
                 }
             }
 
@@ -332,10 +332,10 @@ private fun PendingConfirmationCardView(
                                 )
                             } else {
                                 availableTargets.forEach { target ->
-                                    val bookedCount = allBookings.count {
-                                        it.sessionId == target.id && it.status != BookingStatus.CANCELLED.name
+                                    val confirmedCount = allBookings.count {
+                                        it.sessionId == target.id && it.status == BookingStatus.CONFIRMED.name
                                     }
-                                    val spots = (target.capacity - bookedCount).coerceAtLeast(0)
+                                    val spots = (target.capacity - confirmedCount).coerceAtLeast(0)
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier

@@ -143,6 +143,25 @@ data class StudioUiState(
             val distinctMonths = paid.map { it.monthYear }.distinct().size.coerceAtLeast(1)
             return totalRevenueEur / distinctMonths
         }
+
+    val avgMonthlyPerStudentEur: Double
+        get() {
+            val paid = payments.filter { it.paid }
+            if (paid.isEmpty()) return 0.0
+            val studentMonthPairs = paid.map { "${it.clientId}__${it.monthYear}" }.distinct().size.coerceAtLeast(1)
+            return totalRevenueEur / studentMonthPairs
+        }
+
+    val currentMonthUniqueStudentsCount: Int
+        get() = payments.filter { it.paid && it.monthYear == currentMonthYear }
+            .map { it.clientId }
+            .distinct()
+            .size
+
+    val currentMonthAvgPerStudentEur: Double
+        get() = if (currentMonthUniqueStudentsCount > 0) {
+            currentMonthRevenueEur / currentMonthUniqueStudentsCount
+        } else 0.0
 }
 
 class NewShapeViewModel(
@@ -751,13 +770,14 @@ class NewShapeViewModel(
         val sb = StringBuilder("Dia,Hora,Duração,Vagas,Aluno,Telemóvel,Estado\n")
         for (session in weekSessions) {
             val sessionBookings = data.bookings.filter { it.sessionId == session.id && it.status != BookingStatus.CANCELLED.name }
+            val confirmedCount = sessionBookings.count { it.status == BookingStatus.CONFIRMED.name }
             if (sessionBookings.isEmpty()) {
                 sb.append("\"${session.dateLabel}\",${session.timeLabel},${session.durationMinutes}m,0/${session.capacity},\"(Sem inscritos)\",,\n")
             } else {
                 for (b in sessionBookings) {
                     val c = clientMap[b.clientId]
                     val statusLabel = if (b.status == BookingStatus.CONFIRMED.name) "Confirmado" else "Pendente"
-                    sb.append("\"${session.dateLabel}\",${session.timeLabel},${session.durationMinutes}m,${sessionBookings.size}/${session.capacity},\"${c?.name.orEmpty()}\",${c?.phone.orEmpty()},$statusLabel\n")
+                    sb.append("\"${session.dateLabel}\",${session.timeLabel},${session.durationMinutes}m,${confirmedCount}/${session.capacity},\"${c?.name.orEmpty()}\",${c?.phone.orEmpty()},$statusLabel\n")
                 }
             }
         }

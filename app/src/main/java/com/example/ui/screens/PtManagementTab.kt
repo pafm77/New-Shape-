@@ -149,7 +149,7 @@ private fun FinancesSection(
             }
         }
 
-        // KPI Metric Cards (Current Month + Monthly Average + Count + Total)
+        // KPI Metric Cards (Current Month + Monthly Average + Per-Student Monthly Average + Count + Total)
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -168,6 +168,17 @@ private fun FinancesSection(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                FinanceMetricCard(
+                    title = "Média Mensal / Aluno",
+                    value = "€${String.format("%.2f", state.avgMonthlyPerStudentEur)}",
+                    subtitle = if (state.currentMonthUniqueStudentsCount > 0) {
+                        "${state.currentMonthLabel}: €${String.format("%.2f", state.currentMonthAvgPerStudentEur)} (${state.currentMonthUniqueStudentsCount} alunos)"
+                    } else {
+                        "média por aluno / mês"
+                    },
+                    accent = NewShapeGoldBright,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     FinanceMetricCard(
                         title = "Mensalidades Pagas",
