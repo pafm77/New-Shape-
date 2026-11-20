@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#121214" />
+  <rect x="0" y="0" width="64" height="7" rx="3" fill="#EAB308" />
+  <defs>
+    <clipPath id="fav-above">
+      <polygon points="0,0 64,0 64,41 0,45" />
+    </clipPath>
+    <clipPath id="fav-below">
+      <polygon points="0,45 64,41 64,64 0,64" />
+    </clipPath>
+  </defs>
+  <text
+    x="11"
+    y="25"
+    font-family="Georgia, serif"
+    font-weight="900"
+    font-size="14"
+    fill="#FACC15"
+    letter-spacing="-0.3"
+  >
+    new
+  </text>
+  <text
+    x="10"
+    y="52"
+    font-family="Georgia, serif"
+    font-weight="900"
+    font-size="38"
+    fill="#FACC15"
+    clip-path="url(#fav-above)"
+  >
+    ns
+  </text>
+  <text
+    x="10"
+    y="52"
+    font-family="Georgia, serif"
+    font-weight="900"
+    font-size="38"
+    fill="none"
+    stroke="#FACC15"
+    stroke-width="1.5"
+    clip-path="url(#fav-below)"
+  >
+    ns
+  </text>
+  <line
+    x1="7"
+    y1="44.5"
+    x2="57"
+    y2="41.2"
+    stroke="#FACC15"
+    stroke-width="2"
+    stroke-linecap="round"
+  />
+</svg>

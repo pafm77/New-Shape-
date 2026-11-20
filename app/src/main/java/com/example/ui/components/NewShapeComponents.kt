@@ -13,14 +13,26 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -29,64 +41,131 @@ import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.ceil
+import kotlin.math.max
 
 /**
- * Recreates the New Shape serif stacked wordmark with the signature diagonal cut line across "shape"
- * matching the official brand guide PDF.
+ * Recreates the official New Shape stacked serif wordmark ("new" over "shape")
+ * where "shape" is sliced by a tilted gold line — solid gold above the cut and outlined gold below.
  */
 @Composable
 fun NewShapeLogo(
     modifier: Modifier = Modifier,
     compact: Boolean = false
 ) {
-    val newSize: TextUnit = if (compact) 11.sp else 17.sp
-    val shapeSize: TextUnit = if (compact) 21.sp else 34.sp
-    val lineWidth: Dp = if (compact) 84.dp else 134.dp
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
 
-    Box(modifier = modifier) {
-        Column(horizontalAlignment = Alignment.Start) {
-            Text(
-                text = "new",
-                fontFamily = PlayfairDisplayFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = newSize,
-                lineHeight = newSize,
-                color = NewShapeGoldBright,
-                modifier = Modifier.padding(start = 2.dp)
-            )
-            Box(contentAlignment = Alignment.CenterStart) {
-                Text(
-                    text = "shape",
-                    fontFamily = PlayfairDisplayFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = shapeSize,
-                    lineHeight = shapeSize,
-                    letterSpacing = (-0.8).sp,
-                    color = NewShapeGold,
-                    modifier = Modifier.offset(y = (-4).dp)
-                )
-                Canvas(
-                    modifier = Modifier
-                        .width(lineWidth)
-                        .height(if (compact) 20.dp else 32.dp)
-                ) {
-                    drawLine(
-                        color = ObsidianBg,
-                        start = Offset(0f, size.height * 0.62f),
-                        end = Offset(size.width, size.height * 0.42f),
-                        strokeWidth = if (compact) 2.2.dp.toPx() else 3.2.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                    drawLine(
-                        color = NewShapeGoldBright,
-                        start = Offset(0f, size.height * 0.64f),
-                        end = Offset(size.width, size.height * 0.44f),
-                        strokeWidth = if (compact) 1.dp.toPx() else 1.4.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
-            }
+    val newSize: TextUnit = if (compact) 11.sp else 17.sp
+    val shapeSize: TextUnit = if (compact) 23.sp else 38.sp
+
+    val newStyle = remember(newSize) {
+        TextStyle(
+            fontFamily = PlayfairDisplayFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = newSize,
+            letterSpacing = (-0.2).sp
+        )
+    }
+    val shapeStyle = remember(shapeSize) {
+        TextStyle(
+            fontFamily = PlayfairDisplayFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = shapeSize,
+            letterSpacing = (-1.1).sp
+        )
+    }
+
+    val newLayout = remember(textMeasurer, newStyle) {
+        textMeasurer.measure(text = "new", style = newStyle)
+    }
+    val shapeLayout = remember(textMeasurer, shapeStyle) {
+        textMeasurer.measure(text = "shape", style = shapeStyle)
+    }
+
+    val (widthDp, heightDp, shapeTopPx) = remember(newLayout, shapeLayout, compact, density) {
+        with(density) {
+            val gapPx = if (compact) 1.5.dp.toPx() else 2.5.dp.toPx()
+            val shapeSizePx = shapeSize.toPx()
+            val ascenderOffset = shapeLayout.firstBaseline - shapeSizePx * 0.72f
+            val topOffset = max(0f, newLayout.firstBaseline + gapPx - ascenderOffset)
+            val totalW = max(shapeLayout.size.width, newLayout.size.width) + 6.dp.toPx()
+            val totalH = topOffset + shapeLayout.size.height + 2.dp.toPx()
+            Triple(ceil(totalW).toInt().toDp(), ceil(totalH).toInt().toDp(), topOffset)
         }
+    }
+
+    Canvas(
+        modifier = modifier
+            .size(widthDp, heightDp)
+            .semantics { contentDescription = "New Shape" }
+    ) {
+        val shapeSizePx = shapeSize.toPx()
+        val xHeightPx = shapeSizePx * 0.48f
+        val baselineY = shapeTopPx + shapeLayout.firstBaseline
+
+        val cutYLeft = baselineY - xHeightPx * 0.28f
+        val cutYRight = baselineY - xHeightPx * 0.46f
+
+        val outlineStroke = if (compact) 0.9.dp.toPx() else 1.4.dp.toPx()
+        val slashStroke = if (compact) 1.1.dp.toPx() else 1.7.dp.toPx()
+        val slope = (cutYRight - cutYLeft) / max(1f, size.width)
+        val yAtZero = cutYLeft - slope * 0f
+        val yAtFarLeft = cutYLeft + slope * (-8f)
+        val yAtFarRight = cutYLeft + slope * (size.width + 8f)
+
+        // 1. "new" wordmark
+        drawText(
+            textLayoutResult = newLayout,
+            color = NewShapeGoldBright,
+            topLeft = Offset(1.dp.toPx(), 0f)
+        )
+
+        // 2. Top half of "shape": solid gold fill above diagonal cut
+        val abovePath = Path().apply {
+            moveTo(-8f, -8f)
+            lineTo(size.width + 8f, -8f)
+            lineTo(size.width + 8f, yAtFarRight)
+            lineTo(-8f, yAtFarLeft)
+            close()
+        }
+        clipPath(abovePath) {
+            drawText(
+                textLayoutResult = shapeLayout,
+                color = NewShapeGoldBright,
+                topLeft = Offset(0f, shapeTopPx),
+                drawStyle = Fill
+            )
+        }
+
+        // 3. Bottom half of "shape": hollow gold outline below diagonal cut
+        val belowPath = Path().apply {
+            moveTo(-8f, yAtFarLeft)
+            lineTo(size.width + 8f, yAtFarRight)
+            lineTo(size.width + 8f, size.height + 8f)
+            lineTo(-8f, size.height + 8f)
+            close()
+        }
+        clipPath(belowPath) {
+            drawText(
+                textLayoutResult = shapeLayout,
+                color = NewShapeGoldBright,
+                topLeft = Offset(0f, shapeTopPx),
+                drawStyle = Stroke(
+                    width = outlineStroke,
+                    join = StrokeJoin.Round
+                )
+            )
+        }
+
+        // 4. Diagonal gold slash line along the cut seam
+        drawLine(
+            color = NewShapeGoldBright,
+            start = Offset(-1.dp.toPx(), yAtZero - slope * 1.dp.toPx()),
+            end = Offset(size.width - 1.dp.toPx(), cutYRight),
+            strokeWidth = slashStroke,
+            cap = StrokeCap.Round
+        )
     }
 }
 
