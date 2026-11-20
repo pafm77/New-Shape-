@@ -267,12 +267,20 @@ test("Owner can create and partially update Client, Week, Session, Booking, Paym
     aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").set({
       userId: ALICE_UID,
       clientsCanEdit: true,
-      cutoffHours: 12,
+      cutoffHours: 0,
+      cutoffMinutes: 15,
       whatsappWebMode: false,
-      siteBaseUrl: "https://new-shape-treinos.vercel.app",
+      siteBaseUrl: "https://newshape.vercel.app",
       seeded: true,
       createdAt: created,
       updatedAt: created,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").update({
+      cutoffMinutes: 30,
+      cutoffHours: 0,
+      updatedAt: updated,
     })
   );
 

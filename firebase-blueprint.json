@@ -246,6 +246,7 @@
         "userId": { "type": "string" },
         "clientsCanEdit": { "type": "boolean" },
         "cutoffHours": { "type": "integer" },
+        "cutoffMinutes": { "type": "integer" },
         "whatsappWebMode": { "type": "boolean" },
         "siteBaseUrl": { "type": "string" },
         "studentPortalCode": { "type": "string" },

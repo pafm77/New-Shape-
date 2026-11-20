@@ -204,13 +204,20 @@ class FirestoreStudioRepository(
                 batch.commit().await()
             }
             val existingCode = settingsSnap.getString("studentPortalCode").orEmpty()
-            if (existingCode.length < 8) {
-                settingsRef.update(
-                    mapOf(
-                        "studentPortalCode" to generatePortalCode(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
+            val missingCode = existingCode.length < 8
+            val missingCutoff = !settingsSnap.contains("cutoffMinutes")
+            if (missingCode || missingCutoff) {
+                val updates = mutableMapOf<String, Any>(
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                if (missingCode) {
+                    updates["studentPortalCode"] = generatePortalCode()
+                }
+                if (missingCutoff) {
+                    updates["cutoffMinutes"] = 15
+                    updates["cutoffHours"] = 0
+                }
+                settingsRef.update(updates).await()
             }
             Result.success(Unit)
         } else {
@@ -563,7 +570,8 @@ class FirestoreStudioRepository(
             writes += settingsRef to mapOf(
                 "userId" to uid,
                 "clientsCanEdit" to true,
-                "cutoffHours" to 12,
+                "cutoffHours" to 0,
+                "cutoffMinutes" to 15,
                 "whatsappWebMode" to false,
                 "siteBaseUrl" to "https://newshape.vercel.app",
                 "studentPortalCode" to generatePortalCode(),
@@ -1589,10 +1597,12 @@ class FirestoreStudioRepository(
     suspend fun saveSettings(settings: StudioSettingsRecord): Result<Unit> = try {
         val uid = requireUserId()
         val code = settings.studentPortalCode.takeIf { it.length >= 8 } ?: generatePortalCode()
+        val cutoffMins = settings.effectiveCutoffMinutes()
         userDoc(uid).collection("settings").document("studio").update(
             mapOf(
                 "clientsCanEdit" to settings.clientsCanEdit,
-                "cutoffHours" to settings.cutoffHours.coerceIn(0, 72),
+                "cutoffHours" to (cutoffMins / 60),
+                "cutoffMinutes" to cutoffMins,
                 "whatsappWebMode" to settings.whatsappWebMode,
                 "siteBaseUrl" to settings.siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" }.take(300),
                 "studentPortalCode" to code.take(64),

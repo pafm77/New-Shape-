@@ -47,6 +47,7 @@ import {
   formatWeekKey,
   formatWeekRangeLabel,
   generatePortalCode,
+  getEffectiveCutoffMinutes,
   getMondayOfWeek,
   isValidPortuguesePhone,
   normalizePaymentMethod,
@@ -369,7 +370,9 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
           id: snap.id,
           userId: String(d.userId ?? uid),
           clientsCanEdit: Boolean(d.clientsCanEdit ?? true),
-          cutoffHours: Number(d.cutoffHours ?? 12),
+          cutoffHours: Number(d.cutoffHours ?? 0),
+          cutoffMinutes:
+            d.cutoffMinutes !== undefined ? Number(d.cutoffMinutes) : undefined,
           whatsappWebMode: Boolean(d.whatsappWebMode ?? false),
           siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin ?? DEFAULT_WEB_BASE_URL),
           studentPortalCode: String(d.studentPortalCode ?? ''),
@@ -453,11 +456,15 @@ export async function ensureSeeded(uid: string): Promise<void> {
     }
 
     if (writes.length > 0) await commitWrites(writes);
-    const currentCode = settingsSnap.data()?.studentPortalCode;
-    if (typeof currentCode !== 'string' || currentCode.length < 8) {
+    const settingsData = settingsSnap.data();
+    const currentCode = settingsData?.studentPortalCode;
+    const missingPortalCode = typeof currentCode !== 'string' || currentCode.length < 8;
+    const missingCutoffMinutes = settingsData?.cutoffMinutes === undefined;
+    if (missingPortalCode || missingCutoffMinutes) {
       await updateDoc(settingsRef, {
-        studentPortalCode: generatePortalCode(),
         updatedAt: serverTimestamp(),
+        ...(missingPortalCode ? { studentPortalCode: generatePortalCode() } : {}),
+        ...(missingCutoffMinutes ? { cutoffMinutes: 15, cutoffHours: 0 } : {}),
       });
     }
     return;
@@ -808,7 +815,8 @@ export async function ensureSeeded(uid: string): Promise<void> {
     {
       userId: uid,
       clientsCanEdit: true,
-      cutoffHours: 12,
+      cutoffHours: 0,
+      cutoffMinutes: 15,
       whatsappWebMode: false,
       siteBaseUrl: window.location.origin || DEFAULT_WEB_BASE_URL,
       studentPortalCode: generatePortalCode(),
@@ -1602,10 +1610,13 @@ export async function saveStudioSettings(
       ? settings.studentPortalCode.slice(0, 64)
       : generatePortalCode();
 
+  const cutoffMins = getEffectiveCutoffMinutes(settings);
+
   if (snap.exists()) {
     await updateDoc(ref, {
       clientsCanEdit: settings.clientsCanEdit,
-      cutoffHours: Math.max(0, Math.min(72, Math.round(settings.cutoffHours))),
+      cutoffHours: Math.floor(cutoffMins / 60),
+      cutoffMinutes: cutoffMins,
       whatsappWebMode: settings.whatsappWebMode,
       siteBaseUrl: cleanUrl,
       studentPortalCode: code,
@@ -1616,7 +1627,8 @@ export async function saveStudioSettings(
     await setDoc(ref, {
       userId: uid,
       clientsCanEdit: settings.clientsCanEdit,
-      cutoffHours: Math.max(0, Math.min(72, Math.round(settings.cutoffHours))),
+      cutoffHours: Math.floor(cutoffMins / 60),
+      cutoffMinutes: cutoffMins,
       whatsappWebMode: settings.whatsappWebMode,
       siteBaseUrl: cleanUrl,
       studentPortalCode: code,

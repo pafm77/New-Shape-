@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -747,7 +748,7 @@ fun MensagensSettingsSection(
 ) {
     val context = LocalContext.current
     var clientsCanEdit by remember(state.settings) { mutableStateOf(state.settings.clientsCanEdit) }
-    var cutoffHoursText by remember(state.settings) { mutableStateOf(state.settings.cutoffHours.toString()) }
+    var cutoffMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveCutoffMinutes().toString()) }
     var whatsappWeb by remember(state.settings) { mutableStateOf(state.settings.whatsappWebMode) }
     var siteBaseUrl by remember(state.settings) { mutableStateOf(state.settings.siteBaseUrl) }
 
@@ -904,14 +905,50 @@ fun MensagensSettingsSection(
                     )
                 }
                 Spacer(Modifier.height(12.dp))
+                val parsedCutoffMins = (cutoffMinutesText.toIntOrNull() ?: 15).coerceIn(0, 4320)
+                val previewLabel = when {
+                    parsedCutoffMins <= 0 -> "sem limite"
+                    parsedCutoffMins >= 60 && parsedCutoffMins % 60 == 0 -> "${parsedCutoffMins / 60}h"
+                    else -> "$parsedCutoffMins min"
+                }
                 OutlinedTextField(
-                    value = cutoffHoursText,
-                    onValueChange = { cutoffHoursText = it.filter { c -> c.isDigit() }.take(3) },
-                    label = { Text("Até quantas horas antes do treino") },
+                    value = cutoffMinutesText,
+                    onValueChange = { cutoffMinutesText = it.filter { c -> c.isDigit() }.take(4) },
+                    label = { Text("Antecedência mínima antes do treino (minutos)") },
+                    supportingText = {
+                        Text(
+                            "Atual: $previewLabel antes do treino",
+                            color = NewShapeGoldBright
+                        )
+                    },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("cutoff_minutes_input"),
                     colors = darkFieldColors()
                 )
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        15 to "15 min",
+                        30 to "30 min",
+                        60 to "1h",
+                        120 to "2h",
+                        720 to "12h",
+                        0 to "Sem limite"
+                    ).forEach { (mins, label) ->
+                        FilterChip(
+                            selected = parsedCutoffMins == mins,
+                            onClick = { cutoffMinutesText = mins.toString() },
+                            label = { Text(label) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -941,10 +978,12 @@ fun MensagensSettingsSection(
                 GoldPrimaryButton(
                     text = "Guardar definições",
                     onClick = {
+                        val mins = (cutoffMinutesText.toIntOrNull() ?: 15).coerceIn(0, 4320)
                         viewModel.saveSettings(
                             state.settings.copy(
                                 clientsCanEdit = clientsCanEdit,
-                                cutoffHours = cutoffHoursText.toIntOrNull()?.coerceIn(0, 72) ?: 12,
+                                cutoffHours = mins / 60,
+                                cutoffMinutes = mins,
                                 whatsappWebMode = whatsappWeb,
                                 siteBaseUrl = siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" },
                                 seeded = true

@@ -225,6 +225,23 @@ export function buildWhatsAppUrl(
 
 export const DEFAULT_WEB_BASE_URL = 'https://newshape.vercel.app';
 
+export function getEffectiveCutoffMinutes(settings: {
+  cutoffMinutes?: number;
+  cutoffHours: number;
+}): number {
+  if (typeof settings.cutoffMinutes === 'number' && !Number.isNaN(settings.cutoffMinutes)) {
+    return Math.max(0, Math.min(4320, Math.round(settings.cutoffMinutes)));
+  }
+  return Math.max(0, Math.min(4320, Math.round(settings.cutoffHours * 60)));
+}
+
+export function formatCutoffLabel(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  if (m === 0) return 'sem limite';
+  if (m >= 60 && m % 60 === 0) return `${m / 60}h`;
+  return `${m} min`;
+}
+
 export function generatePortalCode(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
   let out = 'ns_';

@@ -34,7 +34,9 @@ import {
 } from '../types/studio';
 import {
   buildRecentMonthOptions,
+  formatCutoffLabel,
   formatShortDate,
+  getEffectiveCutoffMinutes,
   MEAL_TYPES,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
@@ -441,9 +443,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             (b) => b.sessionId === s.id
                           );
                           const alreadyBooked = Boolean(existingForSession);
-                          const cutoffMs = settings.cutoffHours * 3_600_000;
+                          const cutoffMinutes = getEffectiveCutoffMinutes(settings);
+                          const cutoffMs = cutoffMinutes * 60_000;
                           const isCutoffLocked =
-                            s.startMillis > 0 && Date.now() > s.startMillis - cutoffMs;
+                            cutoffMs > 0 &&
+                            s.startMillis > 0 &&
+                            Date.now() > s.startMillis - cutoffMs;
                           const editLocked = !settings.clientsCanEdit || isCutoffLocked;
                           const fullAndNotMine = isFull && !alreadyBooked;
 
@@ -508,7 +513,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               </div>
                               {isCutoffLocked && (
                                 <p className="mt-2 text-[11px] text-[#F59E0B]">
-                                  Prazo de alteração ({settings.cutoffHours}h antes) encerrado
+                                  Prazo de alteração ({formatCutoffLabel(cutoffMinutes)} antes) encerrado
                                 </p>
                               )}
                             </button>

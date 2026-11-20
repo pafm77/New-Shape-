@@ -184,6 +184,7 @@ service cloud.firestore {
       return data.userId is string && data.userId.size() <= 128 &&
              data.clientsCanEdit is bool &&
              data.cutoffHours is int && data.cutoffHours >= 0 && data.cutoffHours <= 72 &&
+             (!('cutoffMinutes' in data) || (data.cutoffMinutes is int && data.cutoffMinutes >= 0 && data.cutoffMinutes <= 4320)) &&
              data.whatsappWebMode is bool &&
              data.siteBaseUrl is string && data.siteBaseUrl.size() >= 1 && data.siteBaseUrl.size() <= 300 &&
              (!('studentPortalCode' in data) || (data.studentPortalCode is string && data.studentPortalCode.size() <= 64)) &&
@@ -468,7 +469,7 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(settingId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientsCanEdit', 'cutoffHours', 'cutoffMinutes', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidStudioSettings(incoming());
         allow update: if isOwner(userId) && isValidId(settingId) &&
@@ -476,7 +477,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['clientsCanEdit', 'cutoffHours', 'cutoffMinutes', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(settingId);
       }
 

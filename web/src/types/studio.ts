@@ -167,6 +167,7 @@ export interface StudioSettingsRecord {
   userId: string;
   clientsCanEdit: boolean;
   cutoffHours: number;
+  cutoffMinutes?: number;
   whatsappWebMode: boolean;
   siteBaseUrl: string;
   studentPortalCode?: string;

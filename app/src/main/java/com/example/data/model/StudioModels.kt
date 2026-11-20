@@ -235,7 +235,8 @@ data class StudioSettingsRecord(
     @DocumentId val id: String = "",
     val userId: String = "",
     val clientsCanEdit: Boolean = true,
-    val cutoffHours: Int = 12,
+    val cutoffHours: Int = 0,
+    val cutoffMinutes: Int? = null,
     val whatsappWebMode: Boolean = false,
     val siteBaseUrl: String = "https://newshape.vercel.app",
     val studentPortalCode: String = "",
@@ -243,6 +244,18 @@ data class StudioSettingsRecord(
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
+
+fun StudioSettingsRecord.effectiveCutoffMinutes(): Int =
+    (cutoffMinutes ?: (cutoffHours * 60)).coerceIn(0, 4320)
+
+fun StudioSettingsRecord.formatCutoffLabel(): String {
+    val m = effectiveCutoffMinutes()
+    return when {
+        m <= 0 -> "sem limite"
+        m >= 60 && m % 60 == 0 -> "${m / 60}h"
+        else -> "$m min"
+    }
+}
 
 @Keep
 @IgnoreExtraProperties

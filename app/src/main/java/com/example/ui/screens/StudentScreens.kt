@@ -242,7 +242,7 @@ private fun StudentBookingScreen(
         it.weekKey == currentWeek.weekKey && it.clientId == student.id && it.status == "UNAVAILABLE"
     }
 
-    val cutoffMs = state.settings.cutoffHours * 3_600_000L
+    val cutoffMs = state.settings.effectiveCutoffMinutes() * 60_000L
     val nowMs = System.currentTimeMillis()
     val hasConfirmed = existingBookings.any { it.status == BookingStatus.CONFIRMED.name }
     val canEditExisting = existingBookings.isEmpty() || !hasConfirmed || state.settings.clientsCanEdit
@@ -358,7 +358,7 @@ private fun StudentBookingScreen(
             }
             val isFull = confirmedCount >= session.capacity
             val isSelected = session.id in selectedSessionIds
-            val isPastCutoff = session.startMillis > 0 && (session.startMillis - nowMs) < cutoffMs
+            val isPastCutoff = cutoffMs > 0L && session.startMillis > 0 && (session.startMillis - nowMs) < cutoffMs
             val existingForSession = existingBookings.find { it.sessionId == session.id }
             val isFullForNew = isFull && !isSelected
             val canToggle = canEditExisting && !isPastCutoff && !isFullForNew
@@ -396,7 +396,7 @@ private fun StudentBookingScreen(
                         )
                         if (isPastCutoff) {
                             Text(
-                                text = "Fechado (menos de ${state.settings.cutoffHours}h)",
+                                text = "Fechado (menos de ${state.settings.formatCutoffLabel()})",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = DangerRed
                             )
