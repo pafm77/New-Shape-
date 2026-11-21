@@ -27,6 +27,7 @@ import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import java.util.Calendar
 
 @Composable
 fun SemanasSection(
@@ -177,17 +178,34 @@ fun SemanasSection(
                 )
             }
         } else {
+            val todayCal = Calendar.getInstance()
+            val todayYear = todayCal.get(Calendar.YEAR)
+            val todayDay = todayCal.get(Calendar.DAY_OF_YEAR)
+
             items(weekSessions, key = { it.id }) { session ->
                 val sessionBookings = state.bookings.filter {
                     it.sessionId == session.id && it.status != BookingStatus.CANCELLED.name
                 }
+                val confirmedBookings = sessionBookings.filter { it.status == BookingStatus.CONFIRMED.name }
                 val pendingCount = sessionBookings.count {
                     it.status == BookingStatus.PENDING.name || it.status == BookingStatus.ALTERED.name
+                }
+                val presentCount = confirmedBookings.count { it.attendanceStatus == "PRESENT" }
+                val absentCount = confirmedBookings.count { it.attendanceStatus == "ABSENT" }
+                val isToday = remember(session.startMillis) {
+                    if (session.startMillis <= 0L) false
+                    else {
+                        val c = Calendar.getInstance().apply { timeInMillis = session.startMillis }
+                        c.get(Calendar.YEAR) == todayYear && c.get(Calendar.DAY_OF_YEAR) == todayDay
+                    }
                 }
                 Surface(
                     color = CharcoalSurface,
                     shape = MaterialTheme.shapes.medium,
-                    border = BorderStroke(1.dp, HairlineBorder),
+                    border = BorderStroke(
+                        width = if (isToday) 1.5.dp else 1.dp,
+                        color = if (isToday) NewShapeGold else HairlineBorder
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(MaterialTheme.shapes.medium)
@@ -200,16 +218,39 @@ fun SemanasSection(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "${session.dateLabel} · ${session.timeLabel.replace(":", "h")}",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = TextPrimaryDark
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "${session.dateLabel} · ${session.timeLabel.replace(":", "h")}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = TextPrimaryDark
+                                )
+                                if (isToday) {
+                                    StatusPill("Hoje", NewShapeGoldBright, NewShapeGoldMuted)
+                                }
+                            }
                             Text(
                                 text = "${session.durationMinutes} min" + if (session.note.isNotBlank()) " · ${session.note}" else "",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondaryDark
                             )
+                            if (presentCount > 0 || absentCount > 0) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Presenças: ${presentCount}✓ · ${absentCount}✕",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ConfirmedGreen
+                                )
+                            } else if (isToday && confirmedBookings.isNotEmpty()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Toca para confirmar presenças de hoje",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = NewShapeGold
+                                )
+                            }
                             if (pendingCount > 0) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(
@@ -220,7 +261,7 @@ fun SemanasSection(
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val confirmedCount = sessionBookings.count { it.status == BookingStatus.CONFIRMED.name }
+                            val confirmedCount = confirmedBookings.size
                             val isFull = confirmedCount >= session.capacity
                             StatusPill(
                                 text = "$confirmedCount/${session.capacity}",
@@ -261,6 +302,7 @@ fun SemanasSection(
                 viewModel.addManualClientToSession(freshSession.id, freshSession.weekKey, clientId)
             },
             onRemoveBooking = { bookingId -> viewModel.removeBooking(bookingId) },
+            onSetAttendance = { bookingId, status -> viewModel.setBookingAttendance(bookingId, status) },
             onEdit = {
                 selectedSessionDetail = null
                 sessionToEdit = freshSession
@@ -509,6 +551,7 @@ private fun SessionDetailDialog(
     onDismiss: () -> Unit,
     onAddClient: (String) -> Unit,
     onRemoveBooking: (String) -> Unit,
+    onSetAttendance: (String, String) -> Unit,
     onEdit: () -> Unit
 ) {
     val clientMap = clients.associateBy { it.id }
@@ -533,7 +576,7 @@ private fun SessionDetailDialog(
         },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text("Inscritos", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Text("Inscritos & Presenças", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                 Spacer(Modifier.height(8.dp))
                 if (bookings.isEmpty()) {
                     Text("Ainda não há inscritos neste treino.", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
@@ -541,23 +584,81 @@ private fun SessionDetailDialog(
                     bookings.forEach { b ->
                         val c = clientMap[b.clientId]
                         if (c != null) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            val confirmed = b.status == BookingStatus.CONFIRMED.name
+                            val isPresent = b.attendanceStatus == "PRESENT"
+                            val isAbsent = b.attendanceStatus == "ABSENT"
+                            val isPersonal = c.trainingType == "PERSONALIZADO"
+                            Surface(
+                                color = ElevatedCharcoal,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    when {
+                                        isPresent -> ConfirmedGreen.copy(alpha = 0.5f)
+                                        isAbsent -> DangerRed.copy(alpha = 0.5f)
+                                        else -> HairlineBorder
+                                    }
+                                ),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(c.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
-                                    Text(c.phone, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
-                                }
-                                val confirmed = b.status == BookingStatus.CONFIRMED.name
-                                StatusPill(
-                                    text = if (confirmed) "Confirmado" else "Pendente",
-                                    textColor = if (confirmed) ConfirmedGreen else PendingAmber,
-                                    containerColor = if (confirmed) ConfirmedGreenContainer else PendingAmberContainer
-                                )
-                                TextButton(onClick = { onRemoveBooking(b.id) }) {
-                                    Text("Remover", color = DangerRed, style = MaterialTheme.typography.labelSmall)
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(c.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                                                StatusPill(
+                                                    text = if (isPersonal) "Pers." else "Grupo",
+                                                    textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
+                                                    containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
+                                                )
+                                            }
+                                            Text(c.phone, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            StatusPill(
+                                                text = if (confirmed) "Confirmado" else "Pendente",
+                                                textColor = if (confirmed) ConfirmedGreen else PendingAmber,
+                                                containerColor = if (confirmed) ConfirmedGreenContainer else PendingAmberContainer
+                                            )
+                                            IconButton(
+                                                onClick = { onRemoveBooking(b.id) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(Icons.Default.Close, contentDescription = "Remover inscrito", tint = DangerRed, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+                                    if (confirmed) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                            FilterChip(
+                                                selected = isPresent,
+                                                onClick = { onSetAttendance(b.id, if (isPresent) "" else "PRESENT") },
+                                                label = { Text("Presente ✓") },
+                                                modifier = Modifier.weight(1f).testTag("session_present_${b.id}"),
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = ConfirmedGreen,
+                                                    selectedLabelColor = ObsidianBg
+                                                )
+                                            )
+                                            FilterChip(
+                                                selected = isAbsent,
+                                                onClick = { onSetAttendance(b.id, if (isAbsent) "" else "ABSENT") },
+                                                label = { Text("Falta ✕") },
+                                                modifier = Modifier.weight(1f).testTag("session_absent_${b.id}"),
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = DangerRed,
+                                                    selectedLabelColor = TextPrimaryDark
+                                                )
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

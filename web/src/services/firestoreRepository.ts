@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
+  AttendanceStatus,
   BookingRecord,
   ChatMessageRecord,
   ClientRecord,
@@ -30,6 +31,7 @@ import {
   PhysicalAssessmentRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
+  TrainingType,
   TrainingWeekRecord,
   WeekResponseRecord,
   WorkoutPlanItemRecord,
@@ -116,6 +118,7 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
       monthlyFeeEur: Number(d.monthlyFeeEur ?? 0),
       fidelizacaoMonths: Number(d.fidelizacaoMonths ?? 0),
       fidelizacaoStartMillis: Number(d.fidelizacaoStartMillis ?? 0),
+      trainingType: d.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO',
     }),
     (list) =>
       list.sort((a, b) => {
@@ -166,6 +169,12 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
       weekKey: String(d.weekKey ?? ''),
       clientId: String(d.clientId ?? ''),
       status: (String(d.status ?? 'PENDING') as BookingRecord['status']),
+      attendanceStatus:
+        d.attendanceStatus === 'PRESENT' ||
+        d.attendanceStatus === 'ABSENT' ||
+        d.attendanceStatus === 'PENDING'
+          ? d.attendanceStatus
+          : '',
       requestedAtMillis: Number(d.requestedAtMillis ?? 0),
     }),
     (list) => list.sort((a, b) => a.requestedAtMillis - b.requestedAtMillis),
@@ -428,9 +437,9 @@ export async function ensureSeeded(uid: string): Promise<void> {
 
     if (existingAssess.empty) {
       [
-        ['pa_ana_1', now - dayMs * 60, 68.5, 29, 166, 'F' as const, 26.8, 25.1, 6.0, 'Avaliação inicial'],
-        ['pa_ana_2', now - dayMs * 30, 66.8, 29, 166, 'F' as const, 24.9, 25.5, 5.5, 'Boa evolução de força'],
-        ['pa_ana_3', now - dayMs * 2, 65.4, 29, 166, 'F' as const, 23.2, 26.0, 5.0, 'Recomposição corporal consistente'],
+        ['pa_ana_1', now - dayMs * 60, 68.5, 29, 166, 'F' as const, 26.8, 36.6, 6.0, 'Avaliação inicial'],
+        ['pa_ana_2', now - dayMs * 30, 66.8, 29, 166, 'F' as const, 24.9, 38.2, 5.5, 'Boa evolução de força'],
+        ['pa_ana_3', now - dayMs * 2, 65.4, 29, 166, 'F' as const, 23.2, 39.8, 5.0, 'Recomposição corporal consistente'],
       ].forEach(([id, dt, w, age, h, sex, fat, muscle, visc, notes]) => {
         writes.push([
           doc(subcol(uid, 'physical_assessments'), String(id)),
@@ -460,11 +469,18 @@ export async function ensureSeeded(uid: string): Promise<void> {
     const currentCode = settingsData?.studentPortalCode;
     const missingPortalCode = typeof currentCode !== 'string' || currentCode.length < 8;
     const missingCutoffMinutes = settingsData?.cutoffMinutes === undefined;
-    if (missingPortalCode || missingCutoffMinutes) {
+    const savedBaseUrl = typeof settingsData?.siteBaseUrl === 'string' ? settingsData.siteBaseUrl : '';
+    const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+    const shouldSyncNewShapeDomain =
+      currentOrigin === DEFAULT_WEB_BASE_URL &&
+      savedBaseUrl !== DEFAULT_WEB_BASE_URL &&
+      savedBaseUrl.includes('.vercel.app');
+    if (missingPortalCode || missingCutoffMinutes || shouldSyncNewShapeDomain) {
       await updateDoc(settingsRef, {
         updatedAt: serverTimestamp(),
         ...(missingPortalCode ? { studentPortalCode: generatePortalCode() } : {}),
         ...(missingCutoffMinutes ? { cutoffMinutes: 15, cutoffHours: 0 } : {}),
+        ...(shouldSyncNewShapeDomain ? { siteBaseUrl: DEFAULT_WEB_BASE_URL } : {}),
       });
     }
     return;
@@ -523,12 +539,12 @@ export async function ensureSeeded(uid: string): Promise<void> {
   });
 
   const sampleClients = [
-    { id: 'client_ana', name: 'Ana Ribeiro', phone: '912345678', notes: 'Objetivo: recomposição corporal · Manhãs/18h', newClient: false, fee: 120, fidM: 12, fidStart: now - 60 * dayMs },
-    { id: 'client_bruno', name: 'Bruno Costa', phone: '912345602', notes: 'Lesão antiga joelho direito — evitar impacto', newClient: false, fee: 95, fidM: 6, fidStart: now - 145 * dayMs },
-    { id: 'client_eva', name: 'Eva Martins', phone: '912345605', notes: 'Treino força 3x/semana', newClient: false, fee: 120, fidM: 12, fidStart: now - 30 * dayMs },
-    { id: 'client_filipe', name: 'Filipe Sousa', phone: '912345606', notes: '', newClient: false, fee: 110, fidM: 0, fidStart: 0 },
-    { id: 'client_hugo', name: 'Hugo Pereira', phone: '912345608', notes: 'Horário pós-laboral', newClient: false, fee: 95, fidM: 0, fidStart: 0 },
-    { id: 'client_joao', name: 'João Almeida', phone: '912345610', notes: '', newClient: true, fee: 100, fidM: 0, fidStart: 0 },
+    { id: 'client_ana', name: 'Ana Ribeiro', phone: '912345678', notes: 'Objetivo: recomposição corporal · Manhãs/18h', newClient: false, fee: 120, fidM: 12, fidStart: now - 60 * dayMs, trainingType: 'PERSONALIZADO' as TrainingType },
+    { id: 'client_bruno', name: 'Bruno Costa', phone: '912345602', notes: 'Lesão antiga joelho direito — evitar impacto', newClient: false, fee: 95, fidM: 6, fidStart: now - 145 * dayMs, trainingType: 'GRUPO' as TrainingType },
+    { id: 'client_eva', name: 'Eva Martins', phone: '912345605', notes: 'Treino força 3x/semana', newClient: false, fee: 120, fidM: 12, fidStart: now - 30 * dayMs, trainingType: 'PERSONALIZADO' as TrainingType },
+    { id: 'client_filipe', name: 'Filipe Sousa', phone: '912345606', notes: '', newClient: false, fee: 110, fidM: 0, fidStart: 0, trainingType: 'GRUPO' as TrainingType },
+    { id: 'client_hugo', name: 'Hugo Pereira', phone: '912345608', notes: 'Horário pós-laboral', newClient: false, fee: 95, fidM: 0, fidStart: 0, trainingType: 'GRUPO' as TrainingType },
+    { id: 'client_joao', name: 'João Almeida', phone: '912345610', notes: '', newClient: true, fee: 100, fidM: 0, fidStart: 0, trainingType: 'GRUPO' as TrainingType },
   ];
 
   sampleClients.forEach((c) => {
@@ -544,6 +560,7 @@ export async function ensureSeeded(uid: string): Promise<void> {
         monthlyFeeEur: c.fee,
         fidelizacaoMonths: c.fidM,
         fidelizacaoStartMillis: Math.round(c.fidStart),
+        trainingType: c.trainingType,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       },
@@ -784,9 +801,9 @@ export async function ensureSeeded(uid: string): Promise<void> {
   });
 
   [
-    ['pa_ana_1', now - dayMs * 60, 68.5, 29, 166, 'F' as const, 26.8, 25.1, 6.0, 'Avaliação inicial'],
-    ['pa_ana_2', now - dayMs * 30, 66.8, 29, 166, 'F' as const, 24.9, 25.5, 5.5, 'Boa evolução de força'],
-    ['pa_ana_3', now - dayMs * 2, 65.4, 29, 166, 'F' as const, 23.2, 26.0, 5.0, 'Recomposição corporal consistente'],
+    ['pa_ana_1', now - dayMs * 60, 68.5, 29, 166, 'F' as const, 26.8, 36.6, 6.0, 'Avaliação inicial'],
+    ['pa_ana_2', now - dayMs * 30, 66.8, 29, 166, 'F' as const, 24.9, 38.2, 5.5, 'Boa evolução de força'],
+    ['pa_ana_3', now - dayMs * 2, 65.4, 29, 166, 'F' as const, 23.2, 39.8, 5.0, 'Recomposição corporal consistente'],
   ].forEach(([id, dt, w, age, h, sex, fat, muscle, visc, notes]) => {
     writes.push([
       doc(subcol(uid, 'physical_assessments'), String(id)),
@@ -840,10 +857,12 @@ export async function addClient(
     monthlyFeeEur?: number;
     fidelizacaoMonths?: number;
     fidelizacaoStartMillis?: number;
+    trainingType?: TrainingType;
   }
 ): Promise<string> {
   const ref = doc(subcol(uid, 'clients'));
   const fidMonths = payload.fidelizacaoMonths === 6 || payload.fidelizacaoMonths === 12 ? payload.fidelizacaoMonths : 0;
+  const trainingType: TrainingType = payload.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
   await setDoc(ref, {
     userId: uid,
     name: payload.name.trim().slice(0, 100),
@@ -854,6 +873,7 @@ export async function addClient(
     monthlyFeeEur: Math.max(0, Math.min(100000, payload.monthlyFeeEur ?? 0)),
     fidelizacaoMonths: fidMonths,
     fidelizacaoStartMillis: Math.max(0, Math.round(payload.fidelizacaoStartMillis ?? 0)),
+    trainingType,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -862,6 +882,7 @@ export async function addClient(
 
 export async function updateClient(uid: string, client: ClientRecord): Promise<void> {
   const fidMonths = client.fidelizacaoMonths === 6 || client.fidelizacaoMonths === 12 ? client.fidelizacaoMonths : 0;
+  const trainingType: TrainingType = client.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
   await updateDoc(doc(subcol(uid, 'clients'), client.id), {
     name: client.name.trim().slice(0, 100),
     phone: normalizePortuguesePhone(client.phone),
@@ -871,6 +892,7 @@ export async function updateClient(uid: string, client: ClientRecord): Promise<v
     monthlyFeeEur: Math.max(0, Math.min(100000, client.monthlyFeeEur)),
     fidelizacaoMonths: fidMonths,
     fidelizacaoStartMillis: Math.max(0, Math.round(client.fidelizacaoStartMillis)),
+    trainingType,
     updatedAt: serverTimestamp(),
   });
 }
@@ -921,6 +943,7 @@ export async function importClientsCsv(
         monthlyFeeEur: 0,
         fidelizacaoMonths: 0,
         fidelizacaoStartMillis: 0,
+        trainingType: 'GRUPO',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       },
@@ -1138,6 +1161,17 @@ export async function moveBooking(uid: string, bookingId: string, newSessionId: 
   });
 }
 
+export async function setBookingAttendance(
+  uid: string,
+  bookingId: string,
+  attendanceStatus: AttendanceStatus
+): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'bookings'), bookingId), {
+    attendanceStatus,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function submitStudentBookings(
   uid: string,
   weekKey: string,
@@ -1345,15 +1379,91 @@ export async function createWorkoutPlan(
   title: string,
   splitLabel: string
 ): Promise<void> {
-  await setDoc(doc(subcol(uid, 'workout_plans')), {
-    userId: uid,
-    clientId,
-    title: title.trim().slice(0, 120),
-    splitLabel: splitLabel.trim().slice(0, 120),
-    createdAtMillis: Date.now(),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  await createWorkoutPlansForClients(uid, [clientId], title, splitLabel);
+}
+
+export async function createWorkoutPlansForClients(
+  uid: string,
+  clientIds: string[],
+  title: string,
+  splitLabel: string
+): Promise<number> {
+  const uniqueIds = Array.from(new Set(clientIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return 0;
+  const cleanTitle = title.trim().slice(0, 120);
+  const cleanSplit = splitLabel.trim().slice(0, 120);
+  const now = Date.now();
+  const writes: Array<[DocumentReference, Record<string, unknown>]> = uniqueIds.map((cid) => [
+    doc(subcol(uid, 'workout_plans')),
+    {
+      userId: uid,
+      clientId: cid,
+      title: cleanTitle,
+      splitLabel: cleanSplit,
+      createdAtMillis: now,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+  ]);
+  await commitWrites(writes);
+  return uniqueIds.length;
+}
+
+export async function assignWorkoutPlanToClients(
+  uid: string,
+  sourcePlan: WorkoutPlanRecord,
+  sourceItems: WorkoutPlanItemRecord[],
+  targetClientIds: string[]
+): Promise<number> {
+  const uniqueTargets = Array.from(
+    new Set(targetClientIds.filter((cid) => cid && cid !== sourcePlan.clientId))
+  );
+  if (uniqueTargets.length === 0) return 0;
+  const now = Date.now();
+  const sortedItems = sourceItems
+    .filter((i) => i.planId === sourcePlan.id)
+    .sort((a, b) => a.orderIndex - b.orderIndex);
+  const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
+
+  uniqueTargets.forEach((cid) => {
+    const newPlanRef = doc(subcol(uid, 'workout_plans'));
+    writes.push([
+      newPlanRef,
+      {
+        userId: uid,
+        clientId: cid,
+        title: sourcePlan.title.trim().slice(0, 120),
+        splitLabel: sourcePlan.splitLabel.trim().slice(0, 120),
+        createdAtMillis: now,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+    ]);
+
+    sortedItems.forEach((item, idx) => {
+      writes.push([
+        doc(subcol(uid, 'workout_plan_items')),
+        {
+          userId: uid,
+          planId: newPlanRef.id,
+          exerciseId: item.exerciseId,
+          exerciseName: item.exerciseName.slice(0, 120),
+          muscleGroup: item.muscleGroup.slice(0, 40),
+          sets: Math.max(1, Math.min(30, Math.round(item.sets))),
+          reps: item.reps.trim().slice(0, 40) || '10-12',
+          loadKg: item.loadKg.trim().slice(0, 40),
+          restSeconds: Math.max(0, Math.min(600, Math.round(item.restSeconds))),
+          notes: item.notes.trim().slice(0, 300),
+          orderIndex: idx,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+      ]);
+    });
   });
+
+  await commitWrites(writes);
+  return uniqueTargets.length;
 }
 
 export async function deleteWorkoutPlan(
@@ -1397,6 +1507,17 @@ export async function addExerciseToPlan(
   });
 }
 
+export async function updateWorkoutPlanItemLoad(
+  uid: string,
+  itemId: string,
+  loadKg: string
+): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'workout_plan_items'), itemId), {
+    loadKg: loadKg.trim().slice(0, 40),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function removeExerciseFromPlan(uid: string, itemId: string): Promise<void> {
   await deleteDoc(doc(subcol(uid, 'workout_plan_items'), itemId));
 }
@@ -1423,73 +1544,6 @@ export async function addCustomFood(
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-}
-
-export async function importFoodsExcelCsv(
-  uid: string,
-  rawText: string,
-  existingFoods: FoodItemRecord[]
-): Promise<ImportResult> {
-  const existingNames = new Set(existingFoods.map((f) => f.name.toLowerCase()));
-  let added = 0;
-  let ignored = 0;
-  const errors: string[] = [];
-  const lines = rawText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
-
-  lines.forEach((line, idx) => {
-    const low = line.toLowerCase();
-    if (idx === 0 && (low.includes('alimento') || low.includes('nome')) && (low.includes('kcal') || low.includes('caloria'))) {
-      return;
-    }
-    const delimiter = line.includes('\t') ? '\t' : line.includes(';') ? ';' : ',';
-    const parts = line.split(delimiter).map((p) => p.trim());
-    if (parts.length < 5) {
-      errors.push(`Linha ${idx + 1}: colunas insuficientes (usa Nome;Categoria;Kcal;Prot;HC;Gord)`);
-      return;
-    }
-    const hasCat = parts.length >= 6;
-    const name = parts[0].slice(0, 120);
-    const category = (hasCat ? parts[1] : 'Personalizado').slice(0, 40) || 'Personalizado';
-    const numStart = hasCat ? 2 : 1;
-    const parseNum = (s: string) => Number((s || '0').replace(',', '.')) || 0;
-    const kcal = Math.max(0, parseNum(parts[numStart]));
-    const protein = Math.max(0, parseNum(parts[numStart + 1]));
-    const carbs = Math.max(0, parseNum(parts[numStart + 2]));
-    const fat = Math.max(0, parseNum(parts[numStart + 3]));
-
-    if (!name) {
-      errors.push(`Linha ${idx + 1}: nome vazio`);
-      return;
-    }
-    if (existingNames.has(name.toLowerCase())) {
-      ignored++;
-      return;
-    }
-    existingNames.add(name.toLowerCase());
-    writes.push([
-      doc(subcol(uid, 'foods')),
-      {
-        userId: uid,
-        name,
-        category,
-        kcalPer100g: kcal,
-        proteinPer100g: protein,
-        carbsPer100g: carbs,
-        fatPer100g: fat,
-        custom: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-    ]);
-    added++;
-  });
-
-  if (writes.length > 0) await commitWrites(writes);
-  return { added, ignored, errors };
 }
 
 export async function addNutritionEntry(

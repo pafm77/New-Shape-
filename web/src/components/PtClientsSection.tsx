@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  CalendarCheck,
+  Check,
   CreditCard,
   Dumbbell,
   MessageCircle,
@@ -10,8 +12,17 @@ import {
   Upload,
   Users,
   Utensils,
+  X,
 } from 'lucide-react';
-import { ClientRecord, FidelizacaoRecord, PaymentRecord } from '../types/studio';
+import {
+  AttendanceStatus,
+  BookingRecord,
+  ClientRecord,
+  FidelizacaoRecord,
+  PaymentRecord,
+  TrainingSessionRecord,
+  TrainingType,
+} from '../types/studio';
 import {
   PAYMENT_METHODS,
   PaymentMethod,
@@ -37,6 +48,8 @@ import {
 interface PtClientsSectionProps {
   uid: string;
   clients: ClientRecord[];
+  sessions: TrainingSessionRecord[];
+  bookings: BookingRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   onJumpToWorkout: (clientId: string) => void;
@@ -48,6 +61,8 @@ interface PtClientsSectionProps {
 export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   uid,
   clients,
+  sessions,
+  bookings,
   payments,
   fidelizacoes,
   onJumpToWorkout,
@@ -58,6 +73,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<'ALL' | TrainingType>('ALL');
   const [showNewModal, setShowNewModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [payTarget, setPayTarget] = useState<ClientRecord | null>(null);
@@ -73,6 +89,8 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
       <ClientProfileView
         uid={uid}
         client={selectedClient}
+        sessions={sessions}
+        bookings={bookings.filter((b) => b.clientId === selectedClient.id)}
         payments={payments.filter((p) => p.clientId === selectedClient.id)}
         fidelizacoes={fidelizacoes.filter((f) => f.clientId === selectedClient.id)}
         currentMonthYear={currentMonthYear}
@@ -86,8 +104,14 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
     );
   }
 
+  const activeClientsList = clients.filter((c) => c.active);
+  const persCount = activeClientsList.filter((c) => c.trainingType === 'PERSONALIZADO').length;
+  const grupoCount = activeClientsList.filter((c) => c.trainingType !== 'PERSONALIZADO').length;
+
   const filtered = clients.filter((c) => {
     if (!showInactive && !c.active) return false;
+    if (typeFilter === 'PERSONALIZADO' && c.trainingType !== 'PERSONALIZADO') return false;
+    if (typeFilter === 'GRUPO' && c.trainingType === 'PERSONALIZADO') return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return c.name.toLowerCase().includes(q) || c.phone.includes(q);
@@ -99,7 +123,8 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         <div>
           <h2 className="text-xl font-bold text-[#F4F4F5]">Alunos</h2>
           <p className="text-xs text-[#A1A1AA]">
-            {clients.filter((c) => c.active).length} ativos · {clients.length} total
+            {activeClientsList.length} ativos ({persCount} Personalizado · {grupoCount} Grupo) ·{' '}
+            {clients.length} total
           </p>
         </div>
         <div className="flex gap-2">
@@ -135,6 +160,29 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         </label>
       </div>
 
+      <div className="flex flex-wrap gap-1.5">
+        {(
+          [
+            { id: 'ALL' as const, label: `Todos (${showInactive ? clients.length : activeClientsList.length})` },
+            { id: 'PERSONALIZADO' as const, label: `Treino Personalizado (${persCount})` },
+            { id: 'GRUPO' as const, label: `Treino em Grupo (${grupoCount})` },
+          ] as const
+        ).map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setTypeFilter(opt.id)}
+            className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+              typeFilter === opt.id
+                ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
       {filtered.length === 0 ? (
         <EmptyState
           icon={<Users className="h-6 w-6" />}
@@ -157,6 +205,9 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                   <div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <h3 className="text-base font-bold text-[#F4F4F5]">{c.name}</h3>
+                      <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
+                        {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
+                      </StatusPill>
                       {c.newClient && <StatusPill tone="blue">Novo</StatusPill>}
                       {!c.active && <StatusPill>Inativo</StatusPill>}
                     </div>
@@ -206,8 +257,8 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
       {showNewModal && (
         <NewClientModal
           onClose={() => setShowNewModal(false)}
-          onSave={async (name, phone, notes) => {
-            await repo.addClient(uid, { name, phone, notes });
+          onSave={async (name, phone, notes, trainingType) => {
+            await repo.addClient(uid, { name, phone, notes, trainingType });
             setShowNewModal(false);
             onBanner('Aluno adicionado!');
           }}
@@ -255,6 +306,8 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
 const ClientProfileView: React.FC<{
   uid: string;
   client: ClientRecord;
+  sessions: TrainingSessionRecord[];
+  bookings: BookingRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   currentMonthYear: string;
@@ -267,6 +320,8 @@ const ClientProfileView: React.FC<{
 }> = ({
   uid,
   client,
+  sessions,
+  bookings,
   payments,
   fidelizacoes,
   currentMonthYear,
@@ -277,9 +332,13 @@ const ClientProfileView: React.FC<{
   onJumpToChat,
   onBanner,
 }) => {
+  const [profileTab, setProfileTab] = useState<'profile' | 'attendance'>('profile');
   const [name, setName] = useState(client.name);
   const [phone, setPhone] = useState(client.phone);
   const [notes, setNotes] = useState(client.notes);
+  const [trainingType, setTrainingType] = useState<TrainingType>(
+    client.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO'
+  );
   const [monthlyFee, setMonthlyFee] = useState(
     client.monthlyFeeEur > 0 ? String(client.monthlyFeeEur) : ''
   );
@@ -298,6 +357,25 @@ const ClientProfileView: React.FC<{
     return d.getTime();
   }, [fidMonths, fidStart]);
 
+  const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
+  const confirmedHistory = useMemo(() => {
+    return bookings
+      .filter((b) => b.status === 'CONFIRMED')
+      .map((b) => ({ booking: b, session: sessionMap.get(b.sessionId) }))
+      .filter(
+        (item): item is { booking: BookingRecord; session: TrainingSessionRecord } =>
+          Boolean(item.session)
+      )
+      .sort((a, b) => b.session.startMillis - a.session.startMillis);
+  }, [bookings, sessionMap]);
+
+  const presentCount = confirmedHistory.filter((i) => i.booking.attendanceStatus === 'PRESENT').length;
+  const absentCount = confirmedHistory.filter((i) => i.booking.attendanceStatus === 'ABSENT').length;
+  const markedCount = presentCount + absentCount;
+  const pendingAttendanceCount = confirmedHistory.length - markedCount;
+  const donePct = markedCount > 0 ? (presentCount / markedCount) * 100 : 0;
+  const absentPct = markedCount > 0 ? (absentCount / markedCount) * 100 : 0;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
@@ -312,6 +390,9 @@ const ClientProfileView: React.FC<{
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-bold text-[#F4F4F5]">{client.name}</h2>
+              <StatusPill tone={client.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
+                {client.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
+              </StatusPill>
               {client.notes.toLowerCase().includes('rgpd aceite') && (
                 <StatusPill tone="green">RGPD ✓</StatusPill>
               )}
@@ -350,12 +431,201 @@ const ClientProfileView: React.FC<{
         </SecondaryButton>
       </div>
 
+      <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
+        <button
+          type="button"
+          onClick={() => setProfileTab('profile')}
+          className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            profileTab === 'profile'
+              ? 'bg-[#EAB308] text-[#121214]'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          Perfil & Plano
+        </button>
+        <button
+          type="button"
+          onClick={() => setProfileTab('attendance')}
+          className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            profileTab === 'attendance'
+              ? 'bg-[#EAB308] text-[#121214]'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          Assiduidade {markedCount > 0 ? `(${donePct.toFixed(0)}%)` : ''}
+        </button>
+      </div>
+
+      {profileTab === 'attendance' ? (
+        <div className="space-y-4">
+          <BrandCard highlight>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="h-4 w-4 text-[#EAB308]" />
+                <h3 className="text-base font-bold text-[#FACC15]">Assiduidade nos Treinos</h3>
+              </div>
+              <StatusPill tone={markedCount === 0 ? 'neutral' : donePct >= 75 ? 'green' : 'amber'}>
+                {markedCount > 0 ? `${donePct.toFixed(0)}% feitos` : 'Sem registos'}
+              </StatusPill>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+              <div className="rounded-xl border border-[#22C55E]/30 bg-[#143521]/60 p-3">
+                <p className="text-[11px] text-[#86EFAC]">Treinos Feitos</p>
+                <p className="mt-0.5 text-2xl font-extrabold text-[#22C55E]">
+                  {markedCount > 0 ? `${donePct.toFixed(0)}%` : '—'}
+                </p>
+                <p className="text-[11px] text-[#A1A1AA]">{presentCount} presença(s)</p>
+              </div>
+              <div className="rounded-xl border border-[#EF4444]/30 bg-[#3B1518]/60 p-3">
+                <p className="text-[11px] text-[#FCA5A5]">Faltas</p>
+                <p className="mt-0.5 text-2xl font-extrabold text-[#EF4444]">
+                  {markedCount > 0 ? `${absentPct.toFixed(0)}%` : '—'}
+                </p>
+                <p className="text-[11px] text-[#A1A1AA]">{absentCount} falta(s)</p>
+              </div>
+              <div className="rounded-xl border border-[#323238] bg-[#242429] p-3">
+                <p className="text-[11px] text-[#A1A1AA]">Registados</p>
+                <p className="mt-0.5 text-2xl font-extrabold text-[#F4F4F5]">{markedCount}</p>
+                <p className="text-[11px] text-[#A1A1AA]">com presença/falta</p>
+              </div>
+              <div className="rounded-xl border border-[#323238] bg-[#242429] p-3">
+                <p className="text-[11px] text-[#A1A1AA]">Por registar</p>
+                <p className="mt-0.5 text-2xl font-extrabold text-[#FACC15]">
+                  {pendingAttendanceCount}
+                </p>
+                <p className="text-[11px] text-[#A1A1AA]">confirmados</p>
+              </div>
+            </div>
+
+            {markedCount > 0 && (
+              <div className="mt-3">
+                <div className="flex h-3 w-full overflow-hidden rounded-full bg-[#242429]">
+                  <div
+                    style={{ width: `${donePct}%` }}
+                    className="h-full bg-[#22C55E] transition-all"
+                  />
+                  <div
+                    style={{ width: `${absentPct}%` }}
+                    className="h-full bg-[#EF4444] transition-all"
+                  />
+                </div>
+                <div className="mt-1.5 flex justify-between text-[11px] font-semibold">
+                  <span className="text-[#22C55E]">
+                    Feitos: {presentCount} ({donePct.toFixed(1)}%)
+                  </span>
+                  <span className="text-[#EF4444]">
+                    Faltas: {absentCount} ({absentPct.toFixed(1)}%)
+                  </span>
+                </div>
+              </div>
+            )}
+          </BrandCard>
+
+          <BrandCard>
+            <h3 className="text-base font-bold text-[#F4F4F5]">
+              Histórico de Treinos Confirmados ({confirmedHistory.length})
+            </h3>
+            {confirmedHistory.length === 0 ? (
+              <p className="mt-2 text-xs text-[#A1A1AA]">
+                Ainda não existem treinos confirmados para este aluno.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {confirmedHistory.map(({ booking, session }) => {
+                  const isPresent = booking.attendanceStatus === 'PRESENT';
+                  const isAbsent = booking.attendanceStatus === 'ABSENT';
+                  const toggle = async (next: AttendanceStatus) => {
+                    const target: AttendanceStatus =
+                      booking.attendanceStatus === next ? '' : next;
+                    await repo.setBookingAttendance(uid, booking.id, target);
+                    onBanner(
+                      target === 'PRESENT'
+                        ? 'Presença confirmada ✓'
+                        : target === 'ABSENT'
+                        ? 'Falta registada.'
+                        : 'Registo de presença limpo.'
+                    );
+                  };
+                  return (
+                    <div
+                      key={booking.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#323238] bg-[#242429] p-3"
+                    >
+                      <div>
+                        <p className="text-sm font-bold text-[#F4F4F5]">
+                          {session.dateLabel} · {session.timeLabel.replace(':', 'h')}
+                        </p>
+                        <p className="text-xs text-[#A1A1AA]">
+                          {session.durationMinutes} min
+                          {session.note ? ` · ${session.note}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => toggle('PRESENT')}
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
+                            isPresent
+                              ? 'border-[#22C55E] bg-[#22C55E] text-[#121214]'
+                              : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#22C55E] hover:text-[#22C55E]'
+                          }`}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Presente
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggle('ABSENT')}
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
+                            isAbsent
+                              ? 'border-[#EF4444] bg-[#EF4444] text-white'
+                              : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#EF4444] hover:text-[#EF4444]'
+                          }`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Falta
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </BrandCard>
+        </div>
+      ) : (
+        <>
       <BrandCard>
         <h3 className="text-base font-bold text-[#FACC15]">Dados do Perfil & Plano</h3>
         <div className="mt-3 space-y-3">
           <div>
             <FieldLabel>Nome completo</FieldLabel>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <FieldLabel>Tipo de Treino</FieldLabel>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { id: 'PERSONALIZADO' as const, label: 'Treino Personalizado' },
+                  { id: 'GRUPO' as const, label: 'Treino em Grupo' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setTrainingType(opt.id)}
+                  className={`rounded-xl border py-2 text-xs font-bold transition ${
+                    trainingType === opt.id
+                      ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                      : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -421,6 +691,7 @@ const ClientProfileView: React.FC<{
                 monthlyFeeEur: Math.max(0, Number(monthlyFee) || 0),
                 fidelizacaoMonths: fidMonths,
                 fidelizacaoStartMillis: fidMonths > 0 ? fidStart : 0,
+                trainingType,
               });
               onBanner('Perfil do aluno guardado!');
             }}
@@ -512,6 +783,8 @@ const ClientProfileView: React.FC<{
           </div>
         </BrandCard>
       )}
+        </>
+      )}
 
       {showPay && (
         <RegisterPaymentModal
@@ -538,10 +811,11 @@ const ClientProfileView: React.FC<{
 
 const NewClientModal: React.FC<{
   onClose: () => void;
-  onSave: (name: string, phone: string, notes: string) => Promise<void>;
+  onSave: (name: string, phone: string, notes: string, trainingType: TrainingType) => Promise<void>;
 }> = ({ onClose, onSave }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [trainingType, setTrainingType] = useState<TrainingType>('GRUPO');
   const [notes, setNotes] = useState('');
   const [rgpdAccepted, setRgpdAccepted] = useState(false);
 
@@ -560,6 +834,30 @@ const NewClientModal: React.FC<{
             onChange={(e) => setPhone(e.target.value)}
             placeholder="914 000 001"
           />
+        </div>
+        <div>
+          <FieldLabel>Tipo de Treino</FieldLabel>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                { id: 'PERSONALIZADO' as const, label: 'Treino Personalizado' },
+                { id: 'GRUPO' as const, label: 'Treino em Grupo' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setTrainingType(opt.id)}
+                className={`rounded-xl border py-2 text-xs font-bold transition ${
+                  trainingType === opt.id
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <FieldLabel>Notas (opcional)</FieldLabel>
@@ -584,7 +882,7 @@ const NewClientModal: React.FC<{
             onClick={() => {
               const rgpdStamp = rgpdAccepted ? formatRgpdConsentStamp() : '';
               const combinedNotes = [notes.trim(), rgpdStamp].filter(Boolean).join(' · ');
-              return onSave(name, phone, combinedNotes);
+              return onSave(name, phone, combinedNotes, trainingType);
             }}
           >
             Adicionar

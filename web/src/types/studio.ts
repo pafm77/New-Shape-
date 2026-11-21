@@ -8,6 +8,10 @@ export type MealTypeKey =
   | 'JANTAR'
   | 'CEIA';
 
+export type TrainingType = 'PERSONALIZADO' | 'GRUPO';
+
+export type AttendanceStatus = '' | 'PENDING' | 'PRESENT' | 'ABSENT';
+
 export interface ClientRecord {
   id: string;
   userId: string;
@@ -19,6 +23,7 @@ export interface ClientRecord {
   monthlyFeeEur: number;
   fidelizacaoMonths: number;
   fidelizacaoStartMillis: number;
+  trainingType: TrainingType;
 }
 
 export interface TrainingWeekRecord {
@@ -50,6 +55,7 @@ export interface BookingRecord {
   weekKey: string;
   clientId: string;
   status: BookingStatus;
+  attendanceStatus: AttendanceStatus;
   requestedAtMillis: number;
 }
 

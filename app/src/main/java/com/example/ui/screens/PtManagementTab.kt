@@ -91,8 +91,57 @@ private fun FinancesSection(
     var showAddPaymentChooser by remember { mutableStateOf(false) }
     var chosenClient by remember { mutableStateOf<ClientRecord?>(null) }
     var methodFilter by remember { mutableStateOf("ALL") }
+    var trainingFilter by remember { mutableStateOf("ALL") }
 
-    val paidPayments = remember(state.payments) { state.payments.filter { it.paid } }
+    val allPaidPayments = remember(state.payments) { state.payments.filter { it.paid } }
+    val isPersonalizadoPayment: (PaymentRecord) -> Boolean = { p ->
+        clientMap[p.clientId]?.trainingType == "PERSONALIZADO"
+    }
+
+    val personalizadoPayments = remember(allPaidPayments, clientMap) {
+        allPaidPayments.filter(isPersonalizadoPayment)
+    }
+    val grupoPayments = remember(allPaidPayments, clientMap) {
+        allPaidPayments.filter { !isPersonalizadoPayment(it) }
+    }
+
+    val paidPayments = remember(allPaidPayments, trainingFilter, clientMap) {
+        when (trainingFilter) {
+            "PERSONALIZADO" -> allPaidPayments.filter(isPersonalizadoPayment)
+            "GRUPO" -> allPaidPayments.filter { !isPersonalizadoPayment(it) }
+            else -> allPaidPayments
+        }
+    }
+
+    val currentMonthRevenue = remember(paidPayments, state.currentMonthYear) {
+        paidPayments.filter { it.monthYear == state.currentMonthYear }.sumOf { it.amountEur }
+    }
+    val currentMonthCount = remember(paidPayments, state.currentMonthYear) {
+        paidPayments.count { it.monthYear == state.currentMonthYear }
+    }
+    val totalRevenue = remember(paidPayments) { paidPayments.sumOf { it.amountEur } }
+    val monthlyAvg = remember(paidPayments, totalRevenue) {
+        if (paidPayments.isEmpty()) 0.0
+        else totalRevenue / paidPayments.map { it.monthYear }.distinct().size.coerceAtLeast(1)
+    }
+    val avgPerStudent = remember(paidPayments, totalRevenue) {
+        if (paidPayments.isEmpty()) 0.0
+        else totalRevenue / paidPayments.map { "${it.clientId}__${it.monthYear}" }.distinct().size.coerceAtLeast(1)
+    }
+    val curMonthUniqueStudents = remember(paidPayments, state.currentMonthYear) {
+        paidPayments.filter { it.monthYear == state.currentMonthYear }.map { it.clientId }.distinct().size
+    }
+    val curMonthAvgPerStudent = if (curMonthUniqueStudents > 0) currentMonthRevenue / curMonthUniqueStudents else 0.0
+
+    fun statsFor(list: List<PaymentRecord>): Triple<Double, Double, Double> {
+        val total = list.sumOf { it.amountEur }
+        val thisMonth = list.filter { it.monthYear == state.currentMonthYear }.sumOf { it.amountEur }
+        val pairs = list.map { "${it.clientId}__${it.monthYear}" }.distinct().size
+        val avg = if (pairs > 0) total / pairs else 0.0
+        return Triple(total, thisMonth, avg)
+    }
+    val (persTotal, persMonth, persAvg) = remember(personalizadoPayments, state.currentMonthYear) { statsFor(personalizadoPayments) }
+    val (grpTotal, grpMonth, grpAvg) = remember(grupoPayments, state.currentMonthYear) { statsFor(grupoPayments) }
 
     val groupedByMethod = remember(paidPayments) {
         val groups = linkedMapOf(
@@ -136,7 +185,7 @@ private fun FinancesSection(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Finanças", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
                     Text(
-                        "Fidelizações de 6/12 meses divididas por mês",
+                        "Personalizado vs Grupo · Fidelizações divididas/mês",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondaryDark
                     )
@@ -149,20 +198,114 @@ private fun FinancesSection(
             }
         }
 
-        // KPI Metric Cards (Current Month + Monthly Average + Per-Student Monthly Average + Count + Total)
+        // Training Type Filter Chips
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                listOf(
+                    "ALL" to "Todos (${allPaidPayments.size})",
+                    "PERSONALIZADO" to "Personalizado (${personalizadoPayments.size})",
+                    "GRUPO" to "Grupo (${grupoPayments.size})"
+                ).forEach { (key, label) ->
+                    FilterChip(
+                        selected = trainingFilter == key,
+                        onClick = { trainingFilter = key },
+                        label = { Text(label, maxLines = 1) },
+                        modifier = Modifier.testTag("finance_type_filter_$key"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold
+                        )
+                    )
+                }
+            }
+        }
+
+        // Personalizado vs Grupo Comparison Card
+        item {
+            BrandCard {
+                Text("Treino Personalizado vs Treino em Grupo", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        color = if (trainingFilter == "PERSONALIZADO") NewShapeGoldMuted else ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (trainingFilter == "PERSONALIZADO") NewShapeGold else HairlineBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { trainingFilter = if (trainingFilter == "PERSONALIZADO") "ALL" else "PERSONALIZADO" }
+                            .testTag("finance_card_personalizado")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            StatusPill("Personalizado", NewShapeGoldBright, NewShapeGoldMuted)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "€${String.format("%.2f", persTotal)}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = NewShapeGoldBright
+                            )
+                            Text(
+                                "${state.currentMonthLabel}: €${String.format("%.2f", persMonth)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                "Média/aluno: €${String.format("%.2f", persAvg)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                    }
+                    Surface(
+                        color = if (trainingFilter == "GRUPO") InfoBlueContainer else ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (trainingFilter == "GRUPO") InfoBlue else HairlineBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { trainingFilter = if (trainingFilter == "GRUPO") "ALL" else "GRUPO" }
+                            .testTag("finance_card_grupo")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            StatusPill("Grupo", InfoBlue, InfoBlueContainer)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "€${String.format("%.2f", grpTotal)}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = InfoBlue
+                            )
+                            Text(
+                                "${state.currentMonthLabel}: €${String.format("%.2f", grpMonth)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                "Média/aluno: €${String.format("%.2f", grpAvg)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // KPI Metric Cards (Filtered by Training Type)
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     FinanceMetricCard(
                         title = "Faturação (${state.currentMonthLabel})",
-                        value = "€${String.format("%.2f", state.currentMonthRevenueEur)}",
-                        subtitle = "${state.currentMonthPaymentsCount} mensalidade(s)",
+                        value = "€${String.format("%.2f", currentMonthRevenue)}",
+                        subtitle = "$currentMonthCount mensalidade(s)",
                         accent = NewShapeGoldBright,
                         modifier = Modifier.weight(1f)
                     )
                     FinanceMetricCard(
                         title = "Média Mensal",
-                        value = "€${String.format("%.2f", state.monthlyAverageRevenueEur)}",
+                        value = "€${String.format("%.2f", monthlyAvg)}",
                         subtitle = "por mês com registo",
                         accent = InfoBlue,
                         modifier = Modifier.weight(1f)
@@ -170,9 +313,9 @@ private fun FinancesSection(
                 }
                 FinanceMetricCard(
                     title = "Média Mensal / Aluno",
-                    value = "€${String.format("%.2f", state.avgMonthlyPerStudentEur)}",
-                    subtitle = if (state.currentMonthUniqueStudentsCount > 0) {
-                        "${state.currentMonthLabel}: €${String.format("%.2f", state.currentMonthAvgPerStudentEur)} (${state.currentMonthUniqueStudentsCount} alunos)"
+                    value = "€${String.format("%.2f", avgPerStudent)}",
+                    subtitle = if (curMonthUniqueStudents > 0) {
+                        "${state.currentMonthLabel}: €${String.format("%.2f", curMonthAvgPerStudent)} ($curMonthUniqueStudents alunos)"
                     } else {
                         "média por aluno / mês"
                     },
@@ -182,14 +325,14 @@ private fun FinancesSection(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     FinanceMetricCard(
                         title = "Mensalidades Pagas",
-                        value = state.paidPaymentsCount.toString(),
+                        value = paidPayments.size.toString(),
                         subtitle = "1/mês na fidelização",
                         accent = ConfirmedGreen,
                         modifier = Modifier.weight(1f)
                     )
                     FinanceMetricCard(
                         title = "Total Faturação",
-                        value = "€${String.format("%.2f", state.totalRevenueEur)}",
+                        value = "€${String.format("%.2f", totalRevenue)}",
                         subtitle = "soma de todos os meses",
                         accent = NewShapeGold,
                         modifier = Modifier.weight(1f)
@@ -358,9 +501,10 @@ private fun FinancesSection(
                     }
                 } else {
                     items(methodList, key = { "${methodName}_${it.id}" }) { payment ->
-                        val clientName = clientMap[payment.clientId]?.name ?: "Aluno"
+                        val clientObj = clientMap[payment.clientId]
                         PaymentRowCard(
-                            clientName = clientName,
+                            clientName = clientObj?.name ?: "Aluno",
+                            trainingType = clientObj?.trainingType ?: "GRUPO",
                             monthLabel = payment.monthLabel,
                             paidAtMillis = payment.paidAtMillis,
                             amountEur = payment.amountEur,
@@ -380,9 +524,10 @@ private fun FinancesSection(
                     )
                 }
                 items(otherMethodPayments, key = { "other_${it.id}" }) { payment ->
-                    val clientName = clientMap[payment.clientId]?.name ?: "Aluno"
+                    val clientObj = clientMap[payment.clientId]
                     PaymentRowCard(
-                        clientName = clientName,
+                        clientName = clientObj?.name ?: "Aluno",
+                        trainingType = clientObj?.trainingType ?: "GRUPO",
                         monthLabel = "${payment.monthLabel}${if (payment.note.isNotBlank()) " · ${payment.note}" else ""}",
                         paidAtMillis = payment.paidAtMillis,
                         amountEur = payment.amountEur,
@@ -460,11 +605,13 @@ private fun FinancesSection(
 @Composable
 private fun PaymentRowCard(
     clientName: String,
+    trainingType: String,
     monthLabel: String,
     paidAtMillis: Long,
     amountEur: Double,
     onDelete: () -> Unit
 ) {
+    val isPersonal = trainingType == "PERSONALIZADO"
     Surface(
         color = CharcoalSurface,
         shape = MaterialTheme.shapes.medium,
@@ -477,7 +624,17 @@ private fun PaymentRowCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(clientName, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(clientName, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                    StatusPill(
+                        text = if (isPersonal) "Personalizado" else "Grupo",
+                        textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
+                        containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
+                    )
+                }
                 Text(
                     text = "$monthLabel · ${formatShortDate(paidAtMillis)}",
                     style = MaterialTheme.typography.bodySmall,

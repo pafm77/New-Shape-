@@ -49,7 +49,8 @@ service cloud.firestore {
              data.newClient is bool &&
              (!('monthlyFeeEur' in data) || (data.monthlyFeeEur is number && data.monthlyFeeEur >= 0 && data.monthlyFeeEur <= 100000)) &&
              (!('fidelizacaoMonths' in data) || (data.fidelizacaoMonths in [0, 6, 12])) &&
-             (!('fidelizacaoStartMillis' in data) || (data.fidelizacaoStartMillis is int && data.fidelizacaoStartMillis >= 0));
+             (!('fidelizacaoStartMillis' in data) || (data.fidelizacaoStartMillis is int && data.fidelizacaoStartMillis >= 0)) &&
+             (!('trainingType' in data) || (data.trainingType in ['PERSONALIZADO', 'GRUPO']));
     }
 
     function isValidWeek(data) {
@@ -78,6 +79,7 @@ service cloud.firestore {
              data.weekKey is string && data.weekKey.size() >= 1 && data.weekKey.size() <= 30 &&
              data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
              data.status in ['PENDING', 'CONFIRMED', 'ALTERED', 'CANCELLED'] &&
+             (!('attendanceStatus' in data) || (data.attendanceStatus in ['', 'PENDING', 'PRESENT', 'ABSENT'])) &&
              data.requestedAtMillis is int;
     }
 
@@ -217,7 +219,7 @@ service cloud.firestore {
         allow create: if canAccessStudio(userId) && isValidId(clientId) &&
                          incoming().userId == userId &&
                          incoming().keys().hasAll(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidClient(incoming());
         allow update: if isOwner(userId) && isValidId(clientId) &&
@@ -225,7 +227,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(clientId);
       }
 
@@ -271,17 +273,19 @@ service cloud.firestore {
         allow create: if canAccessStudio(userId) && isValidId(bookingId) &&
                          incoming().userId == userId &&
                          (isOwner(userId) || incoming().status in ['PENDING', 'ALTERED']) &&
+                         (isOwner(userId) || !('attendanceStatus' in incoming()) || incoming().attendanceStatus == '') &&
                          incoming().keys().hasAll(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'attendanceStatus', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidBooking(incoming());
         allow update: if canAccessStudio(userId) && isValidId(bookingId) &&
                          isValidBooking(incoming()) &&
                          (isOwner(userId) || incoming().status in ['ALTERED', 'CANCELLED']) &&
+                         (isOwner(userId) || !('attendanceStatus' in incoming().diff(existing()).affectedKeys())) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['sessionId', 'status', 'requestedAtMillis', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['sessionId', 'status', 'attendanceStatus', 'requestedAtMillis', 'updatedAt']);
         allow delete: if canAccessStudio(userId) && isValidId(bookingId);
       }
 
@@ -386,12 +390,15 @@ service cloud.firestore {
                          incoming().keys().hasOnly(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidWorkoutPlanItem(incoming());
-        allow update: if isOwner(userId) && isValidId(itemId) &&
+        allow update: if canAccessStudio(userId) && isValidId(itemId) &&
                          isValidWorkoutPlanItem(incoming()) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'updatedAt']);
+                         (
+                           (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'updatedAt'])) ||
+                           (isStudioMember(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['loadKg', 'updatedAt']))
+                         );
         allow delete: if isOwner(userId) && isValidId(itemId);
       }
 

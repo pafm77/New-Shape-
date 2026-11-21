@@ -25,7 +25,7 @@ const METRICS: { key: MetricKey; label: string; unit: string; decimals: number }
   { key: 'weightKg', label: 'Peso', unit: 'kg', decimals: 1 },
   { key: 'bmi', label: 'IMC', unit: '', decimals: 1 },
   { key: 'bodyFatPct', label: 'MG', unit: '%', decimals: 1 },
-  { key: 'muscleMassKg', label: 'MM', unit: 'kg', decimals: 1 },
+  { key: 'muscleMassKg', label: 'MM', unit: '%', decimals: 1 },
   { key: 'visceralFat', label: 'GV', unit: '', decimals: 1 },
   { key: 'bmrKcal', label: 'TMB', unit: 'kcal', decimals: 0 },
 ];
@@ -134,8 +134,8 @@ export const AssessmentDashboard: React.FC<{
           />
           <MetricTile
             label="Massa Muscular (MM)"
-            value={`${latest.muscleMassKg.toFixed(1)} kg`}
-            delta={delta(latest.muscleMassKg, prev?.muscleMassKg, 'kg')}
+            value={`${latest.muscleMassKg.toFixed(1)}%`}
+            delta={delta(latest.muscleMassKg, prev?.muscleMassKg, '%')}
           />
           <MetricTile
             label="Gord. Visceral (GV)"
@@ -179,7 +179,7 @@ export const AssessmentDashboard: React.FC<{
                     {item.bmrKcal.toFixed(0)} kcal
                   </p>
                   <p className="mt-1 text-xs text-[#A1A1AA]">
-                    MG {item.bodyFatPct.toFixed(1)}% · MM {item.muscleMassKg.toFixed(1)} kg · GV{' '}
+                    MG {item.bodyFatPct.toFixed(1)}% · MM {item.muscleMassKg.toFixed(1)}% · GV{' '}
                     {item.visceralFat.toFixed(1)} · {item.ageYears}a / {item.heightCm.toFixed(0)} cm
                   </p>
                   {item.notes && <p className="mt-1 text-xs text-[#F4F4F5]">{item.notes}</p>}
@@ -379,7 +379,7 @@ export const NewAssessmentModal: React.FC<{
   const [age, setAge] = useState(latest ? String(latest.ageYears) : '28');
   const [height, setHeight] = useState(latest ? String(latest.heightCm) : '175');
   const [fat, setFat] = useState(latest ? String(latest.bodyFatPct) : '18');
-  const [muscle, setMuscle] = useState(latest ? String(latest.muscleMassKg) : '32');
+  const [muscle, setMuscle] = useState(latest ? String(latest.muscleMassKg) : '38');
   const [visceral, setVisceral] = useState(latest ? String(latest.visceralFat) : '5');
   const [notes, setNotes] = useState('');
 
@@ -434,7 +434,7 @@ export const NewAssessmentModal: React.FC<{
             <Input type="number" step="0.1" value={fat} onChange={(e) => setFat(e.target.value)} />
           </div>
           <div>
-            <FieldLabel>Massa Muscular (kg)</FieldLabel>
+            <FieldLabel>Massa Muscular (%)</FieldLabel>
             <Input type="number" step="0.1" value={muscle} onChange={(e) => setMuscle(e.target.value)} />
           </div>
           <div>

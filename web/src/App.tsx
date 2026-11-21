@@ -881,6 +881,8 @@ export function App() {
             <PtClientsSection
               uid={studioUid}
               clients={clients}
+              sessions={sessions}
+              bookings={bookings}
               payments={payments}
               fidelizacoes={fidelizacoes}
               onJumpToWorkout={(cid) => {

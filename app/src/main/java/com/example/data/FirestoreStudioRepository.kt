@@ -170,9 +170,9 @@ class FirestoreStudioRepository(
                 val now = System.currentTimeMillis()
                 val dayMs = 86_400_000L
                 listOf(
-                    listOf("pa_ana_1", now - dayMs * 60, 68.5, 29, 166.0, "F", 26.8, 25.1, 6.0, "Avaliação inicial"),
-                    listOf("pa_ana_2", now - dayMs * 30, 66.8, 29, 166.0, "F", 24.9, 25.5, 5.5, "Boa evolução de força"),
-                    listOf("pa_ana_3", now - dayMs * 2, 65.4, 29, 166.0, "F", 23.2, 26.0, 5.0, "Recomposição corporal consistente")
+                    listOf("pa_ana_1", now - dayMs * 60, 68.5, 29, 166.0, "F", 26.8, 36.6, 6.0, "Avaliação inicial"),
+                    listOf("pa_ana_2", now - dayMs * 30, 66.8, 29, 166.0, "F", 24.9, 38.2, 5.5, "Boa evolução de força"),
+                    listOf("pa_ana_3", now - dayMs * 2, 65.4, 29, 166.0, "F", 23.2, 39.8, 5.0, "Recomposição corporal consistente")
                 ).forEach { pa ->
                     val w = pa[2] as Double
                     val age = pa[3] as Int
@@ -291,6 +291,7 @@ class FirestoreStudioRepository(
                 val (cid, cname, cphone) = idNamePhone
                 val (cnotes, cisNew) = notesNew
                 val (feeEur, fidMonths, fidStart) = feeDefaults[cid] ?: Triple(0.0, 0, 0L)
+                val trainingType = if (cid == "client_ana" || cid == "client_eva") "PERSONALIZADO" else "GRUPO"
                 writes += userDoc(uid).collection("clients").document(cid) to mapOf(
                     "userId" to uid,
                     "name" to cname,
@@ -298,6 +299,7 @@ class FirestoreStudioRepository(
                     "notes" to cnotes,
                     "active" to true,
                     "newClient" to cisNew,
+                    "trainingType" to trainingType,
                     "monthlyFeeEur" to feeEur,
                     "fidelizacaoMonths" to fidMonths,
                     "fidelizacaoStartMillis" to fidStart,
@@ -539,9 +541,9 @@ class FirestoreStudioRepository(
 
             // Sample Physical Assessments for Ana
             listOf(
-                listOf("pa_ana_1", now - dayMs * 60, 68.5, 29, 166.0, "F", 26.8, 25.1, 6.0, "Avaliação inicial"),
-                listOf("pa_ana_2", now - dayMs * 30, 66.8, 29, 166.0, "F", 24.9, 25.5, 5.5, "Boa evolução de força"),
-                listOf("pa_ana_3", now - dayMs * 2, 65.4, 29, 166.0, "F", 23.2, 26.0, 5.0, "Recomposição corporal consistente")
+                listOf("pa_ana_1", now - dayMs * 60, 68.5, 29, 166.0, "F", 26.8, 36.6, 6.0, "Avaliação inicial"),
+                listOf("pa_ana_2", now - dayMs * 30, 66.8, 29, 166.0, "F", 24.9, 38.2, 5.5, "Boa evolução de força"),
+                listOf("pa_ana_3", now - dayMs * 2, 65.4, 29, 166.0, "F", 23.2, 39.8, 5.0, "Recomposição corporal consistente")
             ).forEach { pa ->
                 val w = pa[2] as Double
                 val age = pa[3] as Int
@@ -608,6 +610,7 @@ class FirestoreStudioRepository(
         phone: String,
         notes: String,
         newClient: Boolean = false,
+        trainingType: String = "GRUPO",
         monthlyFeeEur: Double = 0.0,
         fidelizacaoMonths: Int = 0,
         fidelizacaoStartMillis: Long = 0L
@@ -618,6 +621,7 @@ class FirestoreStudioRepository(
             val cleanName = name.trim().take(100)
             require(cleanName.isNotEmpty()) { "O nome do aluno é obrigatório." }
             val cleanPhone = normalizePortuguesePhone(phone)
+            val safeTrainingType = if (trainingType == "PERSONALIZADO") "PERSONALIZADO" else "GRUPO"
             val docRef = userDoc(uid).collection("clients").document()
             path = docRef.path
             docRef.set(
@@ -628,6 +632,7 @@ class FirestoreStudioRepository(
                     "notes" to notes.trim().take(500),
                     "active" to true,
                     "newClient" to newClient,
+                    "trainingType" to safeTrainingType,
                     "monthlyFeeEur" to monthlyFeeEur.coerceIn(0.0, 100000.0),
                     "fidelizacaoMonths" to (if (fidelizacaoMonths in listOf(6, 12)) fidelizacaoMonths else 0),
                     "fidelizacaoStartMillis" to fidelizacaoStartMillis.coerceAtLeast(0L),
@@ -651,6 +656,7 @@ class FirestoreStudioRepository(
             require(client.id.isNotBlank())
             val docRef = userDoc(uid).collection("clients").document(client.id)
             path = docRef.path
+            val safeTrainingType = if (client.trainingType == "PERSONALIZADO") "PERSONALIZADO" else "GRUPO"
             docRef.update(
                 mapOf(
                     "name" to client.name.trim().take(100),
@@ -658,6 +664,7 @@ class FirestoreStudioRepository(
                     "notes" to client.notes.trim().take(500),
                     "active" to client.active,
                     "newClient" to false,
+                    "trainingType" to safeTrainingType,
                     "monthlyFeeEur" to client.monthlyFeeEur.coerceIn(0.0, 100000.0),
                     "fidelizacaoMonths" to (if (client.fidelizacaoMonths in listOf(6, 12)) client.fidelizacaoMonths else 0),
                     "fidelizacaoStartMillis" to client.fidelizacaoStartMillis.coerceAtLeast(0L),
@@ -715,6 +722,7 @@ class FirestoreStudioRepository(
                     "notes" to "",
                     "active" to true,
                     "newClient" to false,
+                    "trainingType" to "GRUPO",
                     "monthlyFeeEur" to 0.0,
                     "fidelizacaoMonths" to 0,
                     "fidelizacaoStartMillis" to 0L,
@@ -1017,6 +1025,27 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
+    suspend fun setBookingAttendance(bookingId: String, attendanceStatus: String): Result<Unit> = try {
+        val uid = requireUserId()
+        val safeStatus = when (attendanceStatus) {
+            "PRESENT", "ABSENT", "PENDING" -> attendanceStatus
+            else -> ""
+        }
+        userDoc(uid).collection("bookings").document(bookingId)
+            .update(
+                mapOf(
+                    "attendanceStatus" to safeStatus,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/bookings/$bookingId")
+        Result.failure(e)
+    }
+
     suspend fun submitStudentBookings(
         weekKey: String,
         clientId: String,
@@ -1291,6 +1320,101 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
+    suspend fun createWorkoutPlansForClients(
+        clientIds: List<String>,
+        title: String,
+        splitLabel: String
+    ): Result<Int> = try {
+        val uid = requireUserId()
+        val uniqueIds = clientIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        require(uniqueIds.isNotEmpty()) { "Seleciona pelo menos um aluno." }
+        val cleanTitle = title.trim().take(120)
+        val cleanSplit = splitLabel.trim().take(120)
+        val now = System.currentTimeMillis()
+        uniqueIds.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { cid ->
+                val ref = userDoc(uid).collection("workout_plans").document()
+                batch.set(
+                    ref,
+                    mapOf(
+                        "userId" to uid,
+                        "clientId" to cid,
+                        "title" to cleanTitle,
+                        "splitLabel" to cleanSplit,
+                        "createdAtMillis" to now,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.commit().await()
+        }
+        Result.success(uniqueIds.size)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/workout_plans")
+        Result.failure(e)
+    }
+
+    suspend fun assignWorkoutPlanToClients(
+        sourcePlan: WorkoutPlanRecord,
+        sourceItems: List<WorkoutPlanItemRecord>,
+        targetClientIds: List<String>
+    ): Result<Int> = try {
+        val uid = requireUserId()
+        val uniqueIds = targetClientIds
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != sourcePlan.clientId }
+            .distinct()
+        require(uniqueIds.isNotEmpty()) { "Seleciona pelo menos outro aluno." }
+        val sortedItems = sourceItems.sortedBy { it.orderIndex }
+        val now = System.currentTimeMillis()
+        val writes = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
+        uniqueIds.forEach { cid ->
+            val newPlanRef = userDoc(uid).collection("workout_plans").document()
+            writes += newPlanRef to mapOf(
+                "userId" to uid,
+                "clientId" to cid,
+                "title" to sourcePlan.title.trim().take(120),
+                "splitLabel" to sourcePlan.splitLabel.trim().take(120),
+                "createdAtMillis" to now,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            sortedItems.forEachIndexed { idx, item ->
+                val itemRef = userDoc(uid).collection("workout_plan_items").document()
+                writes += itemRef to mapOf(
+                    "userId" to uid,
+                    "planId" to newPlanRef.id,
+                    "exerciseId" to item.exerciseId,
+                    "exerciseName" to item.exerciseName.take(120),
+                    "muscleGroup" to item.muscleGroup.take(40),
+                    "sets" to item.sets.coerceIn(1, 30),
+                    "reps" to item.reps.trim().ifBlank { "10-12" }.take(40),
+                    "loadKg" to item.loadKg.trim().take(40),
+                    "restSeconds" to item.restSeconds.coerceIn(0, 600),
+                    "notes" to item.notes.trim().take(300),
+                    "orderIndex" to idx.coerceIn(0, 200),
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            }
+        }
+        writes.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { (ref, payload) -> batch.set(ref, payload) }
+            batch.commit().await()
+        }
+        Result.success(uniqueIds.size)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/workout_plans")
+        Result.failure(e)
+    }
+
     suspend fun deleteWorkoutPlan(planId: String, planItems: List<WorkoutPlanItemRecord>): Result<Unit> = try {
         val uid = requireUserId()
         val batch = db.batch()
@@ -1340,6 +1464,22 @@ class FirestoreStudioRepository(
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/workout_plan_items")
+        Result.failure(e)
+    }
+
+    suspend fun updateWorkoutPlanItemLoad(itemId: String, loadKg: String): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("workout_plan_items").document(itemId).update(
+            mapOf(
+                "loadKg" to loadKg.trim().take(40),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/workout_plan_items/$itemId")
         Result.failure(e)
     }
 
@@ -1415,76 +1555,6 @@ class FirestoreStudioRepository(
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/nutrition_entries/$entryId")
-        Result.failure(e)
-    }
-
-    suspend fun importFoodsCsv(rawText: String, existingFoods: List<FoodItemRecord>): Result<ImportResult> = try {
-        val uid = requireUserId()
-        val existingNames = existingFoods.map { it.name.trim().lowercase() }.toMutableSet()
-        var added = 0
-        var ignored = 0
-        val errors = mutableListOf<String>()
-        val lines = rawText.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        val writes = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
-
-        for ((index, line) in lines.withIndex()) {
-            val delimiter = when {
-                line.contains('\t') -> '\t'
-                line.contains(';') -> ';'
-                else -> ','
-            }
-            val parts = line.split(delimiter).map { it.trim() }
-            if (index == 0 && (parts[0].lowercase().contains("nome") || parts[0].lowercase().contains("alimento"))) {
-                continue
-            }
-            if (parts.size < 6) {
-                errors.add("Linha ${index + 1}: são necessárias 6 colunas (Nome, Categoria, Kcal, Prot, HC, Gord)")
-                continue
-            }
-            val name = parts[0].take(120)
-            val category = parts[1].ifBlank { "Outros" }.take(40)
-            fun parseNum(raw: String): Double? =
-                raw.replace(',', '.').replace(Regex("[^0-9.]"), "").toDoubleOrNull()
-
-            val kcal = parseNum(parts[2])
-            val prot = parseNum(parts[3])
-            val carbs = parseNum(parts[4])
-            val fat = parseNum(parts[5])
-            if (name.isBlank() || kcal == null || prot == null || carbs == null || fat == null) {
-                errors.add("Linha ${index + 1}: valores numéricos inválidos")
-                continue
-            }
-            val key = name.lowercase()
-            if (key in existingNames) {
-                ignored++
-                continue
-            }
-            existingNames.add(key)
-            val docRef = userDoc(uid).collection("foods").document()
-            writes += docRef to mapOf(
-                "userId" to uid,
-                "name" to name,
-                "category" to category,
-                "kcalPer100g" to kcal.coerceAtLeast(0.0),
-                "proteinPer100g" to prot.coerceAtLeast(0.0),
-                "carbsPer100g" to carbs.coerceAtLeast(0.0),
-                "fatPer100g" to fat.coerceAtLeast(0.0),
-                "custom" to true,
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-            added++
-        }
-        writes.chunked(400).forEach { chunk ->
-            val batch = db.batch()
-            chunk.forEach { (ref, payload) -> batch.set(ref, payload) }
-            batch.commit().await()
-        }
-        Result.success(ImportResult(added, ignored, errors))
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/foods")
         Result.failure(e)
     }
 

@@ -16,6 +16,7 @@ data class ClientRecord(
     val notes: String = "",
     val active: Boolean = true,
     val newClient: Boolean = false,
+    val trainingType: String = "GRUPO",
     val monthlyFeeEur: Double = 0.0,
     val fidelizacaoMonths: Int = 0,
     val fidelizacaoStartMillis: Long = 0L,
@@ -66,6 +67,7 @@ data class BookingRecord(
     val weekKey: String = "",
     val clientId: String = "",
     val status: String = BookingStatus.PENDING.name,
+    val attendanceStatus: String = "",
     val requestedAtMillis: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null

@@ -254,7 +254,6 @@ private fun FoodCatalogSection(
     var search by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("Todos") }
     var showAddFoodDialog by remember { mutableStateOf(false) }
-    var showImportFoodsDialog by remember { mutableStateOf(false) }
 
     val categories = remember(state.foodItems) {
         listOf("Todos") + state.foodItems.map { it.category }.distinct().sorted()
@@ -272,22 +271,17 @@ private fun FoodCatalogSection(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text("Alimentos (por 100g)", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    DarkSecondaryButton(
-                        text = "Importar Excel",
-                        icon = Icons.Default.UploadFile,
-                        onClick = { showImportFoodsDialog = true },
-                        modifier = Modifier.weight(1f)
-                    )
-                    GoldPrimaryButton(
-                        text = "+ Novo Alimento",
-                        onClick = { showAddFoodDialog = true },
-                        modifier = Modifier.weight(1f),
-                        testTag = "add_food_button"
-                    )
-                }
+                GoldPrimaryButton(
+                    text = "+ Novo Alimento",
+                    onClick = { showAddFoodDialog = true },
+                    testTag = "add_food_button"
+                )
             }
         }
         item {
@@ -350,13 +344,6 @@ private fun FoodCatalogSection(
                 viewModel.addCustomFood(name, cat, kcal, p, c, f)
                 showAddFoodDialog = false
             }
-        )
-    }
-
-    if (showImportFoodsDialog) {
-        ImportFoodsDialog(
-            onDismiss = { showImportFoodsDialog = false },
-            onImport = { raw, onDone -> viewModel.importFoodsCsv(raw, onDone) }
         )
     }
 }
@@ -550,56 +537,6 @@ private fun AddCustomFoodDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancelar", color = TextSecondaryDark) }
-        }
-    )
-}
-
-@Composable
-private fun ImportFoodsDialog(
-    onDismiss: () -> Unit,
-    onImport: (String, (com.example.data.ImportResult) -> Unit) -> Unit
-) {
-    var rawText by remember {
-        mutableStateOf("Alimento;Categoria;Kcal;Proteina;Hidratos;Gordura\nBife de Peru;Proteína;111;24;0;1.5\nPão de Mistura;Hidratos;255;8.5;50;1.8")
-    }
-    var resultText by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = CharcoalSurface,
-        title = { Text("Importar Tabela Excel / CSV", color = TextPrimaryDark) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "Copia linhas diretamente do Excel (Tab) ou cola em CSV (;) por 100g: Nome;Categoria;Kcal;Prot;HC;Gord.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondaryDark
-                )
-                OutlinedTextField(
-                    value = rawText,
-                    onValueChange = { rawText = it },
-                    minLines = 5,
-                    modifier = Modifier.fillMaxWidth().testTag("import_foods_input"),
-                    colors = darkFieldColors()
-                )
-                if (resultText != null) {
-                    Text(resultText!!, style = MaterialTheme.typography.bodySmall, color = NewShapeGoldBright)
-                }
-            }
-        },
-        confirmButton = {
-            GoldPrimaryButton(
-                text = "Importar Alimentos",
-                onClick = {
-                    onImport(rawText) { res ->
-                        resultText = "Adicionados: ${res.added} · Duplicados ignorados: ${res.ignored} · Erros: ${res.errors.size}"
-                    }
-                },
-                testTag = "confirm_import_foods_btn"
-            )
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Fechar", color = TextSecondaryDark) }
         }
     )
 }

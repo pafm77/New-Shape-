@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Dumbbell, Plus, Search, Trash2, X } from 'lucide-react';
+import { Dumbbell, Plus, Search, Trash2, Users, X } from 'lucide-react';
 import {
   ClientRecord,
   ExerciseRecord,
@@ -49,6 +49,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
 
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [targetPlan, setTargetPlan] = useState<WorkoutPlanRecord | null>(null);
+  const [assignPlan, setAssignPlan] = useState<WorkoutPlanRecord | null>(null);
 
   const clientPlans = useMemo(
     () =>
@@ -184,10 +185,18 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                       </div>
                     )}
 
-                    <div className="mt-3">
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <SecondaryButton fullWidth onClick={() => setTargetPlan(plan)}>
                         <Plus className="h-4 w-4" />
-                        Adicionar Exercício da Biblioteca
+                        Adicionar Exercício
+                      </SecondaryButton>
+                      <SecondaryButton
+                        fullWidth
+                        disabled={activeClients.length <= 1}
+                        onClick={() => setAssignPlan(plan)}
+                      >
+                        <Users className="h-4 w-4" />
+                        Adicionar a mais alunos
                       </SecondaryButton>
                     </div>
                   </BrandCard>
@@ -198,12 +207,45 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
 
           {showNewPlan && effectiveClient && (
             <NewPlanModal
-              clientName={effectiveClient.name}
+              clients={activeClients}
+              initialClientId={effectiveClient.id}
               onClose={() => setShowNewPlan(false)}
-              onCreate={async (title, split) => {
-                await repo.createWorkoutPlan(uid, effectiveClient.id, title, split);
+              onCreate={async (selectedIds, title, split) => {
+                const count = await repo.createWorkoutPlansForClients(
+                  uid,
+                  selectedIds,
+                  title,
+                  split
+                );
                 setShowNewPlan(false);
-                onBanner('Plano de treino criado!');
+                onBanner(
+                  count > 1
+                    ? `Plano de treino criado para ${count} alunos!`
+                    : 'Plano de treino criado!'
+                );
+              }}
+            />
+          )}
+
+          {assignPlan && (
+            <AssignPlanToClientsModal
+              plan={assignPlan}
+              clients={activeClients.filter((c) => c.id !== assignPlan.clientId)}
+              itemCount={workoutPlanItems.filter((i) => i.planId === assignPlan.id).length}
+              onClose={() => setAssignPlan(null)}
+              onAssign={async (targetIds) => {
+                const count = await repo.assignWorkoutPlanToClients(
+                  uid,
+                  assignPlan,
+                  workoutPlanItems,
+                  targetIds
+                );
+                setAssignPlan(null);
+                onBanner(
+                  count === 1
+                    ? 'Plano copiado para 1 aluno!'
+                    : `Plano copiado para ${count} alunos!`
+                );
               }}
             />
           )}
@@ -346,14 +388,27 @@ const ExerciseLibraryView: React.FC<{
 };
 
 const NewPlanModal: React.FC<{
-  clientName: string;
+  clients: ClientRecord[];
+  initialClientId: string;
   onClose: () => void;
-  onCreate: (title: string, split: string) => Promise<void>;
-}> = ({ clientName, onClose, onCreate }) => {
+  onCreate: (clientIds: string[], title: string, split: string) => Promise<void>;
+}> = ({ clients, initialClientId, onClose, onCreate }) => {
   const [title, setTitle] = useState('');
   const [split, setSplit] = useState('Treino A · Corpo Inteiro');
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    initialClientId ? [initialClientId] : clients[0] ? [clients[0].id] : []
+  );
+
+  const toggleClient = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const allSelected = clients.length > 0 && selectedIds.length === clients.length;
+
   return (
-    <Modal open title={`Novo Plano · ${clientName}`} onClose={onClose}>
+    <Modal open title="Novo Plano de Treino" onClose={onClose}>
       <div className="space-y-3">
         <div>
           <FieldLabel>Nome do Plano</FieldLabel>
@@ -367,10 +422,145 @@ const NewPlanModal: React.FC<{
           <FieldLabel>Divisão / Dia</FieldLabel>
           <Input value={split} onChange={(e) => setSplit(e.target.value)} />
         </div>
+        <div>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <FieldLabel>Alunos ({selectedIds.length} selecionado(s))</FieldLabel>
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedIds(allSelected ? [] : clients.map((c) => c.id))
+              }
+              className="text-xs font-bold text-[#FACC15] hover:underline"
+            >
+              {allSelected ? 'Limpar seleção' : 'Selecionar todos'}
+            </button>
+          </div>
+          <div className="max-h-44 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
+            {clients.map((c) => {
+              const checked = selectedIds.includes(c.id);
+              return (
+                <label
+                  key={c.id}
+                  className="flex cursor-pointer items-center justify-between gap-2.5 px-3 py-2 text-xs hover:bg-[#2E2E35]"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleClient(c.id)}
+                      className="h-4 w-4 accent-[#EAB308]"
+                    />
+                    <span className="font-semibold text-[#F4F4F5]">{c.name}</span>
+                  </span>
+                  <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
+                    {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
+                  </StatusPill>
+                </label>
+              );
+            })}
+          </div>
+        </div>
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
-          <GoldButton disabled={!title.trim()} onClick={() => onCreate(title, split)}>
-            Criar Plano
+          <GoldButton
+            disabled={!title.trim() || selectedIds.length === 0}
+            onClick={() => onCreate(selectedIds, title, split)}
+          >
+            {selectedIds.length > 1
+              ? `Criar para ${selectedIds.length} alunos`
+              : 'Criar Plano'}
+          </GoldButton>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const AssignPlanToClientsModal: React.FC<{
+  plan: WorkoutPlanRecord;
+  clients: ClientRecord[];
+  itemCount: number;
+  onClose: () => void;
+  onAssign: (targetClientIds: string[]) => Promise<void>;
+}> = ({ plan, clients, itemCount, onClose, onAssign }) => {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const toggleClient = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const allSelected = clients.length > 0 && selectedIds.length === clients.length;
+
+  return (
+    <Modal
+      open
+      title="Adicionar Plano a Mais Alunos"
+      subtitle={`${plan.title} · ${itemCount} exercício(s) serão copiados`}
+      onClose={onClose}
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-[#A1A1AA]">
+          Cada aluno selecionado recebe uma cópia independente deste plano (incluindo todos os
+          exercícios) para poder registar as suas próprias cargas.
+        </p>
+        {clients.length === 0 ? (
+          <p className="text-xs text-[#A1A1AA]">Não existem outros alunos ativos disponíveis.</p>
+        ) : (
+          <div>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <FieldLabel>Escolher alunos ({selectedIds.length})</FieldLabel>
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedIds(allSelected ? [] : clients.map((c) => c.id))
+                }
+                className="text-xs font-bold text-[#FACC15] hover:underline"
+              >
+                {allSelected ? 'Limpar seleção' : 'Selecionar todos'}
+              </button>
+            </div>
+            <div className="max-h-52 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
+              {clients.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex cursor-pointer items-center justify-between gap-2.5 px-3 py-2 text-xs hover:bg-[#2E2E35]"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(c.id)}
+                      onChange={() => toggleClient(c.id)}
+                      className="h-4 w-4 accent-[#EAB308]"
+                    />
+                    <span className="font-semibold text-[#F4F4F5]">{c.name}</span>
+                  </span>
+                  <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
+                    {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
+                  </StatusPill>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <GoldButton
+            disabled={selectedIds.length === 0 || saving}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await onAssign(selectedIds);
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving
+              ? 'A copiar...'
+              : `Adicionar a ${selectedIds.length || ''} aluno(s)`}
           </GoldButton>
         </div>
       </div>

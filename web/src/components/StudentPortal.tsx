@@ -572,7 +572,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               <div>
                 <h2 className="text-xl font-bold text-[#F4F4F5]">Os Teus Planos de Treino</h2>
                 <p className="text-xs text-[#A1A1AA]">
-                  Prescritos pelo teu Personal Trainer
+                  Prescritos pelo teu Personal Trainer · Regista a carga (kg) que usas em cada exercício
                 </p>
               </div>
               {clientPlans.length === 0 ? (
@@ -592,23 +592,17 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       {plan.splitLabel && (
                         <p className="text-xs text-[#A1A1AA]">{plan.splitLabel}</p>
                       )}
-                      <div className="mt-3 space-y-2 border-t border-[#323238] pt-3">
+                      <div className="mt-3 space-y-2.5 border-t border-[#323238] pt-3">
                         {items.map((item, idx) => (
-                          <div
+                          <StudentExerciseLoadCard
                             key={item.id}
-                            className="rounded-xl bg-[#242429] p-3"
-                          >
-                            <p className="text-sm font-bold text-[#F4F4F5]">
-                              {idx + 1}. {item.exerciseName}
-                            </p>
-                            <p className="mt-0.5 text-xs font-semibold text-[#EAB308]">
-                              {item.sets} séries × {item.reps}
-                              {item.loadKg ? ` · ${item.loadKg}` : ''} · descanso {item.restSeconds}s
-                            </p>
-                            {item.notes && (
-                              <p className="mt-1 text-xs text-[#A1A1AA]">{item.notes}</p>
-                            )}
-                          </div>
+                            index={idx}
+                            item={item}
+                            onSaveLoad={async (newLoad) => {
+                              await repo.updateWorkoutPlanItemLoad(uid, item.id, newLoad);
+                              onBanner(`Carga de "${item.exerciseName}" atualizada!`);
+                            }}
+                          />
                         ))}
                       </div>
                     </BrandCard>
@@ -874,6 +868,86 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           </button>
         ))}
       </nav>
+    </div>
+  );
+};
+
+const StudentExerciseLoadCard: React.FC<{
+  index: number;
+  item: WorkoutPlanItemRecord;
+  onSaveLoad: (newLoad: string) => Promise<void>;
+}> = ({ index, item, onSaveLoad }) => {
+  const [draft, setDraft] = useState(item.loadKg);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(item.loadKg);
+  }, [item.loadKg]);
+
+  const formatLoadInput = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    if (/^\d+([.,]\d+)?$/.test(trimmed)) {
+      return `${trimmed.replace(',', '.')} kg`;
+    }
+    return trimmed;
+  };
+
+  const formatted = formatLoadInput(draft);
+  const hasChanged = formatted !== item.loadKg.trim();
+
+  const handleSave = async () => {
+    if (saving || !hasChanged) return;
+    setSaving(true);
+    try {
+      await onSaveLoad(formatted);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-[#323238] bg-[#242429] p-3 space-y-2.5">
+      <div>
+        <p className="text-sm font-bold text-[#F4F4F5]">
+          {index + 1}. {item.exerciseName}
+        </p>
+        <p className="mt-0.5 text-xs font-semibold text-[#EAB308]">
+          {item.sets} séries × {item.reps}
+          {item.loadKg ? ` · ${item.loadKg}` : ''} · descanso {item.restSeconds}s
+        </p>
+        {item.notes && <p className="mt-1 text-xs text-[#A1A1AA]">{item.notes}</p>}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-[#323238]/70 pt-2">
+        <label className="text-[11px] font-semibold text-[#A1A1AA]">Carga (kg):</label>
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleSave();
+            }
+          }}
+          placeholder="Ex: 40 kg"
+          className="min-w-[110px] flex-1 rounded-lg border border-[#323238] bg-[#18181B] px-2.5 py-1.5 text-xs font-semibold text-[#F4F4F5] placeholder-[#71717A] outline-none focus:border-[#EAB308]"
+        />
+        <button
+          type="button"
+          disabled={!hasChanged || saving}
+          onClick={handleSave}
+          className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+            hasChanged
+              ? 'bg-[#EAB308] text-[#121214] hover:bg-[#FACC15]'
+              : 'border border-[#323238] bg-[#1B1B1E] text-[#71717A] cursor-not-allowed'
+          }`}
+        >
+          <Check className="h-3.5 w-3.5" />
+          {saving ? 'A guardar...' : 'Guardar'}
+        </button>
+      </div>
     </div>
   );
 };

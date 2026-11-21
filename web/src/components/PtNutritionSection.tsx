@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Upload } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import {
   ClientRecord,
   FoodItemRecord,
@@ -15,7 +15,6 @@ import {
   Modal,
   SecondaryButton,
   StatusPill,
-  Textarea,
 } from './UiPrimitives';
 
 interface PtNutritionSectionProps {
@@ -203,7 +202,6 @@ const FoodCatalogView: React.FC<{
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('Todos');
   const [showAdd, setShowAdd] = useState(false);
-  const [showImport, setShowImport] = useState(false);
 
   const cats = useMemo(
     () => ['Todos', ...Array.from(new Set(foodItems.map((f) => f.category))).sort()],
@@ -220,16 +218,10 @@ const FoodCatalogView: React.FC<{
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-bold text-[#F4F4F5]">Alimentos (por 100g)</h2>
-        <div className="flex gap-2">
-          <SecondaryButton onClick={() => setShowImport(true)}>
-            <Upload className="h-4 w-4" />
-            Importar Excel
-          </SecondaryButton>
-          <GoldButton onClick={() => setShowAdd(true)}>
-            <Plus className="h-4 w-4" />
-            Novo Alimento
-          </GoldButton>
-        </div>
+        <GoldButton onClick={() => setShowAdd(true)}>
+          <Plus className="h-4 w-4" />
+          Novo Alimento
+        </GoldButton>
       </div>
 
       <div className="relative">
@@ -285,13 +277,6 @@ const FoodCatalogView: React.FC<{
             setShowAdd(false);
             onBanner('Alimento adicionado!');
           }}
-        />
-      )}
-
-      {showImport && (
-        <ImportFoodsModal
-          onClose={() => setShowImport(false)}
-          onImport={(raw) => repo.importFoodsExcelCsv(uid, raw, foodItems)}
         />
       )}
     </div>
@@ -450,54 +435,6 @@ const AddCustomFoodModal: React.FC<{
             }
           >
             Guardar Alimento
-          </GoldButton>
-        </div>
-      </div>
-    </Modal>
-  );
-};
-
-const ImportFoodsModal: React.FC<{
-  onClose: () => void;
-  onImport: (raw: string) => Promise<{ added: number; ignored: number; errors: string[] }>;
-}> = ({ onClose, onImport }) => {
-  const [rawText, setRawText] = useState(
-    'Alimento;Categoria;Kcal;Proteina;Hidratos;Gordura\nBife de Peru;Proteína;111;24;0;1.5\nPão de Mistura;Hidratos;255;8.5;50;1.8'
-  );
-  const [result, setResult] = useState<string | null>(null);
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setRawText(await file.text());
-  };
-
-  return (
-    <Modal open title="Importar Tabela Excel / CSV" onClose={onClose}>
-      <div className="space-y-3">
-        <p className="text-xs text-[#A1A1AA]">
-          Copia linhas diretamente do Excel (Tab) ou cola em CSV (;) por 100g:{' '}
-          <code className="text-[#FACC15]">Nome;Categoria;Kcal;Prot;HC;Gord</code>.
-        </p>
-        <input
-          type="file"
-          accept=".csv,.tsv,.txt"
-          onChange={handleFile}
-          className="block w-full text-xs text-[#A1A1AA] file:mr-3 file:rounded-lg file:border-0 file:bg-[#242429] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#FACC15]"
-        />
-        <Textarea rows={5} value={rawText} onChange={(e) => setRawText(e.target.value)} />
-        {result && <p className="text-xs font-semibold text-[#FACC15]">{result}</p>}
-        <div className="flex justify-end gap-2 pt-1">
-          <SecondaryButton onClick={onClose}>Fechar</SecondaryButton>
-          <GoldButton
-            onClick={async () => {
-              const res = await onImport(rawText);
-              setResult(
-                `Adicionados: ${res.added} · Duplicados ignorados: ${res.ignored} · Erros: ${res.errors.length}`
-              );
-            }}
-          >
-            Importar Alimentos
           </GoldButton>
         </div>
       </div>

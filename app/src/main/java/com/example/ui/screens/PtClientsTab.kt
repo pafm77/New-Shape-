@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.SeedCatalog
+import com.example.data.model.BookingStatus
 import com.example.data.model.ClientRecord
 import com.example.data.model.FidelizacaoRecord
 import com.example.ui.NewShapeViewModel
@@ -43,6 +45,7 @@ fun PtClientsTab(
     var selectedClientId by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var showInactive by remember { mutableStateOf(false) }
+    var typeFilter by remember { mutableStateOf("ALL") }
     var showNewClientDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var paymentTargetClient by remember { mutableStateOf<ClientRecord?>(null) }
@@ -61,9 +64,25 @@ fun PtClientsTab(
         return
     }
 
-    val filteredClients = remember(state.clients, searchQuery, showInactive) {
-        state.clients.filter { client ->
-            (showInactive || client.active) &&
+    val baseVisibleClients = remember(state.clients, showInactive) {
+        state.clients.filter { showInactive || it.active }
+    }
+    val personalizadoCount = remember(baseVisibleClients) {
+        baseVisibleClients.count { it.trainingType == "PERSONALIZADO" }
+    }
+    val grupoCount = remember(baseVisibleClients) {
+        baseVisibleClients.count { it.trainingType != "PERSONALIZADO" }
+    }
+
+    val filteredClients = remember(baseVisibleClients, searchQuery, typeFilter) {
+        baseVisibleClients.filter { client ->
+            val isPersonal = client.trainingType == "PERSONALIZADO"
+            val matchesType = when (typeFilter) {
+                "PERSONALIZADO" -> isPersonal
+                "GRUPO" -> !isPersonal
+                else -> true
+            }
+            matchesType &&
                 (searchQuery.isBlank() ||
                     client.name.contains(searchQuery, ignoreCase = true) ||
                     client.phone.contains(searchQuery))
@@ -113,6 +132,27 @@ fun PtClientsTab(
                     icon = Icons.Default.UploadFile,
                     onClick = { showImportDialog = true }
                 )
+            }
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                listOf(
+                    "ALL" to "Todos (${baseVisibleClients.size})",
+                    "PERSONALIZADO" to "Personalizado ($personalizadoCount)",
+                    "GRUPO" to "Grupo ($grupoCount)"
+                ).forEach { (key, label) ->
+                    FilterChip(
+                        selected = typeFilter == key,
+                        onClick = { typeFilter = key },
+                        label = { Text(label, maxLines = 1) },
+                        modifier = Modifier.testTag("clients_filter_$key"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold
+                        )
+                    )
+                }
             }
         }
 
@@ -173,9 +213,15 @@ fun PtClientsTab(
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(client.name, style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                                    val isPersonal = client.trainingType == "PERSONALIZADO"
+                                    StatusPill(
+                                        text = if (isPersonal) "Personalizado" else "Grupo",
+                                        textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
+                                        containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
+                                    )
                                     if (client.newClient) {
                                         StatusPill("Novo", InfoBlue, InfoBlueContainer)
                                     }
@@ -235,8 +281,8 @@ fun PtClientsTab(
     if (showNewClientDialog) {
         NewClientDialog(
             onDismiss = { showNewClientDialog = false },
-            onSave = { name, phone, notes ->
-                viewModel.addClient(name, phone, notes)
+            onSave = { name, phone, notes, trainingType ->
+                viewModel.addClient(name, phone, notes, trainingType)
                 showNewClientDialog = false
             }
         )
@@ -282,6 +328,9 @@ fun PtClientProfileScreen(
     var name by remember(client.id) { mutableStateOf(client.name) }
     var phone by remember(client.id) { mutableStateOf(client.phone) }
     var notes by remember(client.id) { mutableStateOf(client.notes) }
+    var trainingType by remember(client.id, client.trainingType) {
+        mutableStateOf(if (client.trainingType == "PERSONALIZADO") "PERSONALIZADO" else "GRUPO")
+    }
     var monthlyFeeText by remember(client.id, client.monthlyFeeEur) {
         mutableStateOf(
             if (client.monthlyFeeEur > 0.0) {
@@ -296,6 +345,7 @@ fun PtClientProfileScreen(
             if (client.fidelizacaoStartMillis > 0L) client.fidelizacaoStartMillis else System.currentTimeMillis()
         )
     }
+    var profileTab by remember(client.id) { mutableIntStateOf(0) }
     var showPayDialog by remember { mutableStateOf(false) }
     var editingFid by remember { mutableStateOf<FidelizacaoRecord?>(null) }
     var showNewFidDialog by remember { mutableStateOf(false) }
@@ -308,264 +358,519 @@ fun PtClientProfileScreen(
     }
     val currentMonthPayment = clientPayments.find { it.monthYear == state.currentMonthYear && it.paid }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack, modifier = Modifier.testTag("client_profile_back")) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar aos alunos", tint = NewShapeGold)
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(client.name, style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-                        if (client.notes.contains("rgpd aceite", ignoreCase = true)) {
-                            StatusPill("RGPD ✓", ConfirmedGreen, ConfirmedGreenContainer)
-                        }
-                    }
-                    Text(
-                        text = if (client.active) "Aluno ativo" else "Aluno inativo",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (client.active) ConfirmedGreen else TextSecondaryDark
-                    )
-                }
-                TextButton(onClick = { viewModel.setClientActive(client, !client.active) }) {
-                    Text(
-                        text = if (client.active) "Desativar" else "Reativar",
-                        color = if (client.active) DangerRed else ConfirmedGreen
-                    )
-                }
-            }
-        }
+    val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
+    val confirmedBookings = remember(state.bookings, sessionMap, client.id) {
+        state.bookings
+            .filter { it.clientId == client.id && it.status == BookingStatus.CONFIRMED.name }
+            .mapNotNull { b -> sessionMap[b.sessionId]?.let { s -> b to s } }
+            .sortedByDescending { it.second.startMillis }
+    }
+    val presentCount = confirmedBookings.count { it.first.attendanceStatus == "PRESENT" }
+    val absentCount = confirmedBookings.count { it.first.attendanceStatus == "ABSENT" }
+    val markedCount = presentCount + absentCount
+    val pendingCount = confirmedBookings.size - markedCount
+    val donePct = if (markedCount > 0) (presentCount * 100.0 / markedCount) else 0.0
+    val absentPct = if (markedCount > 0) (absentCount * 100.0 / markedCount) else 0.0
 
-        // Quick navigation pills
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                DarkSecondaryButton(
-                    text = "Treino",
-                    icon = Icons.Default.FitnessCenter,
-                    onClick = onJumpToWorkout,
-                    modifier = Modifier.weight(1f)
-                )
-                DarkSecondaryButton(
-                    text = "Nutrição",
-                    icon = Icons.Default.Restaurant,
-                    onClick = onJumpToNutrition,
-                    modifier = Modifier.weight(1f)
-                )
-                DarkSecondaryButton(
-                    text = "Chat",
-                    icon = Icons.AutoMirrored.Filled.Chat,
-                    onClick = onJumpToChat,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // Personal Details & Agreed Monthly Plan Card
-        item {
-            BrandCard {
-                Text("Dados do Perfil & Plano", style = MaterialTheme.typography.titleMedium, color = NewShapeGoldBright)
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Nome") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = darkFieldColors()
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it.filter { c -> c.isDigit() }.take(9) },
-                        label = { Text("Telemóvel WhatsApp") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        modifier = Modifier.weight(1f),
-                        colors = darkFieldColors()
-                    )
-                    OutlinedTextField(
-                        value = monthlyFeeText,
-                        onValueChange = { monthlyFeeText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                        label = { Text("Valor Mensalidade (€)") },
-                        placeholder = { Text("120") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.weight(1f).testTag("profile_monthly_fee_input"),
-                        colors = darkFieldColors()
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Text("Período de Fidelização (se aplicável)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    listOf(0 to "Sem fidel.", 6 to "6 Meses", 12 to "12 Meses").forEach { (months, label) ->
-                        FilterChip(
-                            selected = fidelizacaoMonths == months,
-                            onClick = {
-                                fidelizacaoMonths = months
-                                if (months > 0 && fidelizacaoStartMillis <= 0L) {
-                                    fidelizacaoStartMillis = System.currentTimeMillis()
-                                }
-                            },
-                            label = { Text(label) },
-                            modifier = Modifier.testTag("profile_fid_$months"),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = NewShapeGold,
-                                selectedLabelColor = TextOnGold
-                            )
-                        )
-                    }
-                }
-                if (fidelizacaoMonths in listOf(6, 12)) {
-                    val endCal = Calendar.getInstance().apply {
-                        timeInMillis = fidelizacaoStartMillis
-                        add(Calendar.MONTH, fidelizacaoMonths)
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Início: ${formatShortDate(fidelizacaoStartMillis)} → Fim: ${formatShortDate(endCal.timeInMillis)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NewShapeGoldBright
-                        )
-                        TextButton(onClick = { fidelizacaoStartMillis = System.currentTimeMillis() }) {
-                            Text("Reiniciar hoje", color = NewShapeGold, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Notas / Lesões / Objetivos") },
-                    minLines = 2,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = darkFieldColors()
-                )
-                Spacer(Modifier.height(12.dp))
-                GoldPrimaryButton(
-                    text = "Guardar alterações",
-                    onClick = {
-                        val parsedFee = monthlyFeeText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
-                        viewModel.updateClient(
-                            client.copy(
-                                name = name,
-                                phone = phone,
-                                notes = notes,
-                                monthlyFeeEur = parsedFee,
-                                fidelizacaoMonths = fidelizacaoMonths,
-                                fidelizacaoStartMillis = if (fidelizacaoMonths > 0) fidelizacaoStartMillis else 0L
-                            )
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    testTag = "profile_save_changes_btn"
-                )
-            }
-        }
-
-        // Mensalidade Card
-        item {
-            BrandCard(highlightBorder = currentMonthPayment == null) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header + Profile Tabs
+        Surface(color = CharcoalSurface) {
+            Column {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)
                 ) {
-                    Column {
-                        Text("Mensalidade (${state.currentMonthLabel})", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
-                        if (currentMonthPayment != null) {
-                            Text(
-                                text = "Pago €${String.format("%.2f", currentMonthPayment.amountEur)} em ${formatShortDate(currentMonthPayment.paidAtMillis)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ConfirmedGreen
-                            )
-                        } else {
-                            Text("Sem registo de pagamento este mês", style = MaterialTheme.typography.bodySmall, color = PendingAmber)
-                        }
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("client_profile_back")) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar aos alunos", tint = NewShapeGold)
                     }
-                    StatusPill(
-                        text = if (currentMonthPayment != null) "Pago ✓" else "Pendente",
-                        textColor = if (currentMonthPayment != null) ConfirmedGreen else PendingAmber,
-                        containerColor = if (currentMonthPayment != null) ConfirmedGreenContainer else PendingAmberContainer
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                GoldPrimaryButton(
-                    text = "Registar Pagamento de Mensalidade",
-                    icon = Icons.Default.Payments,
-                    onClick = { showPayDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    testTag = "profile_register_payment_btn"
-                )
-                if (clientPayments.isNotEmpty()) {
-                    Spacer(Modifier.height(14.dp))
-                    HorizontalDivider(color = HairlineBorder)
-                    Spacer(Modifier.height(10.dp))
-                    Text("Histórico de pagamentos", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
-                    Spacer(Modifier.height(6.dp))
-                    clientPayments.forEach { p ->
+                    Column(modifier = Modifier.weight(1f)) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(client.name, style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                            val isPersonal = client.trainingType == "PERSONALIZADO"
+                            StatusPill(
+                                text = if (isPersonal) "Personalizado" else "Grupo",
+                                textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
+                                containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
+                            )
+                            if (client.notes.contains("rgpd aceite", ignoreCase = true)) {
+                                StatusPill("RGPD ✓", ConfirmedGreen, ConfirmedGreenContainer)
+                            }
+                        }
+                        Text(
+                            text = if (client.active) "Aluno ativo" else "Aluno inativo",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (client.active) ConfirmedGreen else TextSecondaryDark
+                        )
+                    }
+                    TextButton(onClick = { viewModel.setClientActive(client, !client.active) }) {
+                        Text(
+                            text = if (client.active) "Desativar" else "Reativar",
+                            color = if (client.active) DangerRed else ConfirmedGreen
+                        )
+                    }
+                }
+                TabRow(
+                    selectedTabIndex = profileTab,
+                    containerColor = CharcoalSurface,
+                    contentColor = NewShapeGold,
+                    divider = { HorizontalDivider(color = HairlineBorder) }
+                ) {
+                    listOf("Perfil & Plano", "Assiduidade (${confirmedBookings.size})").forEachIndexed { idx, title ->
+                        Tab(
+                            selected = profileTab == idx,
+                            onClick = { profileTab = idx },
+                            modifier = Modifier.testTag("client_profile_tab_$idx"),
+                            text = {
+                                Text(
+                                    text = title,
+                                    fontWeight = if (profileTab == idx) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (profileTab == idx) NewShapeGold else TextSecondaryDark
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (profileTab == 0) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Quick navigation pills
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        DarkSecondaryButton(
+                            text = "Treino",
+                            icon = Icons.Default.FitnessCenter,
+                            onClick = onJumpToWorkout,
+                            modifier = Modifier.weight(1f)
+                        )
+                        DarkSecondaryButton(
+                            text = "Nutrição",
+                            icon = Icons.Default.Restaurant,
+                            onClick = onJumpToNutrition,
+                            modifier = Modifier.weight(1f)
+                        )
+                        DarkSecondaryButton(
+                            text = "Chat",
+                            icon = Icons.AutoMirrored.Filled.Chat,
+                            onClick = onJumpToChat,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Personal Details & Agreed Monthly Plan Card
+                item {
+                    BrandCard {
+                        Text("Dados do Perfil & Plano", style = MaterialTheme.typography.titleMedium, color = NewShapeGoldBright)
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("Nome") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = darkFieldColors()
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text("Modalidade / Tipo de Treino", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            listOf("PERSONALIZADO" to "Personalizado", "GRUPO" to "Grupo").forEach { (key, label) ->
+                                FilterChip(
+                                    selected = trainingType == key,
+                                    onClick = { trainingType = key },
+                                    label = { Text(label) },
+                                    modifier = Modifier.weight(1f).testTag("profile_training_type_$key"),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NewShapeGold,
+                                        selectedLabelColor = TextOnGold
+                                    )
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = phone,
+                                onValueChange = { phone = it.filter { c -> c.isDigit() }.take(9) },
+                                label = { Text("Telemóvel WhatsApp") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                modifier = Modifier.weight(1f),
+                                colors = darkFieldColors()
+                            )
+                            OutlinedTextField(
+                                value = monthlyFeeText,
+                                onValueChange = { monthlyFeeText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                                label = { Text("Valor Mensalidade (€)") },
+                                placeholder = { Text("120") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f).testTag("profile_monthly_fee_input"),
+                                colors = darkFieldColors()
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("Período de Fidelização (se aplicável)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            listOf(0 to "Sem fidel.", 6 to "6 Meses", 12 to "12 Meses").forEach { (months, label) ->
+                                FilterChip(
+                                    selected = fidelizacaoMonths == months,
+                                    onClick = {
+                                        fidelizacaoMonths = months
+                                        if (months > 0 && fidelizacaoStartMillis <= 0L) {
+                                            fidelizacaoStartMillis = System.currentTimeMillis()
+                                        }
+                                    },
+                                    label = { Text(label) },
+                                    modifier = Modifier.testTag("profile_fid_$months"),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NewShapeGold,
+                                        selectedLabelColor = TextOnGold
+                                    )
+                                )
+                            }
+                        }
+                        if (fidelizacaoMonths in listOf(6, 12)) {
+                            val endCal = Calendar.getInstance().apply {
+                                timeInMillis = fidelizacaoStartMillis
+                                add(Calendar.MONTH, fidelizacaoMonths)
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Início: ${formatShortDate(fidelizacaoStartMillis)} → Fim: ${formatShortDate(endCal.timeInMillis)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = NewShapeGoldBright
+                                )
+                                TextButton(onClick = { fidelizacaoStartMillis = System.currentTimeMillis() }) {
+                                    Text("Reiniciar hoje", color = NewShapeGold, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = notes,
+                            onValueChange = { notes = it },
+                            label = { Text("Notas / Lesões / Objetivos") },
+                            minLines = 2,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = darkFieldColors()
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        GoldPrimaryButton(
+                            text = "Guardar alterações",
+                            onClick = {
+                                val parsedFee = monthlyFeeText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+                                viewModel.updateClient(
+                                    client.copy(
+                                        name = name,
+                                        phone = phone,
+                                        notes = notes,
+                                        trainingType = trainingType,
+                                        monthlyFeeEur = parsedFee,
+                                        fidelizacaoMonths = fidelizacaoMonths,
+                                        fidelizacaoStartMillis = if (fidelizacaoMonths > 0) fidelizacaoStartMillis else 0L
+                                    )
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = "profile_save_changes_btn"
+                        )
+                    }
+                }
+
+                // Mensalidade Card
+                item {
+                    BrandCard(highlightBorder = currentMonthPayment == null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text("${p.monthLabel} · €${String.format("%.2f", p.amountEur)}", style = MaterialTheme.typography.bodyMedium, color = TextPrimaryDark)
-                                Text(
-                                    text = "${formatShortDate(p.paidAtMillis)}${if (p.note.isNotBlank()) " · ${p.note}" else ""}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondaryDark
-                                )
+                                Text("Mensalidade (${state.currentMonthLabel})", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                                if (currentMonthPayment != null) {
+                                    Text(
+                                        text = "Pago €${String.format("%.2f", currentMonthPayment.amountEur)} em ${formatShortDate(currentMonthPayment.paidAtMillis)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = ConfirmedGreen
+                                    )
+                                } else {
+                                    Text("Sem registo de pagamento este mês", style = MaterialTheme.typography.bodySmall, color = PendingAmber)
+                                }
                             }
-                            IconButton(onClick = { viewModel.deletePayment(p.id) }) {
-                                Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                            StatusPill(
+                                text = if (currentMonthPayment != null) "Pago ✓" else "Pendente",
+                                textColor = if (currentMonthPayment != null) ConfirmedGreen else PendingAmber,
+                                containerColor = if (currentMonthPayment != null) ConfirmedGreenContainer else PendingAmberContainer
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        GoldPrimaryButton(
+                            text = "Registar Pagamento de Mensalidade",
+                            icon = Icons.Default.Payments,
+                            onClick = { showPayDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = "profile_register_payment_btn"
+                        )
+                        if (clientPayments.isNotEmpty()) {
+                            Spacer(Modifier.height(14.dp))
+                            HorizontalDivider(color = HairlineBorder)
+                            Spacer(Modifier.height(10.dp))
+                            Text("Histórico de pagamentos", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                            Spacer(Modifier.height(6.dp))
+                            clientPayments.forEach { p ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("${p.monthLabel} · €${String.format("%.2f", p.amountEur)}", style = MaterialTheme.typography.bodyMedium, color = TextPrimaryDark)
+                                        Text(
+                                            text = "${formatShortDate(p.paidAtMillis)}${if (p.note.isNotBlank()) " · ${p.note}" else ""}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondaryDark
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.deletePayment(p.id) }) {
+                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fidelização Card
+                item {
+                    BrandCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Fidelizações (6 / 12 meses)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                            TextButton(onClick = { showNewFidDialog = true }) {
+                                Text("+ Adicionar", color = NewShapeGold, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (clientFids.isEmpty()) {
+                            Text(
+                                "Sem contrato de fidelização registado.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                        } else {
+                            clientFids.forEach { fid ->
+                                Spacer(Modifier.height(8.dp))
+                                FidelizacaoCompactRow(
+                                    fid = fid,
+                                    onEdit = { editingFid = fid },
+                                    onDelete = { viewModel.deleteFidelizacao(fid.id) }
+                                )
                             }
                         }
                     }
                 }
             }
-        }
-
-        // Fidelização Card
-        item {
-            BrandCard {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Fidelizações (6 / 12 meses)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
-                    TextButton(onClick = { showNewFidDialog = true }) {
-                        Text("+ Adicionar", color = NewShapeGold, fontWeight = FontWeight.Bold)
+        } else {
+            // Tab 1: Assiduidade
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    BrandCard(highlightBorder = true) {
+                        Text("Assiduidade nos Treinos", style = MaterialTheme.typography.titleMedium, color = NewShapeGoldBright)
+                        Text(
+                            text = if (markedCount > 0) {
+                                "Baseado em $markedCount treino(s) com presença/falta registada ($pendingCount por marcar)"
+                            } else {
+                                "Ainda sem presenças confirmadas pelo PT nos dias de treino"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                color = ConfirmedGreenContainer,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, ConfirmedGreen.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("Treinos Feitos", style = MaterialTheme.typography.labelSmall, color = ConfirmedGreen)
+                                    Text(
+                                        text = if (markedCount > 0) "${String.format("%.0f", donePct)}%" else "—",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ConfirmedGreen
+                                    )
+                                    Text("$presentCount presença(s)", style = MaterialTheme.typography.labelSmall, color = TextPrimaryDark)
+                                }
+                            }
+                            Surface(
+                                color = DangerRedContainer,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("Faltas", style = MaterialTheme.typography.labelSmall, color = DangerRed)
+                                    Text(
+                                        text = if (markedCount > 0) "${String.format("%.0f", absentPct)}%" else "—",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = DangerRed
+                                    )
+                                    Text("$absentCount falta(s)", style = MaterialTheme.typography.labelSmall, color = TextPrimaryDark)
+                                }
+                            }
+                        }
+                        if (markedCount > 0) {
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(ElevatedCharcoal)
+                            ) {
+                                if (presentCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(presentCount.toFloat())
+                                            .fillMaxHeight()
+                                            .background(ConfirmedGreen)
+                                    )
+                                }
+                                if (absentCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(absentCount.toFloat())
+                                            .fillMaxHeight()
+                                            .background(DangerRed)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-                if (clientFids.isEmpty()) {
+
+                item {
                     Text(
-                        "Sem contrato de fidelização registado.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondaryDark
+                        "Histórico de Treinos Confirmados (${confirmedBookings.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimaryDark
                     )
-                } else {
-                    clientFids.forEach { fid ->
-                        Spacer(Modifier.height(8.dp))
-                        FidelizacaoCompactRow(
-                            fid = fid,
-                            onEdit = { editingFid = fid },
-                            onDelete = { viewModel.deleteFidelizacao(fid.id) }
+                }
+
+                if (confirmedBookings.isEmpty()) {
+                    item {
+                        EmptyStateBox(
+                            icon = Icons.Default.EventAvailable,
+                            title = "Sem treinos confirmados ainda",
+                            subtitle = "Quando o aluno tiver treinos confirmados na agenda, podes registar presenças e faltas aqui ou na aba Semanas."
                         )
+                    }
+                } else {
+                    items(confirmedBookings, key = { it.first.id }) { (booking, session) ->
+                        val isPresent = booking.attendanceStatus == "PRESENT"
+                        val isAbsent = booking.attendanceStatus == "ABSENT"
+                        Surface(
+                            color = CharcoalSurface,
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    isPresent -> ConfirmedGreen.copy(alpha = 0.6f)
+                                    isAbsent -> DangerRed.copy(alpha = 0.6f)
+                                    else -> HairlineBorder
+                                }
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "${session.dateLabel} · ${session.timeLabel.replace(":", "h")}",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = TextPrimaryDark
+                                        )
+                                        Text(
+                                            text = "${session.durationMinutes} min${if (session.note.isNotBlank()) " · ${session.note}" else ""}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondaryDark
+                                        )
+                                    }
+                                    StatusPill(
+                                        text = when {
+                                            isPresent -> "Presente ✓"
+                                            isAbsent -> "Falta ✕"
+                                            else -> "Por marcar"
+                                        },
+                                        textColor = when {
+                                            isPresent -> ConfirmedGreen
+                                            isAbsent -> DangerRed
+                                            else -> TextSecondaryDark
+                                        },
+                                        containerColor = when {
+                                            isPresent -> ConfirmedGreenContainer
+                                            isAbsent -> DangerRedContainer
+                                            else -> ElevatedCharcoal
+                                        }
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    FilterChip(
+                                        selected = isPresent,
+                                        onClick = {
+                                            viewModel.setBookingAttendance(booking.id, if (isPresent) "" else "PRESENT")
+                                        },
+                                        label = { Text("Presente ✓") },
+                                        modifier = Modifier.weight(1f).testTag("profile_present_${booking.id}"),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = ConfirmedGreen,
+                                            selectedLabelColor = ObsidianBg
+                                        )
+                                    )
+                                    FilterChip(
+                                        selected = isAbsent,
+                                        onClick = {
+                                            viewModel.setBookingAttendance(booking.id, if (isAbsent) "" else "ABSENT")
+                                        },
+                                        label = { Text("Falta ✕") },
+                                        modifier = Modifier.weight(1f).testTag("profile_absent_${booking.id}"),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = DangerRed,
+                                            selectedLabelColor = TextPrimaryDark
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -651,11 +956,12 @@ private fun FidelizacaoCompactRow(
 @Composable
 private fun NewClientDialog(
     onDismiss: () -> Unit,
-    onSave: (String, String, String) -> Unit
+    onSave: (String, String, String, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
+    var trainingType by remember { mutableStateOf("GRUPO") }
     var rgpdAccepted by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -679,6 +985,21 @@ private fun NewClientDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     colors = darkFieldColors()
                 )
+                Text("Tipo de Treino", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf("PERSONALIZADO" to "Personalizado", "GRUPO" to "Grupo").forEach { (key, label) ->
+                        FilterChip(
+                            selected = trainingType == key,
+                            onClick = { trainingType = key },
+                            label = { Text(label) },
+                            modifier = Modifier.weight(1f).testTag("new_client_type_$key"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
@@ -720,7 +1041,7 @@ private fun NewClientDialog(
                     val combinedNotes = listOf(notes.trim(), rgpdStamp)
                         .filter { it.isNotBlank() }
                         .joinToString(" · ")
-                    onSave(name, phone, combinedNotes)
+                    onSave(name, phone, combinedNotes, trainingType)
                 }
             )
         },

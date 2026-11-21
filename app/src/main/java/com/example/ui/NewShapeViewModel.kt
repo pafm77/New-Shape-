@@ -477,6 +477,20 @@ class NewShapeViewModel(
         }
     }
 
+    fun setBookingAttendance(bookingId: String, attendanceStatus: String) {
+        viewModelScope.launch {
+            repository.setBookingAttendance(bookingId, attendanceStatus)
+                .onSuccess {
+                    _statusBanner.value = when (attendanceStatus) {
+                        "PRESENT" -> "Presença confirmada."
+                        "ABSENT" -> "Falta registada."
+                        else -> "Registo de presença limpo."
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     fun markClientReminded(weekKey: String, clientId: String) {
         viewModelScope.launch {
             repository.upsertWeekResponse(weekKey, clientId, "REMINDED")
@@ -504,10 +518,10 @@ class NewShapeViewModel(
     }
 
     // --- Clients ---
-    fun addClient(name: String, phone: String, notes: String) {
+    fun addClient(name: String, phone: String, notes: String, trainingType: String = "GRUPO") {
         if (name.isBlank()) return
         viewModelScope.launch {
-            repository.addClient(name, phone, notes)
+            repository.addClient(name, phone, notes, trainingType = trainingType)
                 .onSuccess { _statusBanner.value = "Cliente adicionado." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
@@ -610,6 +624,33 @@ class NewShapeViewModel(
         }
     }
 
+    fun createWorkoutPlansForClients(clientIds: List<String>, title: String, splitLabel: String) {
+        if (title.isBlank() || clientIds.isEmpty()) return
+        viewModelScope.launch {
+            repository.createWorkoutPlansForClients(clientIds, title, splitLabel)
+                .onSuccess { count ->
+                    _statusBanner.value = if (count > 1) {
+                        "Plano criado e atribuído a $count alunos!"
+                    } else {
+                        "Plano de treino criado."
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun assignWorkoutPlanToClients(sourcePlan: WorkoutPlanRecord, targetClientIds: List<String>) {
+        if (targetClientIds.isEmpty()) return
+        val items = currentData?.workoutPlanItems?.filter { it.planId == sourcePlan.id }.orEmpty()
+        viewModelScope.launch {
+            repository.assignWorkoutPlanToClients(sourcePlan, items, targetClientIds)
+                .onSuccess { count ->
+                    _statusBanner.value = "Plano \"${sourcePlan.title}\" atribuído a mais $count aluno(s)!"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     fun deleteWorkoutPlan(planId: String) {
         val items = currentData?.workoutPlanItems.orEmpty()
         viewModelScope.launch {
@@ -630,6 +671,14 @@ class NewShapeViewModel(
         val count = currentData?.workoutPlanItems?.count { it.planId == planId } ?: 0
         viewModelScope.launch {
             repository.addExerciseToPlan(planId, exercise, sets, reps, loadKg, restSeconds, notes, count)
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun updateWorkoutPlanItemLoad(itemId: String, loadKg: String) {
+        viewModelScope.launch {
+            repository.updateWorkoutPlanItemLoad(itemId, loadKg)
+                .onSuccess { _statusBanner.value = "Carga atualizada." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -662,18 +711,6 @@ class NewShapeViewModel(
         viewModelScope.launch {
             repository.addCustomFood(name, category, kcal, protein, carbs, fat)
                 .onSuccess { _statusBanner.value = "Alimento \"$name\" adicionado." }
-                .onFailure { _statusBanner.value = it.localizedMessage }
-        }
-    }
-
-    fun importFoodsCsv(rawText: String, onResult: (ImportResult) -> Unit) {
-        val existing = currentData?.foodItems.orEmpty()
-        viewModelScope.launch {
-            repository.importFoodsCsv(rawText, existing)
-                .onSuccess { res ->
-                    if (res.added > 0) _statusBanner.value = "${res.added} alimentos importados com sucesso."
-                    onResult(res)
-                }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }

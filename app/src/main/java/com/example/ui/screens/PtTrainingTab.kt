@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -15,10 +16,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.model.ClientRecord
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.WorkoutPlanItemRecord
 import com.example.data.model.WorkoutPlanRecord
@@ -79,6 +82,7 @@ private fun WorkoutPlansBuilderSection(
 
     var showNewPlanDialog by remember { mutableStateOf(false) }
     var targetPlanForExercise by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
+    var targetPlanToAssign by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
 
     val clientPlans = remember(state.workoutPlans, selectedClient?.id) {
         if (selectedClient == null) emptyList()
@@ -191,6 +195,17 @@ private fun WorkoutPlansBuilderSection(
                         onClick = { targetPlanForExercise = plan },
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (activeClients.size > 1) {
+                        Spacer(Modifier.height(8.dp))
+                        DarkSecondaryButton(
+                            text = "Adicionar a mais alunos",
+                            icon = Icons.Default.GroupAdd,
+                            onClick = { targetPlanToAssign = plan },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("assign_plan_more_clients_${plan.id}")
+                        )
+                    }
                 }
             }
         }
@@ -198,11 +213,26 @@ private fun WorkoutPlansBuilderSection(
 
     if (showNewPlanDialog && selectedClient != null) {
         NewWorkoutPlanDialog(
-            clientName = selectedClient.name,
+            clients = activeClients,
+            initialClientId = selectedClient.id,
             onDismiss = { showNewPlanDialog = false },
-            onCreate = { title, split ->
-                viewModel.createWorkoutPlan(selectedClient.id, title, split)
+            onCreate = { selectedIds, title, split ->
+                viewModel.createWorkoutPlansForClients(selectedIds, title, split)
                 showNewPlanDialog = false
+            }
+        )
+    }
+
+    targetPlanToAssign?.let { plan ->
+        val otherClients = activeClients.filter { it.id != plan.clientId }
+        AssignWorkoutPlanDialog(
+            plan = plan,
+            exerciseCount = state.workoutPlanItems.count { it.planId == plan.id },
+            candidates = otherClients,
+            onDismiss = { targetPlanToAssign = null },
+            onAssign = { targetIds ->
+                viewModel.assignWorkoutPlanToClients(plan, targetIds)
+                targetPlanToAssign = null
             }
         )
     }
@@ -378,24 +408,33 @@ private fun ExerciseLibrarySection(
 
 @Composable
 private fun NewWorkoutPlanDialog(
-    clientName: String,
+    clients: List<ClientRecord>,
+    initialClientId: String,
     onDismiss: () -> Unit,
-    onCreate: (String, String) -> Unit
+    onCreate: (List<String>, String, String) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var splitLabel by remember { mutableStateOf("Treino A · Corpo Inteiro") }
+    var selectedIds by remember(initialClientId) {
+        mutableStateOf(if (initialClientId.isNotBlank()) setOf(initialClientId) else emptySet())
+    }
+    val allSelected = clients.isNotEmpty() && selectedIds.size == clients.size
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = CharcoalSurface,
-        title = { Text("Novo Plano · $clientName", color = TextPrimaryDark) },
+        title = { Text("Novo Plano de Treino", color = TextPrimaryDark) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Nome do Plano (ex: Hipertrofia 3x)") },
                     singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                     colors = darkFieldColors()
                 )
                 OutlinedTextField(
@@ -403,15 +442,179 @@ private fun NewWorkoutPlanDialog(
                     onValueChange = { splitLabel = it },
                     label = { Text("Divisão / Dia (ex: Treino A · Membros Superiores)") },
                     singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                     colors = darkFieldColors()
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Atribuir a alunos (${selectedIds.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NewShapeGoldBright
+                    )
+                    TextButton(
+                        onClick = {
+                            selectedIds = if (allSelected) emptySet() else clients.map { it.id }.toSet()
+                        }
+                    ) {
+                        Text(
+                            if (allSelected) "Limpar" else "Selecionar todos",
+                            color = NewShapeGold,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)
+                ) {
+                    LazyColumn {
+                        items(clients, key = { it.id }) { c ->
+                            val checked = c.id in selectedIds
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = NewShapeGold,
+                                        checkmarkColor = TextOnGold,
+                                        uncheckedColor = TextSecondaryDark
+                                    )
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(c.name, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
+                                    Text(
+                                        if (c.trainingType == "PERSONALIZADO") "Personalizado" else "Grupo",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (c.trainingType == "PERSONALIZADO") NewShapeGold else TextSecondaryDark
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             GoldPrimaryButton(
-                text = "Criar Plano",
-                enabled = title.isNotBlank(),
-                onClick = { onCreate(title, splitLabel) }
+                text = if (selectedIds.size > 1) "Criar (${selectedIds.size} alunos)" else "Criar Plano",
+                enabled = title.isNotBlank() && selectedIds.isNotEmpty(),
+                onClick = { onCreate(selectedIds.toList(), title, splitLabel) },
+                testTag = "confirm_create_plan_btn"
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar", color = TextSecondaryDark) }
+        }
+    )
+}
+
+@Composable
+private fun AssignWorkoutPlanDialog(
+    plan: WorkoutPlanRecord,
+    exerciseCount: Int,
+    candidates: List<ClientRecord>,
+    onDismiss: () -> Unit,
+    onAssign: (List<String>) -> Unit
+) {
+    var selectedIds by remember(plan.id) { mutableStateOf(emptySet<String>()) }
+    val allSelected = candidates.isNotEmpty() && selectedIds.size == candidates.size
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        title = { Text("Adicionar a mais alunos", color = TextPrimaryDark) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Copia o plano \"${plan.title}\" ($exerciseCount exercício(s)) para os alunos selecionados. Cada aluno pode depois registar as suas cargas em kg.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Selecionados: ${selectedIds.size}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NewShapeGoldBright
+                    )
+                    TextButton(
+                        onClick = {
+                            selectedIds = if (allSelected) emptySet() else candidates.map { it.id }.toSet()
+                        }
+                    ) {
+                        Text(
+                            if (allSelected) "Limpar" else "Selecionar todos",
+                            color = NewShapeGold,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)
+                ) {
+                    LazyColumn {
+                        items(candidates, key = { it.id }) { c ->
+                            val checked = c.id in selectedIds
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = NewShapeGold,
+                                        checkmarkColor = TextOnGold,
+                                        uncheckedColor = TextSecondaryDark
+                                    )
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(c.name, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
+                                    Text(
+                                        if (c.trainingType == "PERSONALIZADO") "Personalizado" else "Grupo",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (c.trainingType == "PERSONALIZADO") NewShapeGold else TextSecondaryDark
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            GoldPrimaryButton(
+                text = "Adicionar (${selectedIds.size})",
+                enabled = selectedIds.isNotEmpty(),
+                onClick = { onAssign(selectedIds.toList()) },
+                testTag = "confirm_assign_plan_btn"
             )
         },
         dismissButton = {

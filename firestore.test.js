@@ -546,5 +546,68 @@ test("Student portal link access: requires valid studentPortalCode and enforces 
       updatedAt: created,
     })
   );
+
+  // PT creates client with trainingType, confirms booking + marks attendance, and creates workout plan item
+  const updated = new Date(Date.now() - 1000);
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/clients`).doc("c_student").update({
+      trainingType: "PERSONALIZADO",
+      updatedAt: updated,
+    })
+  );
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/clients`).doc("c_student").update({
+      trainingType: "INVALIDO",
+      updatedAt: updated,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/bookings`).doc("bk_stu_1").update({
+      status: "CONFIRMED",
+      attendanceStatus: "PRESENT",
+      updatedAt: updated,
+    })
+  );
+  // Student CANNOT change attendanceStatus on a booking
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/bookings`).doc("bk_stu_1").update({
+      status: "ALTERED",
+      attendanceStatus: "ABSENT",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // PT creates workout plan item; student CAN update ONLY loadKg, NOT sets/reps
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_stu").set({
+      userId: ALICE_UID,
+      planId: "wp1",
+      exerciseId: "ex1",
+      exerciseName: "Supino",
+      muscleGroup: "Peito",
+      sets: 4,
+      reps: "10",
+      loadKg: "40 kg",
+      restSeconds: 90,
+      notes: "",
+      orderIndex: 0,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_stu").update({
+      loadKg: "45 kg",
+      updatedAt: updated,
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_stu").update({
+      sets: 10,
+      loadKg: "50 kg",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
 });
+
 

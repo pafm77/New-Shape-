@@ -17,8 +17,10 @@ import {
   CheckCheck,
   Clock,
   Link2,
+  X,
 } from 'lucide-react';
 import {
+  AttendanceStatus,
   BookingRecord,
   BookingWithSession,
   ClientRecord,
@@ -708,26 +710,51 @@ const SemanasView: React.FC<{
             const sBookings = bookings.filter(
               (b) => b.sessionId === session.id && b.status !== 'CANCELLED'
             );
-            const confirmedCount = sBookings.filter(
-              (b) => b.status === 'CONFIRMED'
-            ).length;
+            const confirmedBookings = sBookings.filter((b) => b.status === 'CONFIRMED');
+            const confirmedCount = confirmedBookings.length;
             const pendingCount = sBookings.filter(
               (b) => b.status === 'PENDING' || b.status === 'ALTERED'
             ).length;
+            const presentCount = confirmedBookings.filter(
+              (b) => b.attendanceStatus === 'PRESENT'
+            ).length;
+            const absentCount = confirmedBookings.filter(
+              (b) => b.attendanceStatus === 'ABSENT'
+            ).length;
             const isFull = confirmedCount >= session.capacity;
+            const nowDate = new Date();
+            const sesDate = new Date(session.startMillis);
+            const isToday =
+              session.startMillis > 0 &&
+              nowDate.getFullYear() === sesDate.getFullYear() &&
+              nowDate.getMonth() === sesDate.getMonth() &&
+              nowDate.getDate() === sesDate.getDate();
 
             return (
               <div
                 key={session.id}
                 onClick={() => setDetailSessionId(session.id)}
-                className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-4 transition hover:border-[#EAB308]/60"
+                className={`flex cursor-pointer items-center justify-between gap-3 rounded-2xl border p-4 transition hover:border-[#EAB308]/60 ${
+                  isToday
+                    ? 'border-[#EAB308]/70 bg-[#3D3314]/35'
+                    : 'border-[#323238] bg-[#1B1B1E]'
+                }`}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-[#F4F4F5]">
-                    {session.dateLabel} · {session.timeLabel.replace(':', 'h')}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="text-sm font-bold text-[#F4F4F5]">
+                      {session.dateLabel} · {session.timeLabel.replace(':', 'h')}
+                    </p>
+                    {isToday && <StatusPill tone="gold">Hoje</StatusPill>}
+                    {(presentCount > 0 || absentCount > 0) && (
+                      <StatusPill tone="green">
+                        {presentCount}✓{absentCount > 0 ? ` · ${absentCount}✕` : ''}
+                      </StatusPill>
+                    )}
+                  </div>
                   <p className="text-xs text-[#A1A1AA]">
                     {session.durationMinutes} min{session.note ? ` · ${session.note}` : ''}
+                    {isToday && confirmedCount > 0 ? ' · Toca para marcar presenças' : ''}
                   </p>
                   {pendingCount > 0 && (
                     <p className="mt-1 text-xs font-semibold text-[#F59E0B]">
@@ -792,6 +819,16 @@ const SemanasView: React.FC<{
           onRemoveBooking={async (bid) => {
             await repo.removeBooking(uid, bid);
             onBanner('Inscrição removida.');
+          }}
+          onSetAttendance={async (bid, status) => {
+            await repo.setBookingAttendance(uid, bid, status);
+            onBanner(
+              status === 'PRESENT'
+                ? 'Presença confirmada ✓'
+                : status === 'ABSENT'
+                ? 'Falta registada.'
+                : 'Presença limpa.'
+            );
           }}
           onEdit={() => {
             setDetailSessionId(null);
@@ -1024,8 +1061,18 @@ const SessionDetailModal: React.FC<{
   onClose: () => void;
   onAddClient: (clientId: string) => Promise<void>;
   onRemoveBooking: (bookingId: string) => Promise<void>;
+  onSetAttendance: (bookingId: string, status: AttendanceStatus) => Promise<void>;
   onEdit: () => void;
-}> = ({ session, bookings, clients, onClose, onAddClient, onRemoveBooking, onEdit }) => {
+}> = ({
+  session,
+  bookings,
+  clients,
+  onClose,
+  onAddClient,
+  onRemoveBooking,
+  onSetAttendance,
+  onEdit,
+}) => {
   const clientMap = new Map(clients.map((c) => [c.id, c]));
   const enrolledIds = new Set(bookings.map((b) => b.clientId));
   const availableClients = clients.filter((c) => c.active && !enrolledIds.has(c.id));
@@ -1042,7 +1089,7 @@ const SessionDetailModal: React.FC<{
     >
       <div className="space-y-4">
         <div>
-          <FieldLabel>Inscritos</FieldLabel>
+          <FieldLabel>Inscritos & Confirmação de Presença</FieldLabel>
           {bookings.length === 0 ? (
             <p className="text-xs text-[#A1A1AA]">Ainda não há inscritos neste treino.</p>
           ) : (
@@ -1051,27 +1098,76 @@ const SessionDetailModal: React.FC<{
                 const c = clientMap.get(b.clientId);
                 if (!c) return null;
                 const confirmed = b.status === 'CONFIRMED';
+                const isPresent = b.attendanceStatus === 'PRESENT';
+                const isAbsent = b.attendanceStatus === 'ABSENT';
                 return (
                   <div
                     key={b.id}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-[#323238] bg-[#242429] p-3"
+                    className="space-y-2 rounded-xl border border-[#323238] bg-[#242429] p-3"
                   >
-                    <div>
-                      <p className="text-sm font-bold text-[#F4F4F5]">{c.name}</p>
-                      <p className="text-xs text-[#A1A1AA]">{formatPhoneDisplay(c.phone)}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-sm font-bold text-[#F4F4F5]">{c.name}</p>
+                          <StatusPill
+                            tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}
+                          >
+                            {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
+                          </StatusPill>
+                        </div>
+                        <p className="text-xs text-[#A1A1AA]">{formatPhoneDisplay(c.phone)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <StatusPill tone={confirmed ? 'green' : 'amber'}>
+                          {confirmed ? 'Confirmado' : 'Pendente'}
+                        </StatusPill>
+                        <button
+                          type="button"
+                          onClick={() => onRemoveBooking(b.id)}
+                          className="text-xs font-semibold text-[#EF4444] hover:underline"
+                        >
+                          Remover
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <StatusPill tone={confirmed ? 'green' : 'amber'}>
-                        {confirmed ? 'Confirmado' : 'Pendente'}
-                      </StatusPill>
-                      <button
-                        type="button"
-                        onClick={() => onRemoveBooking(b.id)}
-                        className="text-xs font-semibold text-[#EF4444] hover:underline"
-                      >
-                        Remover
-                      </button>
-                    </div>
+
+                    {confirmed && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#323238]/70 pt-2">
+                        <span className="text-[11px] font-semibold text-[#A1A1AA]">
+                          Presença no treino:
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSetAttendance(b.id, isPresent ? '' : 'PRESENT')
+                            }
+                            className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                              isPresent
+                                ? 'border-[#22C55E] bg-[#22C55E] text-[#121214]'
+                                : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#22C55E] hover:text-[#22C55E]'
+                            }`}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Presente
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSetAttendance(b.id, isAbsent ? '' : 'ABSENT')
+                            }
+                            className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                              isAbsent
+                                ? 'border-[#EF4444] bg-[#EF4444] text-white'
+                                : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#EF4444] hover:text-[#EF4444]'
+                            }`}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Falta
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1435,6 +1531,7 @@ const PortalLinksCard: React.FC<{
   onBanner: (msg: string) => void;
 }> = ({ uid, settings, showRegenerate = false, onOpenWhatsApp, onBanner }) => {
   const [regenerating, setRegenerating] = useState(false);
+  const [syncingDomain, setSyncingDomain] = useState(false);
   const ptLink = buildPtPortalLink(settings.siteBaseUrl);
   const studentLink = buildStudentPortalLink(
     settings.siteBaseUrl,
@@ -1442,6 +1539,13 @@ const PortalLinksCard: React.FC<{
     settings.studentPortalCode
   );
   const studentInviteText = `Olá! 💪 Já podes aceder ao teu Portal de Aluno New Shape (marcações, treinos, nutrição e avaliações) através deste link:\n${studentLink}\n\nEntras apenas com o teu número de telemóvel!`;
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const currentHost = typeof window !== 'undefined' ? window.location.host : '';
+  const normalizedSavedBase = settings.siteBaseUrl.trim().replace(/\/+$/, '');
+  const showDomainMismatch =
+    currentOrigin.startsWith('https://') &&
+    normalizedSavedBase.length > 0 &&
+    normalizedSavedBase !== currentOrigin;
 
   return (
     <BrandCard highlight>
@@ -1470,6 +1574,34 @@ const PortalLinksCard: React.FC<{
           </button>
         )}
       </div>
+
+      {showDomainMismatch && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F59E0B]/50 bg-[#3B2A10] px-3 py-2.5 text-xs text-[#FDE68A]">
+          <span>
+            Os links estão a usar <strong>{normalizedSavedBase}</strong> em vez do endereço atual (
+            <strong>{currentHost}</strong>).
+          </span>
+          <button
+            type="button"
+            disabled={syncingDomain}
+            onClick={async () => {
+              setSyncingDomain(true);
+              try {
+                await repo.saveStudioSettings(uid, {
+                  ...settings,
+                  siteBaseUrl: currentOrigin,
+                });
+                onBanner(`Links atualizados para ${currentHost}!`);
+              } finally {
+                setSyncingDomain(false);
+              }
+            }}
+            className="rounded-lg bg-[#EAB308] px-2.5 py-1 text-xs font-bold text-[#121214] hover:bg-[#FACC15]"
+          >
+            {syncingDomain ? 'A atualizar...' : `Usar ${currentHost}`}
+          </button>
+        </div>
+      )}
 
       <div className="mt-3 space-y-3">
         <div className="rounded-xl border border-[#323238] bg-[#242429]/70 p-3">

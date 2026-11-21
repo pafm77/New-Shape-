@@ -194,7 +194,7 @@ fun StudentMainScaffold(
                     Box(modifier = Modifier.fillMaxSize().widthIn(max = 840.dp)) {
                         when (selectedTab) {
                             0 -> StudentBookingScreen(student = student, state = state, viewModel = viewModel)
-                            1 -> StudentWorkoutScreen(student = student, state = state)
+                            1 -> StudentWorkoutScreen(student = student, state = state, viewModel = viewModel)
                             2 -> StudentNutritionScreen(student = student, state = state, viewModel = viewModel)
                             3 -> StudentAssessmentScreen(student = student, state = state, viewModel = viewModel)
                             4 -> StudentBillingScreen(student = student, state = state)
@@ -454,7 +454,8 @@ private fun StudentBookingScreen(
 @Composable
 private fun StudentWorkoutScreen(
     student: ClientRecord,
-    state: StudioUiState
+    state: StudioUiState,
+    viewModel: NewShapeViewModel
 ) {
     val plans = remember(state.workoutPlans, student.id) {
         state.workoutPlans.filter { it.clientId == student.id }
@@ -467,7 +468,7 @@ private fun StudentWorkoutScreen(
     ) {
         item {
             Text("Os Meus Planos de Treino", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-            Text("Prescritos pelo teu Personal Trainer", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            Text("Podes registar e atualizar a tua carga (kg) em cada exercício", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
         }
 
         if (plans.isEmpty()) {
@@ -493,12 +494,80 @@ private fun StudentWorkoutScreen(
                         Text("Plano sem exercícios ainda.", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
                     } else {
                         items.forEachIndexed { idx, exItem ->
-                            WorkoutPlanExerciseRow(index = idx + 1, item = exItem, onRemove = null)
+                            StudentExerciseLoadRow(
+                                index = idx + 1,
+                                item = exItem,
+                                onSaveLoad = { newLoad ->
+                                    viewModel.updateWorkoutPlanItemLoad(exItem.id, newLoad)
+                                }
+                            )
                             if (idx < items.lastIndex) HorizontalDivider(color = HairlineBorder.copy(alpha = 0.5f))
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StudentExerciseLoadRow(
+    index: Int,
+    item: WorkoutPlanItemRecord,
+    onSaveLoad: (String) -> Unit
+) {
+    var loadInput by remember(item.id, item.loadKg) { mutableStateOf(item.loadKg) }
+    val normalizedTrim = loadInput.trim()
+    val hasChanges = normalizedTrim != item.loadKg.trim()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "$index. ${item.exerciseName}",
+            style = MaterialTheme.typography.titleSmall,
+            color = TextPrimaryDark
+        )
+        Text(
+            text = "${item.sets} séries × ${item.reps} · Descanso ${item.restSeconds}s",
+            style = MaterialTheme.typography.bodySmall,
+            color = NewShapeGold
+        )
+        if (item.notes.isNotBlank()) {
+            Text(item.notes, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = loadInput,
+                onValueChange = { loadInput = it.take(40) },
+                label = { Text("Carga (kg)") },
+                placeholder = { Text("ex: 50 kg") },
+                singleLine = true,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("student_load_input_${item.id}"),
+                colors = darkFieldColors()
+            )
+            GoldPrimaryButton(
+                text = "Guardar",
+                enabled = hasChanges,
+                onClick = {
+                    val formatted = if (normalizedTrim.matches(Regex("^\\d+([.,]\\d+)?$"))) {
+                        "$normalizedTrim kg"
+                    } else {
+                        normalizedTrim
+                    }
+                    onSaveLoad(formatted)
+                },
+                testTag = "student_save_load_${item.id}"
+            )
         }
     }
 }

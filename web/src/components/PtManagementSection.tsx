@@ -14,6 +14,7 @@ import {
   ClientRecord,
   FidelizacaoRecord,
   PaymentRecord,
+  TrainingType,
 } from '../types/studio';
 import {
   PAYMENT_METHODS,
@@ -134,13 +135,47 @@ const FinanceSubTab: React.FC<{
   const [pickClientModal, setPickClientModal] = useState(false);
   const [payClient, setPayClient] = useState<ClientRecord | null>(null);
   const [methodFilter, setMethodFilter] = useState<'ALL' | PaymentMethod>('ALL');
+  const [trainingFilter, setTrainingFilter] = useState<'ALL' | TrainingType>('ALL');
 
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
-  const paidPayments = useMemo(() => payments.filter((p) => p.paid), [payments]);
+  const allPaidPayments = useMemo(() => payments.filter((p) => p.paid), [payments]);
+
+  const getPaymentType = (p: PaymentRecord): TrainingType =>
+    clientMap.get(p.clientId)?.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
+
+  const paidPayments = useMemo(
+    () =>
+      trainingFilter === 'ALL'
+        ? allPaidPayments
+        : allPaidPayments.filter((p) => getPaymentType(p) === trainingFilter),
+    [allPaidPayments, trainingFilter, clientMap]
+  );
 
   const recentMonths = useMemo(() => buildRecentMonthOptions(), []);
   const currentMonthYear = recentMonths[0]?.monthYear || '';
   const currentMonthLabel = recentMonths[0]?.monthLabel || '';
+
+  const trainingBreakdown = useMemo(() => {
+    const calc = (type: TrainingType) => {
+      const list = allPaidPayments.filter((p) => getPaymentType(p) === type);
+      const total = list.reduce((s, p) => s + p.amountEur, 0);
+      const monthList = list.filter((p) => p.monthYear === currentMonthYear);
+      const monthTotal = monthList.reduce((s, p) => s + p.amountEur, 0);
+      const pairCount = new Set(list.map((p) => `${p.clientId}__${p.monthYear}`)).size;
+      const avgPerStudent = pairCount > 0 ? total / pairCount : 0;
+      return {
+        count: list.length,
+        total,
+        monthTotal,
+        monthCount: monthList.length,
+        avgPerStudent,
+      };
+    };
+    return {
+      PERSONALIZADO: calc('PERSONALIZADO'),
+      GRUPO: calc('GRUPO'),
+    };
+  }, [allPaidPayments, currentMonthYear, clientMap]);
 
   const currentMonthPayments = useMemo(
     () => paidPayments.filter((p) => p.monthYear === currentMonthYear),
@@ -260,6 +295,87 @@ const FinanceSubTab: React.FC<{
           <Plus className="h-4 w-4" />
           Pagamento
         </GoldButton>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              { id: 'ALL' as const, label: `Todos (${allPaidPayments.length})` },
+              {
+                id: 'PERSONALIZADO' as const,
+                label: `Treino Personalizado (${trainingBreakdown.PERSONALIZADO.count})`,
+              },
+              {
+                id: 'GRUPO' as const,
+                label: `Treino em Grupo (${trainingBreakdown.GRUPO.count})`,
+              },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setTrainingFilter(opt.id)}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                trainingFilter === opt.id
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Distinção Personalizado vs Grupo */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {(
+          [
+            {
+              key: 'PERSONALIZADO' as const,
+              title: 'Treino Personalizado',
+              tone: 'gold' as const,
+              accent: 'text-[#FACC15]',
+              data: trainingBreakdown.PERSONALIZADO,
+            },
+            {
+              key: 'GRUPO' as const,
+              title: 'Treino em Grupo',
+              tone: 'blue' as const,
+              accent: 'text-[#60A5FA]',
+              data: trainingBreakdown.GRUPO,
+            },
+          ] as const
+        ).map((item) => {
+          const active = trainingFilter === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setTrainingFilter(active ? 'ALL' : item.key)}
+              className={`rounded-2xl border p-4 text-left transition ${
+                active
+                  ? 'border-[#EAB308] bg-[#3D3314]/50'
+                  : 'border-[#323238] bg-[#1B1B1E] hover:border-[#EAB308]/50'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-bold text-[#F4F4F5]">{item.title}</span>
+                <StatusPill tone={item.tone}>{item.data.count} mens.</StatusPill>
+              </div>
+              <p className={`mt-1.5 text-2xl font-extrabold ${item.accent}`}>
+                €{item.data.total.toFixed(2)}
+              </p>
+              <p className="mt-1 text-xs text-[#A1A1AA]">
+                Este mês ({currentMonthLabel}):{' '}
+                <strong className="text-[#F4F4F5]">€{item.data.monthTotal.toFixed(2)}</strong> ·
+                Média/aluno:{' '}
+                <strong className="text-[#F4F4F5]">€{item.data.avgPerStudent.toFixed(2)}</strong>
+              </p>
+            </button>
+          );
+        })}
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -459,10 +575,21 @@ const FinanceSubTab: React.FC<{
                           className="flex items-center justify-between gap-3 rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5"
                         >
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-bold text-[#F4F4F5]">
-                              {client?.name || 'Aluno'} ·{' '}
-                              <span className="text-[#FACC15]">€{p.amountEur.toFixed(2)}</span>
-                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className="truncate text-sm font-bold text-[#F4F4F5]">
+                                {client?.name || 'Aluno'} ·{' '}
+                                <span className="text-[#FACC15]">€{p.amountEur.toFixed(2)}</span>
+                              </p>
+                              <StatusPill
+                                tone={
+                                  client?.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'
+                                }
+                              >
+                                {client?.trainingType === 'PERSONALIZADO'
+                                  ? 'Personalizado'
+                                  : 'Grupo'}
+                              </StatusPill>
+                            </div>
                             <p className="text-xs text-[#A1A1AA]">
                               {p.monthLabel} · {formatShortDate(p.paidAtMillis)}
                             </p>
@@ -508,10 +635,21 @@ const FinanceSubTab: React.FC<{
                       className="flex items-center justify-between gap-3 rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-bold text-[#F4F4F5]">
-                          {client?.name || 'Aluno'} ·{' '}
-                          <span className="text-[#FACC15]">€{p.amountEur.toFixed(2)}</span>
-                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="truncate text-sm font-bold text-[#F4F4F5]">
+                            {client?.name || 'Aluno'} ·{' '}
+                            <span className="text-[#FACC15]">€{p.amountEur.toFixed(2)}</span>
+                          </p>
+                          <StatusPill
+                            tone={
+                              client?.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'
+                            }
+                          >
+                            {client?.trainingType === 'PERSONALIZADO'
+                              ? 'Personalizado'
+                              : 'Grupo'}
+                          </StatusPill>
+                        </div>
                         <p className="text-xs text-[#A1A1AA]">
                           {p.monthLabel} · {formatShortDate(p.paidAtMillis)}
                           {p.note ? ` · ${p.note}` : ''}

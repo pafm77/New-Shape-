@@ -39,7 +39,7 @@ enum class AssessmentMetric(val label: String, val unit: String, val decimals: I
     WEIGHT("Peso", "kg", 1),
     BMI("IMC", "", 1),
     BODY_FAT("MG", "%", 1),
-    MUSCLE_MASS("MM", "kg", 1),
+    MUSCLE_MASS("MM", "%", 1),
     VISCERAL_FAT("GV", "", 1),
     BMR("TMB", "kcal", 0);
 
@@ -181,7 +181,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.assessmentDashboardItems(
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 MetricTile("Massa Gorda (MG)", "${String.format("%.1f", latest.bodyFatPct)}%", deltaText(latest.bodyFatPct, previous?.bodyFatPct, "%"), Modifier.weight(1f))
-                MetricTile("Massa Muscular (MM)", "${String.format("%.1f", latest.muscleMassKg)} kg", deltaText(latest.muscleMassKg, previous?.muscleMassKg, "kg"), Modifier.weight(1f))
+                MetricTile("Massa Muscular (MM)", "${String.format("%.1f", latest.muscleMassKg)}%", deltaText(latest.muscleMassKg, previous?.muscleMassKg, "%"), Modifier.weight(1f))
                 MetricTile("Gord. Visceral (GV)", String.format("%.1f", latest.visceralFat), deltaText(latest.visceralFat, previous?.visceralFat, ""), Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
@@ -224,7 +224,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.assessmentDashboardItems(
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "MG ${String.format("%.1f", item.bodyFatPct)}% · MM ${String.format("%.1f", item.muscleMassKg)} kg · GV ${String.format("%.1f", item.visceralFat)} · ${item.ageYears}a / ${String.format("%.0f", item.heightCm)} cm",
+                text = "MG ${String.format("%.1f", item.bodyFatPct)}% · MM ${String.format("%.1f", item.muscleMassKg)}% · GV ${String.format("%.1f", item.visceralFat)} · ${item.ageYears}a / ${String.format("%.0f", item.heightCm)} cm",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondaryDark
             )
@@ -432,7 +432,7 @@ fun NewAssessmentDialog(
     var ageText by remember { mutableStateOf(latest?.ageYears?.toString() ?: "28") }
     var heightText by remember { mutableStateOf(latest?.heightCm?.let { String.format("%.0f", it) } ?: "175") }
     var bodyFatText by remember { mutableStateOf(latest?.bodyFatPct?.let { String.format("%.1f", it) } ?: "18.0") }
-    var muscleMassText by remember { mutableStateOf(latest?.muscleMassKg?.let { String.format("%.1f", it) } ?: "32.0") }
+    var muscleMassText by remember { mutableStateOf(latest?.muscleMassKg?.let { String.format("%.1f", it) } ?: "38.0") }
     var visceralFatText by remember { mutableStateOf(latest?.visceralFat?.let { String.format("%.1f", it) } ?: "5.0") }
     var notes by remember { mutableStateOf("") }
 
@@ -517,7 +517,7 @@ fun NewAssessmentDialog(
                     OutlinedTextField(
                         value = muscleMassText,
                         onValueChange = { muscleMassText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                        label = { Text("MM (kg)") },
+                        label = { Text("MM (%)") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.weight(1f).testTag("assessment_muscle_input"),
