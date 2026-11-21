@@ -1546,6 +1546,22 @@ export async function addCustomFood(
   });
 }
 
+export async function deleteFood(uid: string, foodId: string): Promise<void> {
+  await deleteDoc(doc(subcol(uid, 'foods'), foodId));
+}
+
+export async function deleteCustomFoods(uid: string, foodIds: string[]): Promise<number> {
+  const uniqueIds = Array.from(new Set(foodIds.filter(Boolean)));
+  for (let i = 0; i < uniqueIds.length; i += 400) {
+    const batch = writeBatch(db);
+    uniqueIds.slice(i, i + 400).forEach((id) => {
+      batch.delete(doc(subcol(uid, 'foods'), id));
+    });
+    await batch.commit();
+  }
+  return uniqueIds.length;
+}
+
 export async function addNutritionEntry(
   uid: string,
   clientId: string,

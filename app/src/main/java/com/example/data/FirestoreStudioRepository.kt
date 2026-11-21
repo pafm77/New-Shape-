@@ -1519,6 +1519,35 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
+    suspend fun deleteFood(foodId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("foods").document(foodId).delete().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/foods/$foodId")
+        Result.failure(e)
+    }
+
+    suspend fun deleteCustomFoods(foodIds: List<String>): Result<Int> = try {
+        val uid = requireUserId()
+        val uniqueIds = foodIds.filter { it.isNotBlank() }.distinct()
+        uniqueIds.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { fid ->
+                batch.delete(userDoc(uid).collection("foods").document(fid))
+            }
+            batch.commit().await()
+        }
+        Result.success(uniqueIds.size)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/foods")
+        Result.failure(e)
+    }
+
     suspend fun addNutritionEntry(clientId: String, mealType: MealType, food: FoodItemRecord, grams: Double): Result<Unit> = try {
         val uid = requireUserId()
         val safeGrams = grams.coerceIn(1.0, 10000.0)

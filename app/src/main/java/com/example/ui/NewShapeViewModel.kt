@@ -715,6 +715,32 @@ class NewShapeViewModel(
         }
     }
 
+    fun deleteFood(foodId: String, foodName: String = "") {
+        viewModelScope.launch {
+            repository.deleteFood(foodId)
+                .onSuccess {
+                    _statusBanner.value = if (foodName.isNotBlank()) {
+                        "Alimento \"$foodName\" removido."
+                    } else {
+                        "Alimento removido."
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun deleteAllCustomFoods() {
+        val customIds = currentData?.foodItems?.filter { it.custom }?.map { it.id }.orEmpty()
+        if (customIds.isEmpty()) return
+        viewModelScope.launch {
+            repository.deleteCustomFoods(customIds)
+                .onSuccess { removed ->
+                    _statusBanner.value = "$removed alimentos importados/adicionados removidos!"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     // --- Physical Assessments ---
     fun addPhysicalAssessment(
         clientId: String,

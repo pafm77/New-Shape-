@@ -253,14 +253,18 @@ private fun FoodCatalogSection(
 ) {
     var search by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("Todos") }
+    var onlyCustom by remember { mutableStateOf(false) }
     var showAddFoodDialog by remember { mutableStateOf(false) }
+    var showDeleteAllCustomDialog by remember { mutableStateOf(false) }
 
+    val customFoods = remember(state.foodItems) { state.foodItems.filter { it.custom } }
     val categories = remember(state.foodItems) {
         listOf("Todos") + state.foodItems.map { it.category }.distinct().sorted()
     }
-    val filtered = remember(state.foodItems, search, selectedCategory) {
+    val filtered = remember(state.foodItems, search, selectedCategory, onlyCustom) {
         state.foodItems.filter { fd ->
-            (selectedCategory == "Todos" || fd.category == selectedCategory) &&
+            (!onlyCustom || fd.custom) &&
+                (selectedCategory == "Todos" || fd.category == selectedCategory) &&
                 (search.isBlank() || fd.name.contains(search, ignoreCase = true))
         }
     }
@@ -271,17 +275,37 @@ private fun FoodCatalogSection(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Alimentos (por 100g)", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
-                GoldPrimaryButton(
-                    text = "+ Novo Alimento",
-                    onClick = { showAddFoodDialog = true },
-                    testTag = "add_food_button"
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Alimentos (por 100g)", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                    GoldPrimaryButton(
+                        text = "+ Novo Alimento",
+                        onClick = { showAddFoodDialog = true },
+                        testTag = "add_food_button"
+                    )
+                }
+                if (customFoods.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = { showDeleteAllCustomDialog = true },
+                        border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.6f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = DangerRedContainer,
+                            contentColor = DangerRed
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("delete_all_custom_foods_btn")
+                    ) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Apagar alimentos importados (${customFoods.size})", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
         item {
@@ -297,6 +321,20 @@ private fun FoodCatalogSection(
         }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (customFoods.isNotEmpty()) {
+                    item {
+                        FilterChip(
+                            selected = onlyCustom,
+                            onClick = { onlyCustom = !onlyCustom },
+                            label = { Text("Importados/Adic. (${customFoods.size})") },
+                            modifier = Modifier.testTag("filter_custom_foods_chip"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = DangerRed,
+                                selectedLabelColor = TextPrimaryDark
+                            )
+                        )
+                    }
+                }
                 items(categories) { cat ->
                     FilterChip(
                         selected = selectedCategory == cat,
@@ -324,14 +362,32 @@ private fun FoodCatalogSection(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(fd.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(fd.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                            if (fd.custom) {
+                                StatusPill("Importado/Adic.", InfoBlue, InfoBlueContainer)
+                            }
+                        }
                         Text(
                             text = "${String.format("%.0f", fd.kcalPer100g)} kcal · P ${fd.proteinPer100g}g · HC ${fd.carbsPer100g}g · G ${fd.fatPer100g}g",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondaryDark
                         )
                     }
-                    StatusPill(fd.category, NewShapeGoldBright, NewShapeGoldMuted)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        StatusPill(fd.category, NewShapeGoldBright, NewShapeGoldMuted)
+                        if (fd.custom) {
+                            IconButton(
+                                onClick = { viewModel.deleteFood(fd.id, fd.name) },
+                                modifier = Modifier.testTag("delete_food_${fd.id}")
+                            ) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar alimento", tint = DangerRed)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -343,6 +399,38 @@ private fun FoodCatalogSection(
             onSave = { name, cat, kcal, p, c, f ->
                 viewModel.addCustomFood(name, cat, kcal, p, c, f)
                 showAddFoodDialog = false
+            }
+        )
+    }
+
+    if (showDeleteAllCustomDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllCustomDialog = false },
+            containerColor = CharcoalSurface,
+            title = { Text("Apagar alimentos importados?", color = TextPrimaryDark) },
+            text = {
+                Text(
+                    "Vais remover todos os ${customFoods.size} alimentos importados via Excel ou adicionados manualmente. A lista base de alimentos da New Shape mantém-se intacta.",
+                    color = TextSecondaryDark
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteAllCustomFoods()
+                        onlyCustom = false
+                        showDeleteAllCustomDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+                    modifier = Modifier.testTag("confirm_delete_all_custom_foods_btn")
+                ) {
+                    Text("Apagar todos (${customFoods.size})", color = TextPrimaryDark)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllCustomDialog = false }) {
+                    Text("Cancelar", color = TextSecondaryDark)
+                }
             }
         )
     }

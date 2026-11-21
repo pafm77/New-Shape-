@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Trash2 } from 'lucide-react';
 import {
   ClientRecord,
   FoodItemRecord,
@@ -201,7 +201,12 @@ const FoodCatalogView: React.FC<{
 }> = ({ uid, foodItems, onBanner }) => {
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('Todos');
+  const [onlyCustom, setOnlyCustom] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showDeleteAllCustom, setShowDeleteAllCustom] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  const customFoods = useMemo(() => foodItems.filter((f) => f.custom), [foodItems]);
 
   const cats = useMemo(
     () => ['Todos', ...Array.from(new Set(foodItems.map((f) => f.category))).sort()],
@@ -210,6 +215,7 @@ const FoodCatalogView: React.FC<{
 
   const filtered = foodItems.filter(
     (f) =>
+      (!onlyCustom || f.custom) &&
       (cat === 'Todos' || f.category === cat) &&
       (!search.trim() || f.name.toLowerCase().includes(search.toLowerCase()))
   );
@@ -218,10 +224,22 @@ const FoodCatalogView: React.FC<{
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-bold text-[#F4F4F5]">Alimentos (por 100g)</h2>
-        <GoldButton onClick={() => setShowAdd(true)}>
-          <Plus className="h-4 w-4" />
-          Novo Alimento
-        </GoldButton>
+        <div className="flex flex-wrap items-center gap-2">
+          {customFoods.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowDeleteAllCustom(true)}
+              className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-[#EF4444]/40 bg-[#3B1518] px-3.5 py-2 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#EF4444]/25"
+            >
+              <Trash2 className="h-4 w-4" />
+              Apagar importados ({customFoods.length})
+            </button>
+          )}
+          <GoldButton onClick={() => setShowAdd(true)}>
+            <Plus className="h-4 w-4" />
+            Novo Alimento
+          </GoldButton>
+        </div>
       </div>
 
       <div className="relative">
@@ -235,6 +253,19 @@ const FoodCatalogView: React.FC<{
       </div>
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {customFoods.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setOnlyCustom((prev) => !prev)}
+            className={`whitespace-nowrap rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+              onlyCustom
+                ? 'border-[#EF4444] bg-[#EF4444] text-white'
+                : 'border-[#EF4444]/40 bg-[#3B1518]/60 text-[#FCA5A5]'
+            }`}
+          >
+            Importados / Adicionados ({customFoods.length})
+          </button>
+        )}
         {cats.map((c) => (
           <button
             key={c}
@@ -257,14 +288,33 @@ const FoodCatalogView: React.FC<{
             key={fd.id}
             className="flex items-center justify-between gap-3 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-3.5"
           >
-            <div>
-              <p className="text-sm font-bold text-[#F4F4F5]">{fd.name}</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="text-sm font-bold text-[#F4F4F5]">{fd.name}</p>
+                {fd.custom && <StatusPill tone="blue">Importado/Adic.</StatusPill>}
+              </div>
               <p className="text-xs text-[#A1A1AA]">
                 {fd.kcalPer100g.toFixed(0)} kcal · P {fd.proteinPer100g}g · HC {fd.carbsPer100g}g · G{' '}
                 {fd.fatPer100g}g
               </p>
             </div>
-            <StatusPill tone="gold">{fd.category}</StatusPill>
+            <div className="flex items-center gap-1.5">
+              <StatusPill tone="gold">{fd.category}</StatusPill>
+              {fd.custom && (
+                <button
+                  type="button"
+                  title="Apagar alimento"
+                  aria-label={`Apagar ${fd.name}`}
+                  onClick={async () => {
+                    await repo.deleteFood(uid, fd.id);
+                    onBanner(`Alimento "${fd.name}" removido.`);
+                  }}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-[#EF4444] transition hover:bg-[#3B1518]"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -278,6 +328,52 @@ const FoodCatalogView: React.FC<{
             onBanner('Alimento adicionado!');
           }}
         />
+      )}
+
+      {showDeleteAllCustom && (
+        <Modal
+          open
+          title="Apagar alimentos importados?"
+          onClose={() => !deletingAll && setShowDeleteAllCustom(false)}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[#D4D4D8]">
+              Vais remover todos os <strong className="text-white">{customFoods.length}</strong> alimentos
+              importados via Excel ou adicionados manualmente. A lista base de alimentos da New Shape
+              mantém-se intacta.
+            </p>
+            <div className="flex justify-end gap-2">
+              <SecondaryButton
+                disabled={deletingAll}
+                onClick={() => setShowDeleteAllCustom(false)}
+              >
+                Cancelar
+              </SecondaryButton>
+              <button
+                type="button"
+                disabled={deletingAll}
+                onClick={async () => {
+                  setDeletingAll(true);
+                  try {
+                    const removed = await repo.deleteCustomFoods(
+                      uid,
+                      customFoods.map((f) => f.id)
+                    );
+                    setOnlyCustom(false);
+                    setShowDeleteAllCustom(false);
+                    onBanner(`${removed} alimentos importados/adicionados removidos!`);
+                  } finally {
+                    setDeletingAll(false);
+                  }
+                }}
+                className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl bg-[#EF4444] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#DC2626] disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                {deletingAll ? 'A apagar...' : `Apagar todos (${customFoods.length})`}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
