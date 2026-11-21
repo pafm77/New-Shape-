@@ -199,6 +199,7 @@ fun SemanasSection(
                 }
                 val presentCount = confirmedBookings.count { it.attendanceStatus == "PRESENT" }
                 val absentCount = confirmedBookings.count { it.attendanceStatus == "ABSENT" }
+                val waitlistCount = state.waitlistEntries.count { it.sessionId == session.id }
                 val isToday = remember(session.startMillis) {
                     if (session.startMillis <= 0L) false
                     else {
@@ -236,6 +237,9 @@ fun SemanasSection(
                                 )
                                 if (isToday) {
                                     StatusPill("Hoje", NewShapeGoldBright, NewShapeGoldMuted)
+                                }
+                                if (waitlistCount > 0) {
+                                    StatusPill("Espera: $waitlistCount", PendingAmber, PendingAmberContainer)
                                 }
                             }
                             Text(
@@ -303,12 +307,17 @@ fun SemanasSection(
         SessionDetailDialog(
             session = freshSession,
             bookings = state.bookings.filter { it.sessionId == freshSession.id && it.status != BookingStatus.CANCELLED.name },
+            waitlistEntries = state.waitlistEntries
+                .filter { it.sessionId == freshSession.id }
+                .sortedBy { it.createdAtMillis },
             clients = state.clients,
             onDismiss = { selectedSessionDetail = null },
             onAddClient = { clientId ->
                 viewModel.addManualClientToSession(freshSession.id, freshSession.weekKey, clientId)
             },
             onRemoveBooking = { bookingId -> viewModel.removeBooking(bookingId) },
+            onPromoteWaitlist = { entry -> viewModel.promoteWaitlistEntry(entry) },
+            onRemoveWaitlist = { entryId -> viewModel.leaveWaitlist(entryId) },
             onSetAttendance = { bookingId, status -> viewModel.setBookingAttendance(bookingId, status) },
             onEdit = {
                 selectedSessionDetail = null
@@ -554,10 +563,13 @@ private fun EditSessionDialog(
 private fun SessionDetailDialog(
     session: TrainingSessionRecord,
     bookings: List<BookingRecord>,
+    waitlistEntries: List<WaitlistEntryRecord>,
     clients: List<ClientRecord>,
     onDismiss: () -> Unit,
     onAddClient: (String) -> Unit,
     onRemoveBooking: (String) -> Unit,
+    onPromoteWaitlist: (WaitlistEntryRecord) -> Unit,
+    onRemoveWaitlist: (String) -> Unit,
     onSetAttendance: (String, String) -> Unit,
     onEdit: () -> Unit
 ) {
@@ -664,6 +676,66 @@ private fun SessionDetailDialog(
                                                     selectedLabelColor = TextPrimaryDark
                                                 )
                                             )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (waitlistEntries.isNotEmpty()) {
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(color = HairlineBorder)
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "Lista de Espera (${waitlistEntries.size}) · Ordem de chegada",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = PendingAmber,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    waitlistEntries.forEachIndexed { idx, entry ->
+                        val c = clientMap[entry.clientId]
+                        if (c != null) {
+                            Surface(
+                                color = PendingAmberContainer.copy(alpha = 0.45f),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, PendingAmber.copy(alpha = 0.55f)),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            StatusPill("#${idx + 1}", PendingAmber, ObsidianBg.copy(alpha = 0.6f))
+                                            Text(c.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                                        }
+                                        Text(c.phone, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Button(
+                                            onClick = { onPromoteWaitlist(entry) },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = NewShapeGold,
+                                                contentColor = TextOnGold
+                                            ),
+                                            modifier = Modifier.testTag("promote_waitlist_${entry.id}")
+                                        ) {
+                                            Text("Promover", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        }
+                                        IconButton(
+                                            onClick = { onRemoveWaitlist(entry.id) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Remover da espera", tint = DangerRed, modifier = Modifier.size(16.dp))
                                         }
                                     }
                                 }

@@ -43,7 +43,9 @@ import {
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
+  WaitlistEntryRecord,
   WeekResponseRecord,
+  WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
   SUPER_ADMIN_EMAIL,
@@ -199,6 +201,8 @@ export function App() {
   const [exercises, setExercises] = useState<ExerciseRecord[]>([]);
   const [workoutPlans, setWorkoutPlans] = useState<WorkoutPlanRecord[]>([]);
   const [workoutPlanItems, setWorkoutPlanItems] = useState<WorkoutPlanItemRecord[]>([]);
+  const [workoutLoadLogs, setWorkoutLoadLogs] = useState<WorkoutLoadLogRecord[]>([]);
+  const [waitlistEntries, setWaitlistEntries] = useState<WaitlistEntryRecord[]>([]);
   const [foods, setFoods] = useState<FoodItemRecord[]>([]);
   const [nutritionEntries, setNutritionEntries] = useState<NutritionEntryRecord[]>([]);
   const [assessments, setAssessments] = useState<PhysicalAssessmentRecord[]>([]);
@@ -426,6 +430,8 @@ export function App() {
         exercises: setExercises,
         workoutPlans: setWorkoutPlans,
         workoutPlanItems: setWorkoutPlanItems,
+        workoutLoadLogs: setWorkoutLoadLogs,
+        waitlistEntries: setWaitlistEntries,
         foods: setFoods,
         nutritionEntries: setNutritionEntries,
         physicalAssessments: setAssessments,
@@ -879,11 +885,13 @@ export function App() {
           weeks={weeks}
           sessions={sessions}
           bookings={bookings}
+          waitlistEntries={waitlistEntries}
           weekResponses={weekResponses}
           payments={payments}
           fidelizacoes={fidelizacoes}
           workoutPlans={workoutPlans}
           workoutPlanItems={workoutPlanItems}
+          workoutLoadLogs={workoutLoadLogs}
           foodItems={foods}
           nutritionEntries={nutritionEntries}
           assessments={assessments}
@@ -1093,6 +1101,7 @@ export function App() {
               activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
+              waitlistEntries={waitlistEntries}
               weekResponses={weekResponses}
               ptNotifications={ptNotifications}
               pendingPtCount={pendingPtCount}
@@ -1124,6 +1133,10 @@ export function App() {
               bookings={bookings}
               payments={payments}
               fidelizacoes={fidelizacoes}
+              assessments={assessments}
+              workoutPlans={workoutPlans}
+              workoutPlanItems={workoutPlanItems}
+              workoutLoadLogs={workoutLoadLogs}
               onJumpToWorkout={(cid) => {
                 setJumpClientId(cid);
                 setPtTab('training');
@@ -1148,6 +1161,7 @@ export function App() {
               exercises={exercises}
               workoutPlans={workoutPlans}
               workoutPlanItems={workoutPlanItems}
+              workoutLoadLogs={workoutLoadLogs}
               initialClientId={jumpClientId}
               onBanner={showBanner}
             />
@@ -1180,6 +1194,7 @@ export function App() {
               fidelizacoes={fidelizacoes}
               chatMessages={chatMessages}
               ptAccounts={allPtAccounts}
+              whatsappWebMode={effectiveSettings.whatsappWebMode}
               initialSubTab={mgmtSubTab}
               initialChatClientId={jumpClientId}
               onBanner={showBanner}

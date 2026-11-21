@@ -17,7 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import android.widget.Toast
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -130,6 +132,7 @@ private fun FinancesSection(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val context = LocalContext.current
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
     var showAddPaymentChooser by remember { mutableStateOf(false) }
     var chosenClient by remember { mutableStateOf<ClientRecord?>(null) }
@@ -383,6 +386,19 @@ private fun FinancesSection(
                     payments = state.payments,
                     clients = state.clients,
                     isSuperAdmin = state.isSuperAdmin
+                )
+            }
+            item(key = "finance_admin_tools") {
+                FinanceAdminTools(
+                    isSuperAdmin = state.isSuperAdmin,
+                    currentMonthYear = state.currentMonthYear,
+                    currentMonthLabel = state.currentMonthLabel,
+                    clients = state.clients,
+                    payments = state.payments,
+                    fidelizacoes = state.fidelizacoes,
+                    whatsappWebMode = state.settings.whatsappWebMode,
+                    onQuickPayClient = { chosenClient = it },
+                    onBanner = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
                 )
             }
         }

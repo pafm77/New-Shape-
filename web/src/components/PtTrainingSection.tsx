@@ -3,6 +3,7 @@ import { Dumbbell, Plus, Search, Trash2, Users, X } from 'lucide-react';
 import {
   ClientRecord,
   ExerciseRecord,
+  WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
 } from '../types/studio';
@@ -19,6 +20,7 @@ import {
   Textarea,
 } from './UiPrimitives';
 import { ExerciseLastLoadBadge } from './ExerciseLastLoadBadge';
+import { ExerciseProgressModal } from './ExerciseProgressModal';
 
 interface PtTrainingSectionProps {
   uid: string;
@@ -26,6 +28,7 @@ interface PtTrainingSectionProps {
   exercises: ExerciseRecord[];
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
+  workoutLoadLogs: WorkoutLoadLogRecord[];
   initialClientId?: string;
   onBanner: (msg: string) => void;
 }
@@ -36,6 +39,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   exercises,
   workoutPlans,
   workoutPlanItems,
+  workoutLoadLogs,
   initialClientId,
   onBanner,
 }) => {
@@ -51,6 +55,10 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [targetPlan, setTargetPlan] = useState<WorkoutPlanRecord | null>(null);
   const [assignPlan, setAssignPlan] = useState<WorkoutPlanRecord | null>(null);
+  const [historyItem, setHistoryItem] = useState<{
+    item: WorkoutPlanItemRecord;
+    clientId: string;
+  } | null>(null);
 
   const clientPlans = useMemo(
     () =>
@@ -175,6 +183,10 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                                 clientId={plan.clientId}
                                 workoutPlans={workoutPlans}
                                 workoutPlanItems={workoutPlanItems}
+                                workoutLoadLogs={workoutLoadLogs}
+                                onOpenHistory={() =>
+                                  setHistoryItem({ item, clientId: plan.clientId })
+                                }
                               />
                               {item.notes && (
                                 <p className="text-xs text-[#A1A1AA]">{item.notes}</p>
@@ -278,6 +290,21 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                 setTargetPlan(null);
                 onBanner('Exercício adicionado ao plano.');
               }}
+            />
+          )}
+
+          {historyItem && (
+            <ExerciseProgressModal
+              open
+              clientId={historyItem.clientId}
+              clientName={effectiveClient?.name}
+              exerciseId={historyItem.item.exerciseId}
+              exerciseName={historyItem.item.exerciseName}
+              currentLoadKg={historyItem.item.loadKg}
+              lastLoadKg={historyItem.item.lastLoadKg}
+              lastLoggedAtMillis={historyItem.item.lastLoggedAtMillis}
+              workoutLoadLogs={workoutLoadLogs}
+              onClose={() => setHistoryItem(null)}
             />
           )}
         </div>

@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ClientRecord
 import com.example.data.model.ExerciseRecord
+import com.example.data.model.WorkoutLoadLogRecord
 import com.example.data.model.WorkoutPlanItemRecord
 import com.example.data.model.WorkoutPlanRecord
 import com.example.ui.NewShapeViewModel
@@ -83,6 +84,7 @@ private fun WorkoutPlansBuilderSection(
     var showNewPlanDialog by remember { mutableStateOf(false) }
     var targetPlanForExercise by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
     var targetPlanToAssign by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
+    var historyTargetItem by remember { mutableStateOf<WorkoutPlanItemRecord?>(null) }
 
     val clientPlans = remember(state.workoutPlans, selectedClient?.id) {
         if (selectedClient == null) emptyList()
@@ -183,6 +185,8 @@ private fun WorkoutPlansBuilderSection(
                                 clientId = plan.clientId,
                                 workoutPlans = state.workoutPlans,
                                 workoutPlanItems = state.workoutPlanItems,
+                                workoutLoadLogs = state.workoutLoadLogs,
+                                onOpenHistory = { historyTargetItem = exItem },
                                 onRemove = { viewModel.removeExerciseFromPlan(exItem.id) }
                             )
                             if (idx < items.lastIndex) {
@@ -251,6 +255,20 @@ private fun WorkoutPlansBuilderSection(
             }
         )
     }
+
+    historyTargetItem?.let { exItem ->
+        if (selectedClient != null) {
+            ExerciseProgressDialog(
+                clientId = selectedClient.id,
+                clientName = selectedClient.name,
+                exerciseId = exItem.exerciseId,
+                exerciseName = exItem.exerciseName,
+                workoutLoadLogs = state.workoutLoadLogs,
+                currentLoadKg = exItem.loadKg,
+                onDismiss = { historyTargetItem = null }
+            )
+        }
+    }
 }
 
 @Composable
@@ -260,6 +278,8 @@ fun WorkoutPlanExerciseRow(
     clientId: String = "",
     workoutPlans: List<WorkoutPlanRecord> = emptyList(),
     workoutPlanItems: List<WorkoutPlanItemRecord> = emptyList(),
+    workoutLoadLogs: List<WorkoutLoadLogRecord> = emptyList(),
+    onOpenHistory: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null
 ) {
     Row(
@@ -286,7 +306,9 @@ fun WorkoutPlanExerciseRow(
                 item = item,
                 clientId = clientId,
                 workoutPlans = workoutPlans,
-                workoutPlanItems = workoutPlanItems
+                workoutPlanItems = workoutPlanItems,
+                workoutLoadLogs = workoutLoadLogs,
+                onOpenHistory = onOpenHistory
             )
             if (item.notes.isNotBlank()) {
                 Text(item.notes, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)

@@ -37,7 +37,9 @@ import {
   TrainingSessionRecord,
   TrainingType,
   TrainingWeekRecord,
+  WaitlistEntryRecord,
   WeekResponseRecord,
+  WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
   isSuperAdminEmail,
@@ -87,6 +89,8 @@ export interface StudioStreams {
   chatMessages: (items: ChatMessageRecord[]) => void;
   templates: (items: MessageTemplateRecord[]) => void;
   ptNotifications?: (items: PtNotificationRecord[]) => void;
+  workoutLoadLogs?: (items: WorkoutLoadLogRecord[]) => void;
+  waitlistEntries?: (items: WaitlistEntryRecord[]) => void;
   settings: (item: StudioSettingsRecord | null) => void;
   onError: (err: Error) => void;
 }
@@ -141,6 +145,7 @@ export function subscribeStudioData(
       fidelizacaoMonths: Number(d.fidelizacaoMonths ?? 0),
       fidelizacaoStartMillis: Number(d.fidelizacaoStartMillis ?? 0),
       trainingType: d.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO',
+      weeklySessionLimit: Number(d.weeklySessionLimit ?? 0),
     }),
     (list) =>
       list.sort((a, b) => {
@@ -416,6 +421,42 @@ export function subscribeStudioData(
     );
   } else if (handlers.ptNotifications) {
     handlers.ptNotifications([]);
+  }
+
+  if (handlers.workoutLoadLogs) {
+    listen<WorkoutLoadLogRecord>(
+      'workout_load_logs',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        clientId: String(d.clientId ?? ''),
+        planId: String(d.planId ?? ''),
+        planItemId: String(d.planItemId ?? ''),
+        exerciseId: String(d.exerciseId ?? ''),
+        exerciseName: String(d.exerciseName ?? ''),
+        loadKg: String(d.loadKg ?? ''),
+        numericKg: Number(d.numericKg ?? 0),
+        loggedAtMillis: Number(d.loggedAtMillis ?? 0),
+      }),
+      (list) => list.sort((a, b) => a.loggedAtMillis - b.loggedAtMillis),
+      handlers.workoutLoadLogs
+    );
+  }
+
+  if (handlers.waitlistEntries) {
+    listen<WaitlistEntryRecord>(
+      'waitlist_entries',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        sessionId: String(d.sessionId ?? ''),
+        weekKey: String(d.weekKey ?? ''),
+        clientId: String(d.clientId ?? ''),
+        createdAtMillis: Number(d.createdAtMillis ?? 0),
+      }),
+      (list) => list.sort((a, b) => a.createdAtMillis - b.createdAtMillis),
+      handlers.waitlistEntries
+    );
   }
 
   unsubs.push(
@@ -1078,11 +1119,13 @@ export async function addClient(
     fidelizacaoMonths?: number;
     fidelizacaoStartMillis?: number;
     trainingType?: TrainingType;
+    weeklySessionLimit?: number;
   }
 ): Promise<string> {
   const ref = doc(subcol(uid, 'clients'));
   const fidMonths = payload.fidelizacaoMonths === 6 || payload.fidelizacaoMonths === 12 ? payload.fidelizacaoMonths : 0;
   const trainingType: TrainingType = payload.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
+  const weeklySessionLimit = Math.max(0, Math.min(21, Math.round(payload.weeklySessionLimit ?? 0)));
   await setDoc(ref, {
     userId: uid,
     name: payload.name.trim().slice(0, 100),
@@ -1094,6 +1137,7 @@ export async function addClient(
     fidelizacaoMonths: fidMonths,
     fidelizacaoStartMillis: Math.max(0, Math.round(payload.fidelizacaoStartMillis ?? 0)),
     trainingType,
+    weeklySessionLimit,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -1103,6 +1147,7 @@ export async function addClient(
 export async function updateClient(uid: string, client: ClientRecord): Promise<void> {
   const fidMonths = client.fidelizacaoMonths === 6 || client.fidelizacaoMonths === 12 ? client.fidelizacaoMonths : 0;
   const trainingType: TrainingType = client.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
+  const weeklySessionLimit = Math.max(0, Math.min(21, Math.round(client.weeklySessionLimit ?? 0)));
   await updateDoc(doc(subcol(uid, 'clients'), client.id), {
     name: client.name.trim().slice(0, 100),
     phone: normalizePortuguesePhone(client.phone),
@@ -1113,6 +1158,7 @@ export async function updateClient(uid: string, client: ClientRecord): Promise<v
     fidelizacaoMonths: fidMonths,
     fidelizacaoStartMillis: Math.max(0, Math.round(client.fidelizacaoStartMillis)),
     trainingType,
+    weeklySessionLimit,
     updatedAt: serverTimestamp(),
   });
 }
@@ -1727,24 +1773,97 @@ export async function addExerciseToPlan(
   });
 }
 
+export function parseLoadKgNumber(loadKg: string): number {
+  const match = loadKg.replace(',', '.').match(/\d+(\.\d+)?/);
+  if (!match) return 0;
+  const n = Number(match[0]);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(2000, Number(n.toFixed(2)));
+}
+
 export async function updateWorkoutPlanItemLoad(
   uid: string,
   itemId: string,
   loadKg: string,
-  previousLoadKg?: string
+  previousLoadKg?: string,
+  logContext?: {
+    clientId: string;
+    planId: string;
+    exerciseId: string;
+    exerciseName: string;
+  }
 ): Promise<void> {
   const cleanLoad = loadKg.trim().slice(0, 40);
   const cleanPrev = (previousLoadKg !== undefined ? previousLoadKg : cleanLoad).trim().slice(0, 40);
+  const now = Date.now();
   await updateDoc(doc(subcol(uid, 'workout_plan_items'), itemId), {
     loadKg: cleanLoad,
     lastLoadKg: cleanPrev || cleanLoad,
-    lastLoggedAtMillis: Date.now(),
+    lastLoggedAtMillis: now,
     updatedAt: serverTimestamp(),
   });
+  if (logContext && logContext.clientId && logContext.exerciseName.trim() && cleanLoad) {
+    await setDoc(doc(subcol(uid, 'workout_load_logs')), {
+      userId: uid,
+      clientId: logContext.clientId.slice(0, 128),
+      planId: logContext.planId.slice(0, 128),
+      planItemId: itemId.slice(0, 128),
+      exerciseId: logContext.exerciseId.slice(0, 128),
+      exerciseName: logContext.exerciseName.trim().slice(0, 120),
+      loadKg: cleanLoad,
+      numericKg: parseLoadKgNumber(cleanLoad),
+      loggedAtMillis: now,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
 }
 
 export async function removeExerciseFromPlan(uid: string, itemId: string): Promise<void> {
   await deleteDoc(doc(subcol(uid, 'workout_plan_items'), itemId));
+}
+
+// --- Waitlist (Lista de Espera) ---
+export async function joinWaitlist(
+  uid: string,
+  sessionId: string,
+  weekKey: string,
+  clientId: string
+): Promise<void> {
+  const entryId = `${sessionId}_${clientId}`.slice(0, 120);
+  await setDoc(doc(subcol(uid, 'waitlist_entries'), entryId), {
+    userId: uid,
+    sessionId: sessionId.slice(0, 128),
+    weekKey: weekKey.slice(0, 30),
+    clientId: clientId.slice(0, 128),
+    createdAtMillis: Date.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function leaveWaitlist(uid: string, entryId: string): Promise<void> {
+  await deleteDoc(doc(subcol(uid, 'waitlist_entries'), entryId));
+}
+
+export async function promoteWaitlistEntry(
+  uid: string,
+  entry: WaitlistEntryRecord
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.delete(doc(subcol(uid, 'waitlist_entries'), entry.id));
+  batch.delete(doc(subcol(uid, 'week_responses'), `${entry.weekKey}_${entry.clientId}`));
+  batch.set(doc(subcol(uid, 'bookings')), {
+    userId: uid,
+    sessionId: entry.sessionId,
+    weekKey: entry.weekKey,
+    clientId: entry.clientId,
+    status: 'CONFIRMED',
+    requestedAtMillis: Date.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  await batch.commit();
 }
 
 // --- Nutrition & Foods ---

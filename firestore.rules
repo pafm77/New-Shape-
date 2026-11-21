@@ -56,7 +56,8 @@ service cloud.firestore {
              (!('monthlyFeeEur' in data) || (data.monthlyFeeEur is number && data.monthlyFeeEur >= 0 && data.monthlyFeeEur <= 100000)) &&
              (!('fidelizacaoMonths' in data) || (data.fidelizacaoMonths in [0, 6, 12])) &&
              (!('fidelizacaoStartMillis' in data) || (data.fidelizacaoStartMillis is int && data.fidelizacaoStartMillis >= 0)) &&
-             (!('trainingType' in data) || (data.trainingType in ['PERSONALIZADO', 'GRUPO']));
+             (!('trainingType' in data) || (data.trainingType in ['PERSONALIZADO', 'GRUPO'])) &&
+             (!('weeklySessionLimit' in data) || (data.weeklySessionLimit is int && data.weeklySessionLimit >= 0 && data.weeklySessionLimit <= 21));
     }
 
     function isValidWeek(data) {
@@ -240,6 +241,26 @@ service cloud.firestore {
              data.notes is string && data.notes.size() <= 500;
     }
 
+    function isValidWorkoutLoadLog(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.planId is string && data.planId.size() <= 128 &&
+             data.planItemId is string && data.planItemId.size() <= 128 &&
+             data.exerciseId is string && data.exerciseId.size() <= 128 &&
+             data.exerciseName is string && data.exerciseName.size() >= 1 && data.exerciseName.size() <= 120 &&
+             data.loadKg is string && data.loadKg.size() >= 1 && data.loadKg.size() <= 40 &&
+             data.numericKg is number && data.numericKg >= 0 && data.numericKg <= 2000 &&
+             data.loggedAtMillis is int && data.loggedAtMillis >= 0;
+    }
+
+    function isValidWaitlistEntry(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+             data.weekKey is string && data.weekKey.size() >= 1 && data.weekKey.size() <= 30 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.createdAtMillis is int && data.createdAtMillis >= 0;
+    }
+
     // --- PT Registration & Approval (Admin: pafm77pedrinho77@gmail.com) ---
     match /pt_accounts/{ptUid} {
       allow get: if isSuperAdmin() || (isSignedIn() && request.auth.uid == ptUid);
@@ -275,7 +296,7 @@ service cloud.firestore {
         allow create: if canAccessStudio(userId) && isValidId(clientId) &&
                          incoming().userId == userId &&
                          incoming().keys().hasAll(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'weeklySessionLimit', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidClient(incoming());
         allow update: if isOwner(userId) && isValidId(clientId) &&
@@ -283,7 +304,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'weeklySessionLimit', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(clientId);
       }
 
@@ -605,6 +626,32 @@ service cloud.firestore {
                          isValidTimestamp(incoming().updatedAt) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(notificationId);
+      }
+
+      match /workout_load_logs/{logId} {
+        allow get: if canAccessStudio(userId) && isValidId(logId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(logId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'planId', 'planItemId', 'exerciseId', 'exerciseName', 'loadKg', 'numericKg', 'loggedAtMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'planId', 'planItemId', 'exerciseId', 'exerciseName', 'loadKg', 'numericKg', 'loggedAtMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidWorkoutLoadLog(incoming());
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(logId);
+      }
+
+      match /waitlist_entries/{entryId} {
+        allow get: if canAccessStudio(userId) && isValidId(entryId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(entryId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'sessionId', 'weekKey', 'clientId', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'sessionId', 'weekKey', 'clientId', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidWaitlistEntry(incoming());
+        allow update: if false;
+        allow delete: if canAccessStudio(userId) && isValidId(entryId);
       }
     }
   }

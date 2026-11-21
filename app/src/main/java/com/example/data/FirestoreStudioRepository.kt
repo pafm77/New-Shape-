@@ -115,6 +115,12 @@ class FirestoreStudioRepository(
     fun observePtNotifications(uid: String): Flow<List<PtNotificationRecord>> =
         observeSubcollection<PtNotificationRecord>(uid, "pt_notifications") { it.sortedByDescending { n -> n.timestampMillis } }
 
+    fun observeWorkoutLoadLogs(uid: String): Flow<List<WorkoutLoadLogRecord>> =
+        observeSubcollection<WorkoutLoadLogRecord>(uid, "workout_load_logs") { it.sortedBy { l -> l.loggedAtMillis } }
+
+    fun observeWaitlistEntries(uid: String): Flow<List<WaitlistEntryRecord>> =
+        observeSubcollection<WaitlistEntryRecord>(uid, "waitlist_entries") { it.sortedBy { w -> w.createdAtMillis } }
+
     fun observeOwnPtAccount(uid: String): Flow<PtAccountRecord?> = flow {
         require(uid.isNotBlank()) { "UID inválido." }
         val docRef = db.collection("pt_accounts").document(uid)
@@ -825,7 +831,8 @@ class FirestoreStudioRepository(
         trainingType: String = "GRUPO",
         monthlyFeeEur: Double = 0.0,
         fidelizacaoMonths: Int = 0,
-        fidelizacaoStartMillis: Long = 0L
+        fidelizacaoStartMillis: Long = 0L,
+        weeklySessionLimit: Int = 0
     ): Result<String> {
         var path = "users/unknown/clients"
         return try {
@@ -848,6 +855,7 @@ class FirestoreStudioRepository(
                     "monthlyFeeEur" to monthlyFeeEur.coerceIn(0.0, 100000.0),
                     "fidelizacaoMonths" to (if (fidelizacaoMonths in listOf(6, 12)) fidelizacaoMonths else 0),
                     "fidelizacaoStartMillis" to fidelizacaoStartMillis.coerceAtLeast(0L),
+                    "weeklySessionLimit" to weeklySessionLimit.coerceIn(0, 21),
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -880,6 +888,7 @@ class FirestoreStudioRepository(
                     "monthlyFeeEur" to client.monthlyFeeEur.coerceIn(0.0, 100000.0),
                     "fidelizacaoMonths" to (if (client.fidelizacaoMonths in listOf(6, 12)) client.fidelizacaoMonths else 0),
                     "fidelizacaoStartMillis" to client.fidelizacaoStartMillis.coerceAtLeast(0L),
+                    "weeklySessionLimit" to client.weeklySessionLimit.coerceIn(0, 21),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
@@ -1679,17 +1688,28 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
+    fun parseLoadKgNumber(loadKg: String): Double {
+        val match = Regex("\\d+(?:[.,]\\d+)?").find(loadKg) ?: return 0.0
+        val parsed = match.value.replace(',', '.').toDoubleOrNull() ?: return 0.0
+        return parsed.coerceIn(0.0, 2000.0)
+    }
+
     suspend fun updateWorkoutPlanItemLoad(
         itemId: String,
         loadKg: String,
-        previousLoadKg: String? = null
+        previousLoadKg: String? = null,
+        clientId: String = "",
+        planId: String = "",
+        exerciseId: String = "",
+        exerciseName: String = ""
     ): Result<Unit> = try {
         val uid = requireUserId()
         val cleanLoad = loadKg.trim().take(40)
         val cleanPrev = previousLoadKg?.trim()?.take(40).orEmpty()
+        val now = System.currentTimeMillis()
         val payload = mutableMapOf<String, Any>(
             "loadKg" to cleanLoad,
-            "lastLoggedAtMillis" to System.currentTimeMillis(),
+            "lastLoggedAtMillis" to now,
             "updatedAt" to FieldValue.serverTimestamp()
         )
         if (cleanPrev.isNotBlank() && cleanPrev != cleanLoad) {
@@ -1698,6 +1718,23 @@ class FirestoreStudioRepository(
             payload["lastLoadKg"] = cleanLoad
         }
         userDoc(uid).collection("workout_plan_items").document(itemId).update(payload).await()
+        if (clientId.isNotBlank() && exerciseName.isNotBlank() && cleanLoad.isNotBlank()) {
+            userDoc(uid).collection("workout_load_logs").document().set(
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to clientId.take(128),
+                    "planId" to planId.take(128),
+                    "planItemId" to itemId.take(128),
+                    "exerciseId" to exerciseId.take(128),
+                    "exerciseName" to exerciseName.trim().take(120),
+                    "loadKg" to cleanLoad,
+                    "numericKg" to parseLoadKgNumber(cleanLoad),
+                    "loggedAtMillis" to now,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
@@ -1714,6 +1751,68 @@ class FirestoreStudioRepository(
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/workout_plan_items/$itemId")
+        Result.failure(e)
+    }
+
+    // --- Waitlist (Lista de Espera) ---
+    suspend fun joinWaitlist(sessionId: String, weekKey: String, clientId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        val entryId = "${sessionId}_${clientId}".take(120)
+        userDoc(uid).collection("waitlist_entries").document(entryId).set(
+            mapOf(
+                "userId" to uid,
+                "sessionId" to sessionId.take(128),
+                "weekKey" to weekKey.take(30),
+                "clientId" to clientId.take(128),
+                "createdAtMillis" to System.currentTimeMillis(),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/waitlist_entries")
+        Result.failure(e)
+    }
+
+    suspend fun leaveWaitlist(entryId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("waitlist_entries").document(entryId).delete().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/waitlist_entries/$entryId")
+        Result.failure(e)
+    }
+
+    suspend fun promoteWaitlistEntry(entry: WaitlistEntryRecord): Result<Unit> = try {
+        val uid = requireUserId()
+        val batch = db.batch()
+        batch.delete(userDoc(uid).collection("waitlist_entries").document(entry.id))
+        batch.delete(userDoc(uid).collection("week_responses").document("${entry.weekKey}_${entry.clientId}"))
+        val newBookingRef = userDoc(uid).collection("bookings").document()
+        batch.set(
+            newBookingRef,
+            mapOf(
+                "userId" to uid,
+                "sessionId" to entry.sessionId,
+                "weekKey" to entry.weekKey,
+                "clientId" to entry.clientId,
+                "status" to BookingStatus.CONFIRMED.name,
+                "requestedAtMillis" to System.currentTimeMillis(),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        batch.commit().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/waitlist_entries/${entry.id}")
         Result.failure(e)
     }
 

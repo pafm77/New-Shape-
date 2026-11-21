@@ -5,6 +5,7 @@ import {
   Check,
   CreditCard,
   Dumbbell,
+  FileText,
   MessageCircle,
   Plus,
   Search,
@@ -20,9 +21,14 @@ import {
   ClientRecord,
   FidelizacaoRecord,
   PaymentRecord,
+  PhysicalAssessmentRecord,
   TrainingSessionRecord,
   TrainingType,
+  WorkoutLoadLogRecord,
+  WorkoutPlanItemRecord,
+  WorkoutPlanRecord,
 } from '../types/studio';
+import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 import {
   PAYMENT_METHODS,
   PaymentMethod,
@@ -53,6 +59,10 @@ interface PtClientsSectionProps {
   bookings: BookingRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
+  assessments: PhysicalAssessmentRecord[];
+  workoutPlans: WorkoutPlanRecord[];
+  workoutPlanItems: WorkoutPlanItemRecord[];
+  workoutLoadLogs: WorkoutLoadLogRecord[];
   onJumpToWorkout: (clientId: string) => void;
   onJumpToNutrition: (clientId: string) => void;
   onJumpToChat: (clientId: string) => void;
@@ -67,6 +77,10 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   bookings,
   payments,
   fidelizacoes,
+  assessments,
+  workoutPlans,
+  workoutPlanItems,
+  workoutLoadLogs,
   onJumpToWorkout,
   onJumpToNutrition,
   onJumpToChat,
@@ -96,6 +110,10 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         bookings={bookings.filter((b) => b.clientId === selectedClient.id)}
         payments={payments.filter((p) => p.clientId === selectedClient.id)}
         fidelizacoes={fidelizacoes.filter((f) => f.clientId === selectedClient.id)}
+        assessments={assessments.filter((a) => a.clientId === selectedClient.id)}
+        workoutPlans={workoutPlans}
+        workoutPlanItems={workoutPlanItems}
+        workoutLoadLogs={workoutLoadLogs}
         currentMonthYear={currentMonthYear}
         currentMonthLabel={currentMonthLabel}
         onBack={() => setSelectedClientId(null)}
@@ -211,6 +229,9 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
                         {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
                       </StatusPill>
+                      {(c.weeklySessionLimit ?? 0) > 0 && (
+                        <StatusPill tone="neutral">{c.weeklySessionLimit}x/sem</StatusPill>
+                      )}
                       {c.newClient && <StatusPill tone="blue">Novo</StatusPill>}
                       {!c.active && <StatusPill>Inativo</StatusPill>}
                     </div>
@@ -266,8 +287,8 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
       {showNewModal && (
         <NewClientModal
           onClose={() => setShowNewModal(false)}
-          onSave={async (name, phone, notes, trainingType) => {
-            await repo.addClient(uid, { name, phone, notes, trainingType });
+          onSave={async (name, phone, notes, trainingType, weeklySessionLimit) => {
+            await repo.addClient(uid, { name, phone, notes, trainingType, weeklySessionLimit });
             setShowNewModal(false);
             onBanner('Aluno adicionado!');
           }}
@@ -320,6 +341,10 @@ const ClientProfileView: React.FC<{
   bookings: BookingRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
+  assessments: PhysicalAssessmentRecord[];
+  workoutPlans: WorkoutPlanRecord[];
+  workoutPlanItems: WorkoutPlanItemRecord[];
+  workoutLoadLogs: WorkoutLoadLogRecord[];
   currentMonthYear: string;
   currentMonthLabel: string;
   onBack: () => void;
@@ -335,6 +360,10 @@ const ClientProfileView: React.FC<{
   bookings,
   payments,
   fidelizacoes,
+  assessments,
+  workoutPlans,
+  workoutPlanItems,
+  workoutLoadLogs,
   currentMonthYear,
   currentMonthLabel,
   onBack,
@@ -349,6 +378,9 @@ const ClientProfileView: React.FC<{
   const [notes, setNotes] = useState(client.notes);
   const [trainingType, setTrainingType] = useState<TrainingType>(
     client.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO'
+  );
+  const [weeklySessionLimit, setWeeklySessionLimit] = useState<number>(
+    client.weeklySessionLimit ?? 0
   );
   const [monthlyFee, setMonthlyFee] = useState(
     client.monthlyFeeEur > 0 ? String(client.monthlyFeeEur) : ''
@@ -427,7 +459,7 @@ const ClientProfileView: React.FC<{
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <SecondaryButton onClick={onJumpToWorkout}>
           <Dumbbell className="h-4 w-4" />
           Treino
@@ -440,6 +472,27 @@ const ClientProfileView: React.FC<{
           <MessageCircle className="h-4 w-4" />
           Chat
         </SecondaryButton>
+        <GoldButton
+          onClick={() => {
+            const ok = openStudentEvolutionPdfReport({
+              client,
+              assessments,
+              bookings,
+              sessions,
+              workoutPlans,
+              workoutPlanItems,
+              workoutLoadLogs,
+            });
+            onBanner(
+              ok
+                ? 'Relatório de Evolução PDF pronto para guardar ou imprimir!'
+                : 'Autoriza pop-ups no browser para gerar o relatório PDF.'
+            );
+          }}
+        >
+          <FileText className="h-4 w-4" />
+          Relatório PDF
+        </GoldButton>
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
@@ -638,6 +691,25 @@ const ClientProfileView: React.FC<{
               ))}
             </div>
           </div>
+          <div>
+            <FieldLabel>Limite Semanal de Treinos (Pacote)</FieldLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {[0, 1, 2, 3, 4, 5, 6, 7].map((lim) => (
+                <button
+                  key={lim}
+                  type="button"
+                  onClick={() => setWeeklySessionLimit(lim)}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                    weeklySessionLimit === lim
+                      ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                      : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                  }`}
+                >
+                  {lim === 0 ? 'Sem limite' : `${lim}x/sem`}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className={`grid grid-cols-1 ${isSuperAdmin ? 'sm:grid-cols-2' : ''} gap-3`}>
             <div>
               <FieldLabel>Telemóvel WhatsApp</FieldLabel>
@@ -705,6 +777,7 @@ const ClientProfileView: React.FC<{
                 fidelizacaoMonths: fidMonths,
                 fidelizacaoStartMillis: fidMonths > 0 ? fidStart : 0,
                 trainingType,
+                weeklySessionLimit,
               });
               onBanner('Perfil do aluno guardado!');
             }}
@@ -826,11 +899,18 @@ const ClientProfileView: React.FC<{
 
 const NewClientModal: React.FC<{
   onClose: () => void;
-  onSave: (name: string, phone: string, notes: string, trainingType: TrainingType) => Promise<void>;
+  onSave: (
+    name: string,
+    phone: string,
+    notes: string,
+    trainingType: TrainingType,
+    weeklySessionLimit: number
+  ) => Promise<void>;
 }> = ({ onClose, onSave }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [trainingType, setTrainingType] = useState<TrainingType>('GRUPO');
+  const [weeklySessionLimit, setWeeklySessionLimit] = useState<number>(0);
   const [notes, setNotes] = useState('');
   const [rgpdAccepted, setRgpdAccepted] = useState(false);
 
@@ -875,6 +955,25 @@ const NewClientModal: React.FC<{
           </div>
         </div>
         <div>
+          <FieldLabel>Limite Semanal de Treinos (Pacote)</FieldLabel>
+          <div className="flex flex-wrap gap-1.5">
+            {[0, 1, 2, 3, 4, 5, 6].map((lim) => (
+              <button
+                key={lim}
+                type="button"
+                onClick={() => setWeeklySessionLimit(lim)}
+                className={`rounded-xl border px-2.5 py-1.5 text-xs font-bold transition ${
+                  weeklySessionLimit === lim
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {lim === 0 ? 'Sem limite' : `${lim}x/sem`}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
           <FieldLabel>Notas (opcional)</FieldLabel>
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
@@ -897,7 +996,7 @@ const NewClientModal: React.FC<{
             onClick={() => {
               const rgpdStamp = rgpdAccepted ? formatRgpdConsentStamp() : '';
               const combinedNotes = [notes.trim(), rgpdStamp].filter(Boolean).join(' · ');
-              return onSave(name, phone, combinedNotes, trainingType);
+              return onSave(name, phone, combinedNotes, trainingType, weeklySessionLimit);
             }}
           >
             Adicionar

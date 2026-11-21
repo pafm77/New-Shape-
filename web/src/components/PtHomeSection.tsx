@@ -32,6 +32,7 @@ import {
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
+  WaitlistEntryRecord,
   WeekResponseRecord,
 } from '../types/studio';
 import {
@@ -75,6 +76,7 @@ interface PtHomeSectionProps {
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  waitlistEntries: WaitlistEntryRecord[];
   weekResponses: WeekResponseRecord[];
   ptNotifications: PtNotificationRecord[];
   pendingPtCount: number;
@@ -96,6 +98,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   activeWeek,
   sessions,
   bookings,
+  waitlistEntries,
   weekResponses,
   ptNotifications,
   pendingPtCount,
@@ -175,6 +178,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
           activeWeek={activeWeek}
           sessions={sessions}
           bookings={bookings}
+          waitlistEntries={waitlistEntries}
           templates={templates}
           settings={settings}
           onShiftWeek={onShiftWeek}
@@ -637,6 +641,7 @@ const SemanasView: React.FC<{
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  waitlistEntries: WaitlistEntryRecord[];
   templates: MessageTemplateRecord[];
   settings: StudioSettingsRecord;
   onShiftWeek: (delta: number) => void;
@@ -648,6 +653,7 @@ const SemanasView: React.FC<{
   activeWeek,
   sessions,
   bookings,
+  waitlistEntries,
   templates,
   settings,
   onShiftWeek,
@@ -831,6 +837,9 @@ const SemanasView: React.FC<{
             const absentCount = confirmedBookings.filter(
               (b) => b.attendanceStatus === 'ABSENT'
             ).length;
+            const sessionWaitlistCount = waitlistEntries.filter(
+              (w) => w.sessionId === session.id
+            ).length;
             const isFull = confirmedCount >= session.capacity;
             const nowDate = new Date();
             const sesDate = new Date(session.startMillis);
@@ -859,6 +868,11 @@ const SemanasView: React.FC<{
                     {(presentCount > 0 || absentCount > 0) && (
                       <StatusPill tone="green">
                         {presentCount}✓{absentCount > 0 ? ` · ${absentCount}✕` : ''}
+                      </StatusPill>
+                    )}
+                    {sessionWaitlistCount > 0 && (
+                      <StatusPill tone="amber">
+                        Espera: {sessionWaitlistCount}
                       </StatusPill>
                     )}
                   </div>
@@ -920,6 +934,9 @@ const SemanasView: React.FC<{
         <SessionDetailModal
           session={detailSession}
           bookings={bookings.filter((b) => b.sessionId === detailSession.id && b.status !== 'CANCELLED')}
+          waitlistEntries={waitlistEntries
+            .filter((w) => w.sessionId === detailSession.id)
+            .sort((a, b) => a.createdAtMillis - b.createdAtMillis)}
           clients={clients}
           onClose={() => setDetailSessionId(null)}
           onAddClient={async (clientId) => {
@@ -929,6 +946,14 @@ const SemanasView: React.FC<{
           onRemoveBooking={async (bid) => {
             await repo.removeBooking(uid, bid);
             onBanner('Inscrição removida.');
+          }}
+          onPromoteWaitlist={async (entry) => {
+            await repo.promoteWaitlistEntry(uid, entry);
+            onBanner('Aluno promovido da lista de espera para Confirmado ✓');
+          }}
+          onRemoveWaitlist={async (entryId) => {
+            await repo.leaveWaitlist(uid, entryId);
+            onBanner('Aluno removido da lista de espera.');
           }}
           onSetAttendance={async (bid, status) => {
             await repo.setBookingAttendance(uid, bid, status);
@@ -1167,19 +1192,25 @@ const EditSessionModal: React.FC<{
 const SessionDetailModal: React.FC<{
   session: TrainingSessionRecord;
   bookings: BookingRecord[];
+  waitlistEntries: WaitlistEntryRecord[];
   clients: ClientRecord[];
   onClose: () => void;
   onAddClient: (clientId: string) => Promise<void>;
   onRemoveBooking: (bookingId: string) => Promise<void>;
+  onPromoteWaitlist: (entry: WaitlistEntryRecord) => Promise<void>;
+  onRemoveWaitlist: (entryId: string) => Promise<void>;
   onSetAttendance: (bookingId: string, status: AttendanceStatus) => Promise<void>;
   onEdit: () => void;
 }> = ({
   session,
   bookings,
+  waitlistEntries,
   clients,
   onClose,
   onAddClient,
   onRemoveBooking,
+  onPromoteWaitlist,
+  onRemoveWaitlist,
   onSetAttendance,
   onEdit,
 }) => {
@@ -1284,6 +1315,52 @@ const SessionDetailModal: React.FC<{
             </div>
           )}
         </div>
+
+        {waitlistEntries.length > 0 && (
+          <div className="border-t border-[#323238] pt-3 space-y-2">
+            <FieldLabel>
+              Lista de Espera ({waitlistEntries.length}) · Ordem de chegada
+            </FieldLabel>
+            <div className="space-y-2">
+              {waitlistEntries.map((entry, idx) => {
+                const c = clientMap.get(entry.clientId);
+                if (!c) return null;
+                return (
+                  <div
+                    key={entry.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F59E0B]/40 bg-[#3B2A10]/45 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusPill tone="amber">#{idx + 1}</StatusPill>
+                        <p className="text-sm font-bold text-[#F4F4F5]">{c.name}</p>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+                        {formatPhoneDisplay(c.phone)} · entrou {formatTimeAgo(entry.createdAtMillis)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onPromoteWaitlist(entry)}
+                        className="rounded-lg bg-[#EAB308] px-2.5 py-1.5 text-xs font-bold text-[#121214] hover:bg-[#FACC15]"
+                      >
+                        Promover ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveWaitlist(entry.id)}
+                        className="text-xs font-semibold text-[#EF4444] hover:underline"
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {availableClients.length > 0 && (
           <div className="border-t border-[#323238] pt-3 space-y-2">

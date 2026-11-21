@@ -15,6 +15,7 @@
         "fidelizacaoMonths": { "type": "integer" },
         "fidelizacaoStartMillis": { "type": "integer" },
         "trainingType": { "type": "string", "enum": ["PERSONALIZADO", "GRUPO"] },
+        "weeklySessionLimit": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -333,6 +334,40 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "clientId", "clientName", "type", "summary", "weekKey", "read", "timestampMillis", "createdAt", "updatedAt"]
+    },
+    "WorkoutLoadLog": {
+      "title": "WorkoutLoadLog",
+      "description": "Registo histórico de carga (kg) utilizada num exercício pelo aluno para evolução e Recordes Pessoais (PR)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "planId": { "type": "string" },
+        "planItemId": { "type": "string" },
+        "exerciseId": { "type": "string" },
+        "exerciseName": { "type": "string" },
+        "loadKg": { "type": "string" },
+        "numericKg": { "type": "number" },
+        "loggedAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "planId", "planItemId", "exerciseId", "exerciseName", "loadKg", "numericKg", "loggedAtMillis", "createdAt", "updatedAt"]
+    },
+    "WaitlistEntry": {
+      "title": "WaitlistEntry",
+      "description": "Entrada na lista de espera para uma sessão de treino de grupo lotada",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "weekKey": { "type": "string" },
+        "clientId": { "type": "string" },
+        "createdAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "sessionId", "weekKey", "clientId", "createdAtMillis", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -407,6 +442,14 @@
     "/users/{userId}/pt_notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/PtNotification" },
       "description": "Alertas ao PT de cancelamentos e alterações de horário"
+    },
+    "/users/{userId}/workout_load_logs/{logId}": {
+      "schema": { "$ref": "#/entities/WorkoutLoadLog" },
+      "description": "Histórico completo de cargas por exercício e cálculo de Recordes Pessoais (PR)"
+    },
+    "/users/{userId}/waitlist_entries/{entryId}": {
+      "schema": { "$ref": "#/entities/WaitlistEntry" },
+      "description": "Lista de espera para sessões de grupo lotadas"
     },
     "/pt_accounts/{ptUid}": {
       "schema": { "$ref": "#/entities/PtAccount" },

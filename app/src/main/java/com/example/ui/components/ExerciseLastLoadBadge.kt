@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.TrendingDown
@@ -14,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,8 +23,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.data.computeClientExercisePrs
+import com.example.data.model.WorkoutLoadLogRecord
 import com.example.data.model.WorkoutPlanItemRecord
 import com.example.data.model.WorkoutPlanRecord
+import com.example.data.normalizeExercisePrKey
 import com.example.ui.theme.*
 import java.util.Locale
 import kotlin.math.round
@@ -135,7 +140,9 @@ fun ExerciseLastLoadBadge(
     clientId: String,
     workoutPlans: List<WorkoutPlanRecord>,
     workoutPlanItems: List<WorkoutPlanItemRecord>,
+    workoutLoadLogs: List<WorkoutLoadLogRecord> = emptyList(),
     emphasize: Boolean = false,
+    onOpenHistory: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val info = remember(item, clientId, workoutPlans, workoutPlanItems) {
@@ -146,60 +153,109 @@ fun ExerciseLastLoadBadge(
             workoutPlanItems = workoutPlanItems
         )
     }
+    val prEntry = remember(item.exerciseId, item.exerciseName, clientId, workoutLoadLogs, workoutPlans, workoutPlanItems) {
+        if (clientId.isBlank()) null
+        else {
+            val map = computeClientExercisePrs(
+                clientId = clientId,
+                workoutLoadLogs = workoutLoadLogs,
+                workoutPlans = workoutPlans,
+                workoutPlanItems = workoutPlanItems
+            )
+            map[normalizeExercisePrKey(item.exerciseId, item.exerciseName)]
+        }
+    }
     var expanded by remember(item.id) { mutableStateOf(false) }
     val hasLoad = info.load.isNotBlank()
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Surface(
-            color = when {
-                hasLoad && emphasize -> NewShapeGoldMuted
-                hasLoad -> NewShapeGoldMuted.copy(alpha = 0.65f)
-                else -> ElevatedCharcoal
-            },
-            shape = RoundedCornerShape(999.dp),
-            border = BorderStroke(
-                1.dp,
-                if (hasLoad) NewShapeGold.copy(alpha = if (emphasize) 0.9f else 0.5f) else HairlineBorder
-            ),
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .clickable { expanded = !expanded }
-                .testTag("last_load_badge_${item.id}")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            Surface(
+                color = when {
+                    hasLoad && emphasize -> NewShapeGoldMuted
+                    hasLoad -> NewShapeGoldMuted.copy(alpha = 0.65f)
+                    else -> ElevatedCharcoal
+                },
+                shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (hasLoad) NewShapeGold.copy(alpha = if (emphasize) 0.9f else 0.5f) else HairlineBorder
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable { expanded = !expanded }
+                    .testTag("last_load_badge_${item.id}")
             ) {
-                Icon(
-                    imageVector = Icons.Default.History,
-                    contentDescription = "Carga do último treino",
-                    tint = if (hasLoad) NewShapeGoldBright else TextSecondaryDark,
-                    modifier = Modifier.size(14.dp)
-                )
-                Text(
-                    text = if (hasLoad) "Últ. treino: ${info.load}" else "Últ. treino: —",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = if (hasLoad) NewShapeGoldBright else TextSecondaryDark
-                )
-                val delta = info.deltaKg
-                if (delta != null && delta != 0.0) {
-                    val positive = delta > 0.0
-                    val deltaText = if (positive) "+${formatDelta(delta)} kg" else "${formatDelta(delta)} kg"
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "Carga do último treino",
+                        tint = if (hasLoad) NewShapeGoldBright else TextSecondaryDark,
+                        modifier = Modifier.size(14.dp)
+                    )
                     Text(
-                        text = deltaText,
+                        text = if (hasLoad) "Últ. treino: ${info.load}" else "Últ. treino: —",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = if (positive) ConfirmedGreen else PendingAmber
+                        color = if (hasLoad) NewShapeGoldBright else TextSecondaryDark
+                    )
+                    val delta = info.deltaKg
+                    if (delta != null && delta != 0.0) {
+                        val positive = delta > 0.0
+                        val deltaText = if (positive) "+${formatDelta(delta)} kg" else "${formatDelta(delta)} kg"
+                        Text(
+                            text = deltaText,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (positive) ConfirmedGreen else PendingAmber
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Ver detalhes do histórico de carga",
+                        tint = if (hasLoad) NewShapeGoldBright.copy(alpha = 0.8f) else TextSecondaryDark,
+                        modifier = Modifier.size(13.dp)
                     )
                 }
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Ver detalhes do histórico de carga",
-                    tint = if (hasLoad) NewShapeGoldBright.copy(alpha = 0.8f) else TextSecondaryDark,
-                    modifier = Modifier.size(13.dp)
-                )
+            }
+
+            if (prEntry != null) {
+                Surface(
+                    color = NewShapeGoldMuted,
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(1.dp, NewShapeGold),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(enabled = onOpenHistory != null) { onOpenHistory?.invoke() }
+                        .testTag("pr_badge_${item.id}")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EmojiEvents,
+                            contentDescription = "Recorde pessoal",
+                            tint = NewShapeGoldBright,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "PR ${prEntry.prLabel}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = NewShapeGoldBright
+                        )
+                    }
+                }
             }
         }
 
@@ -290,11 +346,46 @@ fun ExerciseLastLoadBadge(
                             }
                         }
                     }
-                    Text(
-                        text = info.sourceLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondaryDark
-                    )
+                    if (prEntry != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Recorde pessoal (PR):", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                            Text(
+                                text = prEntry.prLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = NewShapeGoldBright
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = info.sourceLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondaryDark,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (onOpenHistory != null) {
+                            TextButton(
+                                onClick = onOpenHistory,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("open_history_chart_${item.id}")
+                            ) {
+                                Text(
+                                    text = "Ver gráfico & PR",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NewShapeGoldBright
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

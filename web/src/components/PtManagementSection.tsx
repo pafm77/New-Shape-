@@ -43,6 +43,7 @@ import {
 } from './UiPrimitives';
 import { RegisterPaymentModal } from './PtClientsSection';
 import { FinanceChart } from './FinanceChart';
+import { FinanceAdminTools } from './FinanceAdminTools';
 
 export type ManagementSubTab = 'finance' | 'team' | 'fidelizacao' | 'chat';
 
@@ -54,6 +55,7 @@ interface PtManagementSectionProps {
   fidelizacoes: FidelizacaoRecord[];
   chatMessages: ChatMessageRecord[];
   ptAccounts: PtAccountRecord[];
+  whatsappWebMode?: boolean;
   initialSubTab?: ManagementSubTab;
   initialChatClientId?: string;
   onBanner: (msg: string) => void;
@@ -67,6 +69,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
   fidelizacoes,
   chatMessages,
   ptAccounts,
+  whatsappWebMode = false,
   initialSubTab = 'finance',
   initialChatClientId = '',
   onBanner,
@@ -140,6 +143,8 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           isSuperAdmin={isSuperAdmin}
           clients={clients}
           payments={payments}
+          fidelizacoes={fidelizacoes}
+          whatsappWebMode={whatsappWebMode}
           onBanner={onBanner}
         />
       )}
@@ -330,8 +335,10 @@ const FinanceSubTab: React.FC<{
   isSuperAdmin: boolean;
   clients: ClientRecord[];
   payments: PaymentRecord[];
+  fidelizacoes: FidelizacaoRecord[];
+  whatsappWebMode: boolean;
   onBanner: (msg: string) => void;
-}> = ({ uid, isSuperAdmin, clients, payments, onBanner }) => {
+}> = ({ uid, isSuperAdmin, clients, payments, fidelizacoes, whatsappWebMode, onBanner }) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [pickClientModal, setPickClientModal] = useState(false);
   const [payClient, setPayClient] = useState<ClientRecord | null>(null);
@@ -589,6 +596,16 @@ const FinanceSubTab: React.FC<{
         payments={payments}
         clients={clients}
         isSuperAdmin={isSuperAdmin}
+      />
+
+      <FinanceAdminTools
+        isSuperAdmin={isSuperAdmin}
+        clients={clients}
+        payments={payments}
+        fidelizacoes={fidelizacoes}
+        whatsappWebMode={whatsappWebMode}
+        onQuickPay={(c) => setPayClient(c)}
+        onBanner={onBanner}
       />
 
       {/* Totais por Método de Pagamento + Filtro */}

@@ -1,9 +1,11 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,10 +22,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.ReportExporter
 import com.example.data.SeedCatalog
 import com.example.data.model.BookingStatus
 import com.example.data.model.ClientRecord
@@ -234,10 +238,11 @@ fun PtClientsTab(
                                     }
                                 }
                                 Text(client.phone, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
-                                if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || client.fidelizacaoMonths > 0) {
+                                if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || client.fidelizacaoMonths > 0 || client.weeklySessionLimit > 0) {
                                     val feeStr = if (state.isSuperAdmin && client.monthlyFeeEur > 0.0) "€${String.format("%.0f", client.monthlyFeeEur)}/mês" else ""
                                     val fidStr = if (client.fidelizacaoMonths > 0) "Fidelização ${client.fidelizacaoMonths}m" else ""
-                                    val info = listOf(feeStr, fidStr).filter { it.isNotBlank() }.joinToString(" · ")
+                                    val limitStr = if (client.weeklySessionLimit > 0) "${client.weeklySessionLimit}x/sem" else ""
+                                    val info = listOf(feeStr, fidStr, limitStr).filter { it.isNotBlank() }.joinToString(" · ")
                                     Text(info, style = MaterialTheme.typography.labelSmall, color = NewShapeGold)
                                 }
                             }
@@ -289,8 +294,8 @@ fun PtClientsTab(
     if (showNewClientDialog) {
         NewClientDialog(
             onDismiss = { showNewClientDialog = false },
-            onSave = { name, phone, notes, trainingType ->
-                viewModel.addClient(name, phone, notes, trainingType)
+            onSave = { name, phone, notes, trainingType, weeklyLimit ->
+                viewModel.addClient(name, phone, notes, trainingType, weeklyLimit)
                 showNewClientDialog = false
             }
         )
@@ -334,12 +339,16 @@ fun PtClientProfileScreen(
     onJumpToChat: () -> Unit
 ) {
     BackHandler(onBack = onBack)
+    val context = LocalContext.current
 
     var name by remember(client.id) { mutableStateOf(client.name) }
     var phone by remember(client.id) { mutableStateOf(client.phone) }
     var notes by remember(client.id) { mutableStateOf(client.notes) }
     var trainingType by remember(client.id, client.trainingType) {
         mutableStateOf(if (client.trainingType == "PERSONALIZADO") "PERSONALIZADO" else "GRUPO")
+    }
+    var weeklySessionLimit by remember(client.id, client.weeklySessionLimit) {
+        mutableIntStateOf(client.weeklySessionLimit.coerceIn(0, 21))
     }
     var monthlyFeeText by remember(client.id, client.monthlyFeeEur) {
         mutableStateOf(
@@ -452,26 +461,49 @@ fun PtClientProfileScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Quick navigation pills
+                // Quick navigation pills + Evolution PDF Report
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            DarkSecondaryButton(
+                                text = "Treino",
+                                icon = Icons.Default.FitnessCenter,
+                                onClick = onJumpToWorkout,
+                                modifier = Modifier.weight(1f)
+                            )
+                            DarkSecondaryButton(
+                                text = "Nutrição",
+                                icon = Icons.Default.Restaurant,
+                                onClick = onJumpToNutrition,
+                                modifier = Modifier.weight(1f)
+                            )
+                            DarkSecondaryButton(
+                                text = "Chat",
+                                icon = Icons.AutoMirrored.Filled.Chat,
+                                onClick = onJumpToChat,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                         DarkSecondaryButton(
-                            text = "Treino",
-                            icon = Icons.Default.FitnessCenter,
-                            onClick = onJumpToWorkout,
-                            modifier = Modifier.weight(1f)
-                        )
-                        DarkSecondaryButton(
-                            text = "Nutrição",
-                            icon = Icons.Default.Restaurant,
-                            onClick = onJumpToNutrition,
-                            modifier = Modifier.weight(1f)
-                        )
-                        DarkSecondaryButton(
-                            text = "Chat",
-                            icon = Icons.AutoMirrored.Filled.Chat,
-                            onClick = onJumpToChat,
-                            modifier = Modifier.weight(1f)
+                            text = "Exportar Relatório PDF de Evolução",
+                            icon = Icons.Default.PictureAsPdf,
+                            onClick = {
+                                val ok = ReportExporter.shareStudentEvolutionPdf(
+                                    context = context,
+                                    client = client,
+                                    assessments = state.physicalAssessments,
+                                    bookings = state.bookings,
+                                    workoutPlans = state.workoutPlans,
+                                    workoutPlanItems = state.workoutPlanItems,
+                                    workoutLoadLogs = state.workoutLoadLogs
+                                )
+                                if (!ok) {
+                                    Toast.makeText(context, "Erro ao gerar relatório PDF.", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("profile_export_pdf_btn")
                         )
                     }
                 }
@@ -527,6 +559,26 @@ fun PtClientProfileScreen(
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                     modifier = Modifier.weight(1f).testTag("profile_monthly_fee_input"),
                                     colors = darkFieldColors()
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("Limite Semanal do Pacote (treinos/semana)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        ) {
+                            listOf(0 to "Sem limite", 1 to "1x", 2 to "2x", 3 to "3x", 4 to "4x", 5 to "5x", 6 to "6x").forEach { (lim, lbl) ->
+                                FilterChip(
+                                    selected = weeklySessionLimit == lim,
+                                    onClick = { weeklySessionLimit = lim },
+                                    label = { Text(lbl) },
+                                    modifier = Modifier.testTag("profile_weekly_limit_$lim"),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NewShapeGold,
+                                        selectedLabelColor = TextOnGold
+                                    )
                                 )
                             }
                         }
@@ -599,7 +651,8 @@ fun PtClientProfileScreen(
                                         trainingType = trainingType,
                                         monthlyFeeEur = parsedFee,
                                         fidelizacaoMonths = fidelizacaoMonths,
-                                        fidelizacaoStartMillis = if (fidelizacaoMonths > 0) fidelizacaoStartMillis else 0L
+                                        fidelizacaoStartMillis = if (fidelizacaoMonths > 0) fidelizacaoStartMillis else 0L,
+                                        weeklySessionLimit = weeklySessionLimit
                                     )
                                 )
                             },
@@ -974,12 +1027,13 @@ private fun FidelizacaoCompactRow(
 @Composable
 private fun NewClientDialog(
     onDismiss: () -> Unit,
-    onSave: (String, String, String, String) -> Unit
+    onSave: (String, String, String, String, Int) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var trainingType by remember { mutableStateOf("GRUPO") }
+    var weeklySessionLimit by remember { mutableIntStateOf(0) }
     var rgpdAccepted by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -987,7 +1041,10 @@ private fun NewClientDialog(
         containerColor = CharcoalSurface,
         title = { Text("Novo Cliente", color = TextPrimaryDark) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -1011,6 +1068,24 @@ private fun NewClientDialog(
                             onClick = { trainingType = key },
                             label = { Text(label) },
                             modifier = Modifier.weight(1f).testTag("new_client_type_$key"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
+                Text("Limite semanal do pacote", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
+                    listOf(0 to "Sem limite", 1 to "1x", 2 to "2x", 3 to "3x", 4 to "4x", 5 to "5x").forEach { (lim, lbl) ->
+                        FilterChip(
+                            selected = weeklySessionLimit == lim,
+                            onClick = { weeklySessionLimit = lim },
+                            label = { Text(lbl) },
+                            modifier = Modifier.testTag("new_client_limit_$lim"),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = NewShapeGold,
                                 selectedLabelColor = TextOnGold
@@ -1059,7 +1134,7 @@ private fun NewClientDialog(
                     val combinedNotes = listOf(notes.trim(), rgpdStamp)
                         .filter { it.isNotBlank() }
                         .joinToString(" · ")
-                    onSave(name, phone, combinedNotes, trainingType)
+                    onSave(name, phone, combinedNotes, trainingType, weeklySessionLimit)
                 }
             )
         },

@@ -70,6 +70,8 @@ data class StudioUiState(
     val physicalAssessments: List<PhysicalAssessmentRecord> = emptyList(),
     val chatMessages: List<ChatMessageRecord> = emptyList(),
     val messageTemplates: List<MessageTemplateRecord> = emptyList(),
+    val workoutLoadLogs: List<WorkoutLoadLogRecord> = emptyList(),
+    val waitlistEntries: List<WaitlistEntryRecord> = emptyList(),
     val settings: StudioSettingsRecord = StudioSettingsRecord(),
     val waitingWhatsAppReturn: Boolean = false,
     val undoSnapshot: UndoConfirmationSnapshot? = null,
@@ -249,11 +251,24 @@ class NewShapeViewModel(
             repository.observeNutritionEntries(currentUserId),
             repository.observePhysicalAssessments(currentUserId)
         ) { foods, nutrition, assessments -> Triple(foods, nutrition, assessments) },
-        repository.observeChatMessages(currentUserId),
-        repository.observeTemplates(currentUserId),
-        repository.observeSettings(currentUserId)
-    ) { (foods, nutrition, assessments), chats, templates, settings ->
-        ExtraSlice(foods, nutrition, assessments, chats, templates, settings ?: StudioSettingsRecord())
+        combine(
+            repository.observeChatMessages(currentUserId),
+            repository.observeTemplates(currentUserId),
+            repository.observeSettings(currentUserId)
+        ) { chats, templates, settings -> Triple(chats, templates, settings) },
+        repository.observeWorkoutLoadLogs(currentUserId),
+        repository.observeWaitlistEntries(currentUserId)
+    ) { (foods, nutrition, assessments), (chats, templates, settings), loadLogs, waitlist ->
+        ExtraSlice(
+            foodItems = foods,
+            nutritionEntries = nutrition,
+            physicalAssessments = assessments,
+            chatMessages = chats,
+            messageTemplates = templates,
+            settings = settings ?: StudioSettingsRecord(),
+            workoutLoadLogs = loadLogs,
+            waitlistEntries = waitlist
+        )
     }
 
     private val ptAdminFlow = combine(
@@ -308,6 +323,8 @@ class NewShapeViewModel(
             physicalAssessments = extra.physicalAssessments,
             chatMessages = extra.chatMessages,
             messageTemplates = extra.messageTemplates,
+            workoutLoadLogs = extra.workoutLoadLogs,
+            waitlistEntries = extra.waitlistEntries,
             settings = extra.settings,
             waitingWhatsAppReturn = ctrl.waitingWhatsAppReturn,
             undoSnapshot = ctrl.undoSnapshot,
@@ -670,10 +687,22 @@ class NewShapeViewModel(
     }
 
     // --- Clients ---
-    fun addClient(name: String, phone: String, notes: String, trainingType: String = "GRUPO") {
+    fun addClient(
+        name: String,
+        phone: String,
+        notes: String,
+        trainingType: String = "GRUPO",
+        weeklySessionLimit: Int = 0
+    ) {
         if (name.isBlank()) return
         viewModelScope.launch {
-            repository.addClient(name, phone, notes, trainingType = trainingType)
+            repository.addClient(
+                name = name,
+                phone = phone,
+                notes = notes,
+                trainingType = trainingType,
+                weeklySessionLimit = weeklySessionLimit
+            )
                 .onSuccess { _statusBanner.value = "Cliente adicionado." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
@@ -828,8 +857,19 @@ class NewShapeViewModel(
     }
 
     fun updateWorkoutPlanItemLoad(itemId: String, loadKg: String, previousLoadKg: String? = null) {
+        val data = currentData
+        val item = data?.workoutPlanItems?.find { it.id == itemId }
+        val plan = item?.let { i -> data.workoutPlans.find { it.id == i.planId } }
         viewModelScope.launch {
-            repository.updateWorkoutPlanItemLoad(itemId, loadKg, previousLoadKg)
+            repository.updateWorkoutPlanItemLoad(
+                itemId = itemId,
+                loadKg = loadKg,
+                previousLoadKg = previousLoadKg,
+                clientId = plan?.clientId.orEmpty(),
+                planId = plan?.id.orEmpty(),
+                exerciseId = item?.exerciseId.orEmpty(),
+                exerciseName = item?.exerciseName.orEmpty()
+            )
                 .onSuccess { _statusBanner.value = "Carga guardada ($loadKg)." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
@@ -838,6 +878,31 @@ class NewShapeViewModel(
     fun removeExerciseFromPlan(itemId: String) {
         viewModelScope.launch {
             repository.removeExerciseFromPlan(itemId)
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    // --- Waitlist (Lista de Espera) ---
+    fun joinWaitlist(sessionId: String, weekKey: String, clientId: String) {
+        viewModelScope.launch {
+            repository.joinWaitlist(sessionId, weekKey, clientId)
+                .onSuccess { _statusBanner.value = "Entraste na lista de espera! O PT será avisado se abrir vaga." }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun leaveWaitlist(entryId: String) {
+        viewModelScope.launch {
+            repository.leaveWaitlist(entryId)
+                .onSuccess { _statusBanner.value = "Removido da lista de espera." }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun promoteWaitlistEntry(entry: WaitlistEntryRecord) {
+        viewModelScope.launch {
+            repository.promoteWaitlistEntry(entry)
+                .onSuccess { _statusBanner.value = "Aluno promovido da lista de espera para Confirmado!" }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -1034,7 +1099,9 @@ private data class ExtraSlice(
     val physicalAssessments: List<PhysicalAssessmentRecord>,
     val chatMessages: List<ChatMessageRecord>,
     val messageTemplates: List<MessageTemplateRecord>,
-    val settings: StudioSettingsRecord
+    val settings: StudioSettingsRecord,
+    val workoutLoadLogs: List<WorkoutLoadLogRecord>,
+    val waitlistEntries: List<WaitlistEntryRecord>
 )
 
 private data class ControlSlice(

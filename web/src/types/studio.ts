@@ -57,6 +57,7 @@ export interface ClientRecord {
   fidelizacaoMonths: number;
   fidelizacaoStartMillis: number;
   trainingType: TrainingType;
+  weeklySessionLimit?: number;
 }
 
 export interface TrainingWeekRecord {
@@ -156,6 +157,28 @@ export interface WorkoutPlanItemRecord {
   restSeconds: number;
   notes: string;
   orderIndex: number;
+}
+
+export interface WorkoutLoadLogRecord {
+  id: string;
+  userId: string;
+  clientId: string;
+  planId: string;
+  planItemId: string;
+  exerciseId: string;
+  exerciseName: string;
+  loadKg: string;
+  numericKg: number;
+  loggedAtMillis: number;
+}
+
+export interface WaitlistEntryRecord {
+  id: string;
+  userId: string;
+  sessionId: string;
+  weekKey: string;
+  clientId: string;
+  createdAtMillis: number;
 }
 
 export interface FoodItemRecord {

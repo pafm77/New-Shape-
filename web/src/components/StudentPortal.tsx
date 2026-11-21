@@ -8,6 +8,7 @@ import {
   Clock,
   CreditCard,
   Dumbbell,
+  FileText,
   History,
   LogOut,
   MessageCircle,
@@ -35,7 +36,9 @@ import {
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
+  WaitlistEntryRecord,
   WeekResponseRecord,
+  WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
 } from '../types/studio';
@@ -74,6 +77,8 @@ import {
 import { AddFoodToMealModal, DailyMacrosSummaryCard } from './PtNutritionSection';
 import { AssessmentDashboard, NewAssessmentModal } from './PtAssessmentSection';
 import { PrivateChatPanel } from './PtManagementSection';
+import { ExerciseProgressModal } from './ExerciseProgressModal';
+import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 
 interface StudentPortalProps {
   uid: string;
@@ -81,11 +86,13 @@ interface StudentPortalProps {
   weeks: TrainingWeekRecord[];
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  waitlistEntries: WaitlistEntryRecord[];
   weekResponses: WeekResponseRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
+  workoutLoadLogs: WorkoutLoadLogRecord[];
   foodItems: FoodItemRecord[];
   nutritionEntries: NutritionEntryRecord[];
   assessments: PhysicalAssessmentRecord[];
@@ -106,11 +113,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   weeks,
   sessions,
   bookings,
+  waitlistEntries,
   weekResponses,
   payments,
   fidelizacoes,
   workoutPlans,
   workoutPlanItems,
+  workoutLoadLogs,
   foodItems,
   nutritionEntries,
   assessments,
@@ -128,7 +137,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     label: string;
   } | null>(null);
   const [showNewAssessmentModal, setShowNewAssessmentModal] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<{
+    exerciseId: string;
+    exerciseName: string;
+  } | null>(null);
   const firstName = client.name.trim().split(/\s+/)[0] || client.name;
+  const weeklyLimit = client.weeklySessionLimit ?? 0;
 
   // Push / local training reminders
   const studioDefaultLeadMins = getEffectiveReminderLeadMinutes(settings);
@@ -500,6 +514,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         <h2 className="text-lg font-bold text-[#F4F4F5]">
                           Semana {activeWeek?.label}
                         </h2>
+                        {weeklyLimit > 0 && (
+                          <div className="mt-1.5 flex justify-center">
+                            <StatusPill
+                              tone={draftSessionIds.size >= weeklyLimit ? 'amber' : 'gold'}
+                            >
+                              Pacote: {draftSessionIds.size} / {weeklyLimit} treinos esta semana
+                            </StatusPill>
+                          </div>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -689,11 +712,21 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             Date.now() > s.startMillis - cutoffMs;
                           const editLocked = !settings.clientsCanEdit || isCutoffLocked;
                           const fullAndNotMine = isFull && !alreadyBooked;
+                          const sessionWaitlist = waitlistEntries
+                            .filter((w) => w.sessionId === s.id)
+                            .sort((a, b) => a.createdAtMillis - b.createdAtMillis);
+                          const myWaitlistIdx = sessionWaitlist.findIndex(
+                            (w) => w.clientId === client.id
+                          );
+                          const myWaitlistEntry =
+                            myWaitlistIdx >= 0 ? sessionWaitlist[myWaitlistIdx] : null;
 
                           const pillTone = existingForSession
                             ? existingForSession.status === 'CONFIRMED'
                               ? 'green'
                               : 'amber'
+                            : myWaitlistEntry
+                            ? 'amber'
                             : isFull
                             ? 'red'
                             : isMine
@@ -704,57 +737,115 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             ? existingForSession.status === 'CONFIRMED'
                               ? 'Confirmado'
                               : 'Por confirmar'
+                            : myWaitlistEntry
+                            ? `Espera #${myWaitlistIdx + 1}`
                             : isFull
                             ? 'Esgotado'
                             : 'Disponível';
 
                           return (
-                            <button
+                            <div
                               key={s.id}
-                              type="button"
-                              disabled={editLocked || fullAndNotMine}
-                              onClick={() => {
-                                setDraftSessionIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(s.id)) next.delete(s.id);
-                                  else next.add(s.id);
-                                  return next;
-                                });
-                              }}
-                              className={`rounded-2xl border p-4 text-left transition ${
+                              className={`flex flex-col justify-between rounded-2xl border p-4 text-left transition ${
                                 isMine
                                   ? 'border-[#EAB308] bg-[#3D3314]/70'
+                                  : myWaitlistEntry
+                                  ? 'border-[#F59E0B]/60 bg-[#3B2A10]/40'
                                   : 'border-[#323238] bg-[#1B1B1E] hover:border-[#EAB308]/50'
-                              } disabled:cursor-not-allowed disabled:opacity-55`}
+                              }`}
                             >
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <p className="text-xs font-semibold text-[#EAB308]">
-                                    {s.dateLabel}
+                              <button
+                                type="button"
+                                disabled={editLocked || fullAndNotMine}
+                                onClick={() => {
+                                  if (
+                                    !isMine &&
+                                    weeklyLimit > 0 &&
+                                    draftSessionIds.size >= weeklyLimit
+                                  ) {
+                                    onBanner(
+                                      `Atingiste o limite semanal do teu pacote (${weeklyLimit} treino(s)/semana). Retira um horário ou fala com o teu PT.`
+                                    );
+                                    return;
+                                  }
+                                  setDraftSessionIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(s.id)) next.delete(s.id);
+                                    else next.add(s.id);
+                                    return next;
+                                  });
+                                }}
+                                className="w-full text-left disabled:cursor-not-allowed disabled:opacity-65"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <p className="text-xs font-semibold text-[#EAB308]">
+                                      {s.dateLabel}
+                                    </p>
+                                    <p className="mt-0.5 text-lg font-extrabold text-[#F4F4F5]">
+                                      {s.timeLabel} · {s.durationMinutes} min
+                                    </p>
+                                    {s.note && (
+                                      <p className="mt-0.5 text-xs text-[#A1A1AA]">{s.note}</p>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col items-end gap-1.5">
+                                    <StatusPill tone={pillTone}>{pillLabel}</StatusPill>
+                                    {isMine && (
+                                      <span className="inline-flex items-center gap-1 text-xs font-bold text-[#FACC15]">
+                                        <Check className="h-3.5 w-3.5" />
+                                        Selecionado
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {isCutoffLocked && (
+                                  <p className="mt-2 text-[11px] text-[#F59E0B]">
+                                    Prazo de alteração ({formatCutoffLabel(cutoffMinutes)} antes) encerrado
                                   </p>
-                                  <p className="mt-0.5 text-lg font-extrabold text-[#F4F4F5]">
-                                    {s.timeLabel} · {s.durationMinutes} min
-                                  </p>
-                                  {s.note && (
-                                    <p className="mt-0.5 text-xs text-[#A1A1AA]">{s.note}</p>
+                                )}
+                              </button>
+
+                              {fullAndNotMine && !editLocked && (
+                                <div className="mt-3 border-t border-[#323238]/70 pt-2.5 flex items-center justify-between gap-2">
+                                  <span className="text-[11px] text-[#A1A1AA]">
+                                    {myWaitlistEntry
+                                      ? `Estás em #${myWaitlistIdx + 1} na lista de espera`
+                                      : sessionWaitlist.length > 0
+                                      ? `${sessionWaitlist.length} em lista de espera`
+                                      : 'Turma completa'}
+                                  </span>
+                                  {myWaitlistEntry ? (
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        await repo.leaveWaitlist(uid, myWaitlistEntry.id);
+                                        onBanner('Saíste da lista de espera.');
+                                      }}
+                                      className="rounded-lg border border-[#EF4444]/60 bg-[#3B1518] px-2.5 py-1 text-xs font-bold text-[#FCA5A5] hover:bg-[#4B1A1E]"
+                                    >
+                                      Sair da espera
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        await repo.joinWaitlist(
+                                          uid,
+                                          s.id,
+                                          activeWeek.weekKey,
+                                          client.id
+                                        );
+                                        onBanner('Entraste na lista de espera! O PT será avisado se abrir vaga.');
+                                      }}
+                                      className="rounded-lg border border-[#EAB308]/60 bg-[#3D3314] px-2.5 py-1 text-xs font-bold text-[#FACC15] hover:bg-[#4D4019]"
+                                    >
+                                      Entrar na lista de espera
+                                    </button>
                                   )}
                                 </div>
-                                <div className="flex flex-col items-end gap-1.5">
-                                  <StatusPill tone={pillTone}>{pillLabel}</StatusPill>
-                                  {isMine && (
-                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-[#FACC15]">
-                                      <Check className="h-3.5 w-3.5" />
-                                      Selecionado
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              {isCutoffLocked && (
-                                <p className="mt-2 text-[11px] text-[#F59E0B]">
-                                  Prazo de alteração ({formatCutoffLabel(cutoffMinutes)} antes) encerrado
-                                </p>
                               )}
-                            </button>
+                            </div>
                           );
                         })}
                     </div>
@@ -766,6 +857,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         fullWidth
                         disabled={!settings.clientsCanEdit}
                         onClick={async () => {
+                          if (weeklyLimit > 0 && draftSessionIds.size > weeklyLimit) {
+                            onBanner(
+                              `O teu pacote permite até ${weeklyLimit} treino(s) por semana.`
+                            );
+                            return;
+                          }
                           const sessionMap = new Map(sessions.map((s) => [s.id, s]));
                           const prevIds = new Set(clientWeekBookings.map((b) => b.sessionId));
                           const removedIds = Array.from(prevIds).filter(
@@ -996,6 +1093,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               clientId={client.id}
                               workoutPlans={workoutPlans}
                               workoutPlanItems={workoutPlanItems}
+                              workoutLoadLogs={workoutLoadLogs}
                               isExecuting={isExecuting}
                               isDone={completedItemIds.has(item.id)}
                               baselineLoadOverride={baselineOverride}
@@ -1008,6 +1106,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 });
                               }}
                               onStartRest={() => startRestTimer(item.restSeconds)}
+                              onOpenHistory={() =>
+                                setHistoryTarget({
+                                  exerciseId: item.exerciseId,
+                                  exerciseName: item.exerciseName,
+                                })
+                              }
                               onSaveLoad={async (newLoad) => {
                                 const prevForStorage = (
                                   baselineLoads[item.id] ||
@@ -1019,7 +1123,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   uid,
                                   item.id,
                                   newLoad,
-                                  prevForStorage
+                                  prevForStorage,
+                                  {
+                                    clientId: client.id,
+                                    planId: plan.id,
+                                    exerciseId: item.exerciseId,
+                                    exerciseName: item.exerciseName,
+                                  }
                                 );
                                 onBanner(`Carga de "${item.exerciseName}" atualizada!`);
                               }}
@@ -1030,6 +1140,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     </BrandCard>
                   );
                 })
+              )}
+
+              {historyTarget && (
+                <ExerciseProgressModal
+                  open
+                  clientName={client.name}
+                  clientId={client.id}
+                  exerciseId={historyTarget.exerciseId}
+                  exerciseName={historyTarget.exerciseName}
+                  workoutLoadLogs={workoutLoadLogs}
+                  onClose={() => setHistoryTarget(null)}
+                />
               )}
             </div>
           )}
@@ -1133,10 +1255,31 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     Regista as tuas medições (IMC e TMB calculados automaticamente)
                   </p>
                 </div>
-                <GoldButton onClick={() => setShowNewAssessmentModal(true)}>
-                  <Plus className="h-4 w-4" />
-                  Nova Avaliação
-                </GoldButton>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SecondaryButton
+                    onClick={() => {
+                      const ok = openStudentEvolutionPdfReport({
+                        client,
+                        assessments,
+                        bookings,
+                        sessions,
+                        workoutPlans,
+                        workoutPlanItems,
+                        workoutLoadLogs,
+                      });
+                      if (!ok) {
+                        onBanner('Permite pop-ups no browser para gerar o relatório PDF.');
+                      }
+                    }}
+                  >
+                    <FileText className="h-4 w-4 text-[#EAB308]" />
+                    Relatório PDF
+                  </SecondaryButton>
+                  <GoldButton onClick={() => setShowNewAssessmentModal(true)}>
+                    <Plus className="h-4 w-4" />
+                    Nova Avaliação
+                  </GoldButton>
+                </div>
               </div>
               <AssessmentDashboard
                 assessments={clientAssessments}
@@ -1341,11 +1484,13 @@ const StudentExerciseLoadCard: React.FC<{
   clientId: string;
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
+  workoutLoadLogs: WorkoutLoadLogRecord[];
   isExecuting: boolean;
   isDone: boolean;
   baselineLoadOverride?: string;
   onToggleDone: () => void;
   onStartRest: () => void;
+  onOpenHistory: () => void;
   onSaveLoad: (newLoad: string) => Promise<void>;
 }> = ({
   index,
@@ -1353,11 +1498,13 @@ const StudentExerciseLoadCard: React.FC<{
   clientId,
   workoutPlans,
   workoutPlanItems,
+  workoutLoadLogs,
   isExecuting,
   isDone,
   baselineLoadOverride,
   onToggleDone,
   onStartRest,
+  onOpenHistory,
   onSaveLoad,
 }) => {
   const [draft, setDraft] = useState(item.loadKg);
@@ -1452,8 +1599,10 @@ const StudentExerciseLoadCard: React.FC<{
           clientId={clientId}
           workoutPlans={workoutPlans}
           workoutPlanItems={workoutPlanItems}
+          workoutLoadLogs={workoutLoadLogs}
           baselineLoadOverride={baselineLoadOverride}
           emphasize={isExecuting}
+          onOpenHistory={onOpenHistory}
         />
         {resolvedHistory.loggedAtMillis > 0 ? (
           <span className="inline-flex items-center gap-1 text-[11px] text-[#A1A1AA]">

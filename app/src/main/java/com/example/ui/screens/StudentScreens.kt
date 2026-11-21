@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -30,6 +31,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.ReportExporter
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
 import com.example.ui.NewShapeViewModel
@@ -293,6 +295,7 @@ private fun StudentBookingScreen(
     val nowMs = System.currentTimeMillis()
     val hasConfirmed = existingBookings.any { it.status == BookingStatus.CONFIRMED.name }
     val canEditExisting = existingBookings.isEmpty() || !hasConfirmed || state.settings.clientsCanEdit
+    val weeklyLimit = student.weeklySessionLimit.coerceAtLeast(0)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -445,6 +448,15 @@ private fun StudentBookingScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Semana", style = MaterialTheme.typography.labelSmall, color = NewShapeGold)
                         Text(currentWeek?.label ?: "", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                        if (weeklyLimit > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            val atLimit = selectedSessionIds.size >= weeklyLimit
+                            StatusPill(
+                                text = "Pacote: ${selectedSessionIds.size} / $weeklyLimit treinos esta semana",
+                                textColor = if (atLimit) PendingAmber else NewShapeGoldBright,
+                                containerColor = if (atLimit) PendingAmberContainer else NewShapeGoldMuted
+                            )
+                        }
                     }
                     IconButton(
                         enabled = weekIndex < publishedWeeks.lastIndex,
@@ -521,66 +533,133 @@ private fun StudentBookingScreen(
             val isFullForNew = isFull && !isSelected
             val canToggle = canEditExisting && !isPastCutoff && !isFullForNew
 
+            val sessionWaitlist = state.waitlistEntries
+                .filter { it.sessionId == session.id }
+                .sortedBy { it.createdAtMillis }
+            val myWaitlistIdx = sessionWaitlist.indexOfFirst { it.clientId == student.id }
+            val myWaitlistEntry = sessionWaitlist.getOrNull(myWaitlistIdx)
+
             Surface(
-                color = if (isSelected) NewShapeGoldMuted else CharcoalSurface,
+                color = when {
+                    isSelected -> NewShapeGoldMuted
+                    myWaitlistEntry != null -> PendingAmberContainer.copy(alpha = 0.4f)
+                    else -> CharcoalSurface
+                },
                 shape = MaterialTheme.shapes.medium,
                 border = BorderStroke(
                     width = if (isSelected) 2.dp else 1.dp,
-                    color = if (isSelected) NewShapeGold else HairlineBorder
+                    color = when {
+                        isSelected -> NewShapeGold
+                        myWaitlistEntry != null -> PendingAmber
+                        else -> HairlineBorder
+                    }
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(MaterialTheme.shapes.medium)
                     .clickable(enabled = canToggle) {
-                        selectedSessionIds = if (isSelected) selectedSessionIds - session.id else selectedSessionIds + session.id
+                        if (!isSelected && weeklyLimit > 0 && selectedSessionIds.size >= weeklyLimit) {
+                            Toast.makeText(
+                                context,
+                                "Atingiste o limite semanal do teu pacote ($weeklyLimit treino(s)/semana).",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            selectedSessionIds = if (isSelected) selectedSessionIds - session.id else selectedSessionIds + session.id
+                        }
                     }
                     .testTag("student_session_${session.id}")
             ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "${session.dateLabel} · ${session.timeLabel.replace(":", "h")}",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = if (isSelected) NewShapeGoldBright else TextPrimaryDark
-                        )
-                        Text(
-                            text = "${session.durationMinutes} min" + if (session.note.isNotBlank()) " · ${session.note}" else "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondaryDark
-                        )
-                        if (isPastCutoff) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Fechado (menos de ${state.settings.formatCutoffLabel()})",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = DangerRed
+                                text = "${session.dateLabel} · ${session.timeLabel.replace(":", "h")}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (isSelected) NewShapeGoldBright else TextPrimaryDark
+                            )
+                            Text(
+                                text = "${session.durationMinutes} min" + if (session.note.isNotBlank()) " · ${session.note}" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                            if (isPastCutoff) {
+                                Text(
+                                    text = "Fechado (menos de ${state.settings.formatCutoffLabel()})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = DangerRed
+                                )
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (existingForSession != null) {
+                                val conf = existingForSession.status == BookingStatus.CONFIRMED.name
+                                StatusPill(
+                                    text = if (conf) "Confirmado" else "Por confirmar",
+                                    textColor = if (conf) ConfirmedGreen else PendingAmber,
+                                    containerColor = if (conf) ConfirmedGreenContainer else PendingAmberContainer
+                                )
+                            } else if (myWaitlistEntry != null) {
+                                StatusPill(
+                                    text = "Espera #${myWaitlistIdx + 1}",
+                                    textColor = PendingAmber,
+                                    containerColor = PendingAmberContainer
+                                )
+                            } else {
+                                StatusPill(
+                                    text = if (isFull) "Esgotado" else "Disponível",
+                                    textColor = if (isFull) DangerRed else TextPrimaryDark,
+                                    containerColor = if (isFull) DangerRedContainer else ElevatedCharcoal
+                                )
+                            }
+                            Icon(
+                                imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = if (isSelected) "Selecionado" else "Selecionar",
+                                tint = if (isSelected) NewShapeGold else TextSecondaryDark
                             )
                         }
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (existingForSession != null) {
-                            val conf = existingForSession.status == BookingStatus.CONFIRMED.name
-                            StatusPill(
-                                text = if (conf) "Confirmado" else "Por confirmar",
-                                textColor = if (conf) ConfirmedGreen else PendingAmber,
-                                containerColor = if (conf) ConfirmedGreenContainer else PendingAmberContainer
+                    if (isFullForNew && !isPastCutoff && canEditExisting && currentWeek != null) {
+                        Spacer(Modifier.height(10.dp))
+                        HorizontalDivider(color = HairlineBorder.copy(alpha = 0.6f))
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = when {
+                                    myWaitlistEntry != null -> "Estás em #${myWaitlistIdx + 1} na lista de espera"
+                                    sessionWaitlist.isNotEmpty() -> "${sessionWaitlist.size} aluno(s) em lista de espera"
+                                    else -> "Turma completa"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondaryDark,
+                                modifier = Modifier.weight(1f)
                             )
-                        } else {
-                            StatusPill(
-                                text = if (isFull) "Esgotado" else "Disponível",
-                                textColor = if (isFull) DangerRed else TextPrimaryDark,
-                                containerColor = if (isFull) DangerRedContainer else ElevatedCharcoal
-                            )
+                            if (myWaitlistEntry != null) {
+                                TextButton(
+                                    onClick = { viewModel.leaveWaitlist(myWaitlistEntry.id) },
+                                    modifier = Modifier.testTag("student_leave_waitlist_${session.id}")
+                                ) {
+                                    Text("Sair da espera", color = DangerRed, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                TextButton(
+                                    onClick = { viewModel.joinWaitlist(session.id, currentWeek.weekKey, student.id) },
+                                    modifier = Modifier.testTag("student_join_waitlist_${session.id}")
+                                ) {
+                                    Text("Lista de espera", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
-                        Icon(
-                            imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                            contentDescription = if (isSelected) "Selecionado" else "Selecionar",
-                            tint = if (isSelected) NewShapeGold else TextSecondaryDark
-                        )
                     }
                 }
             }
@@ -594,7 +673,17 @@ private fun StudentBookingScreen(
                     text = if (existingBookings.isEmpty()) "Marcar treinos (${selectedSessionIds.size})" else "Guardar alterações",
                     icon = Icons.Default.Check,
                     enabled = canEditExisting && (selectedSessionIds.isNotEmpty() || existingBookings.isNotEmpty()),
-                    onClick = { viewModel.submitStudentBookings(currentWeek.weekKey, student.id, selectedSessionIds) },
+                    onClick = {
+                        if (weeklyLimit > 0 && selectedSessionIds.size > weeklyLimit) {
+                            Toast.makeText(
+                                context,
+                                "O teu pacote permite até $weeklyLimit treino(s) por semana.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            viewModel.submitStudentBookings(currentWeek.weekKey, student.id, selectedSessionIds)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     testTag = "student_submit_bookings_btn"
                 )
@@ -687,6 +776,7 @@ private fun StudentWorkoutScreen(
     var completedExerciseIds by remember(executingPlanId) { mutableStateOf<Set<String>>(emptySet()) }
     var restSecondsLeft by remember { mutableIntStateOf(0) }
     var restExerciseName by remember { mutableStateOf("") }
+    var historyTargetItem by remember { mutableStateOf<WorkoutPlanItemRecord?>(null) }
 
     LaunchedEffect(restSecondsLeft) {
         if (restSecondsLeft > 0) {
@@ -829,6 +919,7 @@ private fun StudentWorkoutScreen(
                                 clientId = student.id,
                                 workoutPlans = state.workoutPlans,
                                 workoutPlanItems = state.workoutPlanItems,
+                                workoutLoadLogs = state.workoutLoadLogs,
                                 isExecuting = isExecuting,
                                 isCompleted = exItem.id in completedExerciseIds,
                                 onToggleComplete = {
@@ -842,6 +933,7 @@ private fun StudentWorkoutScreen(
                                     restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
                                     restExerciseName = exItem.exerciseName
                                 },
+                                onOpenHistory = { historyTargetItem = exItem },
                                 onSaveLoad = { newLoad ->
                                     viewModel.updateWorkoutPlanItemLoad(
                                         itemId = exItem.id,
@@ -857,6 +949,18 @@ private fun StudentWorkoutScreen(
             }
         }
     }
+
+    historyTargetItem?.let { exItem ->
+        ExerciseProgressDialog(
+            clientId = student.id,
+            clientName = student.name,
+            exerciseId = exItem.exerciseId,
+            exerciseName = exItem.exerciseName,
+            workoutLoadLogs = state.workoutLoadLogs,
+            currentLoadKg = exItem.loadKg,
+            onDismiss = { historyTargetItem = null }
+        )
+    }
 }
 
 @Composable
@@ -866,10 +970,12 @@ private fun StudentExerciseLoadRow(
     clientId: String,
     workoutPlans: List<WorkoutPlanRecord>,
     workoutPlanItems: List<WorkoutPlanItemRecord>,
+    workoutLoadLogs: List<WorkoutLoadLogRecord>,
     isExecuting: Boolean,
     isCompleted: Boolean,
     onToggleComplete: () -> Unit,
     onStartRest: () -> Unit,
+    onOpenHistory: () -> Unit,
     onSaveLoad: (String) -> Unit
 ) {
     var loadInput by remember(item.id, item.loadKg) { mutableStateOf(item.loadKg) }
@@ -923,13 +1029,15 @@ private fun StudentExerciseLoadRow(
             }
         }
 
-        // Interactive Last-Workout Historical Load Badge & Expandable Tooltip
+        // Interactive Last-Workout Historical Load Badge & Expandable Tooltip + PR
         ExerciseLastLoadBadge(
             item = item,
             clientId = clientId,
             workoutPlans = workoutPlans,
             workoutPlanItems = workoutPlanItems,
+            workoutLoadLogs = workoutLoadLogs,
             emphasize = isExecuting,
+            onOpenHistory = onOpenHistory,
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -1074,6 +1182,7 @@ private fun StudentAssessmentScreen(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val context = LocalContext.current
     val assessments = remember(state.physicalAssessments, student.id) {
         state.physicalAssessments
             .filter { it.clientId == student.id }
@@ -1087,20 +1196,43 @@ private fun StudentAssessmentScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("A Minha Avaliação Física", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-                    Text("Regista peso, IMC, TMB e evolução", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("A Minha Avaliação Física", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                        Text("Regista peso, IMC, TMB e evolução", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                    }
+                    GoldPrimaryButton(
+                        text = "+ Nova",
+                        icon = Icons.Default.Add,
+                        onClick = { showNewDialog = true },
+                        testTag = "student_add_assessment_button"
+                    )
                 }
-                GoldPrimaryButton(
-                    text = "+ Nova",
-                    icon = Icons.Default.Add,
-                    onClick = { showNewDialog = true },
-                    testTag = "student_add_assessment_button"
+                DarkSecondaryButton(
+                    text = "Exportar Relatório PDF de Evolução",
+                    icon = Icons.Default.PictureAsPdf,
+                    onClick = {
+                        val ok = ReportExporter.shareStudentEvolutionPdf(
+                            context = context,
+                            client = student,
+                            assessments = state.physicalAssessments,
+                            bookings = state.bookings,
+                            workoutPlans = state.workoutPlans,
+                            workoutPlanItems = state.workoutPlanItems,
+                            workoutLoadLogs = state.workoutLoadLogs
+                        )
+                        if (!ok) {
+                            Toast.makeText(context, "Erro ao gerar relatório PDF.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("student_export_pdf_btn")
                 )
             }
         }

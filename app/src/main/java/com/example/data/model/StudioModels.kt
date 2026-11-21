@@ -25,6 +25,7 @@ data class ClientRecord(
     val monthlyFeeEur: Double = 0.0,
     val fidelizacaoMonths: Int = 0,
     val fidelizacaoStartMillis: Long = 0L,
+    val weeklySessionLimit: Int = 0,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -164,6 +165,36 @@ data class WorkoutPlanItemRecord(
     val restSeconds: Int = 90,
     val notes: String = "",
     val orderIndex: Int = 0,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class WorkoutLoadLogRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val clientId: String = "",
+    val planId: String = "",
+    val planItemId: String = "",
+    val exerciseId: String = "",
+    val exerciseName: String = "",
+    val loadKg: String = "",
+    val numericKg: Double = 0.0,
+    val loggedAtMillis: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class WaitlistEntryRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val sessionId: String = "",
+    val weekKey: String = "",
+    val clientId: String = "",
+    val createdAtMillis: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

@@ -748,5 +748,114 @@ test("Super-Admin PT (pafm77pedrinho77@gmail.com) manages PT approvals and is th
   await assertSucceeds(adminDb.collection(`users/${ALICE_UID}/payments`).get());
 });
 
+test("Workout load logs, waitlist entries, and weeklySessionLimit enforce bounds and isolation", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
+  const studentDb = testEnv.authenticatedContext("student_portal_789").firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").set({
+      userId: ALICE_UID,
+      clientsCanEdit: true,
+      cutoffHours: 12,
+      whatsappWebMode: false,
+      siteBaseUrl: "https://newshape.vercel.app",
+      studentPortalCode: "ns_invite_2026_abc",
+      seeded: true,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/portal_members`).doc("student_portal_789").set({
+      userId: ALICE_UID,
+      memberUid: "student_portal_789",
+      inviteCode: "ns_invite_2026_abc",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/clients`).doc("c_lim").set({
+      userId: ALICE_UID,
+      name: "Diogo Mendes",
+      phone: "913334445",
+      notes: "",
+      active: true,
+      newClient: false,
+      trainingType: "GRUPO",
+      weeklySessionLimit: 3,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/clients`).doc("c_lim").update({
+      weeklySessionLimit: 30,
+      updatedAt: updated,
+    })
+  );
+
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/workout_load_logs`).doc("log_1").set({
+      userId: ALICE_UID,
+      clientId: "c_lim",
+      planId: "wp1",
+      planItemId: "wpi1",
+      exerciseId: "ex1",
+      exerciseName: "Supino Plano",
+      loadKg: "65 kg",
+      numericKg: 65.0,
+      loggedAtMillis: 1794950000000,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(aliceDb.collection(`users/${ALICE_UID}/workout_load_logs`).get());
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/workout_load_logs`).get());
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/workout_load_logs`).doc("log_1").update({
+      numericKg: 99.0,
+      updatedAt: updated,
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/workout_load_logs`).doc("log_bad").set({
+      userId: ALICE_UID,
+      clientId: "c_lim",
+      planId: "wp1",
+      planItemId: "wpi1",
+      exerciseId: "ex1",
+      exerciseName: "Supino Plano",
+      loadKg: "-10 kg",
+      numericKg: -10.0,
+      loggedAtMillis: 1794950000000,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/waitlist_entries`).doc("wl_1").set({
+      userId: ALICE_UID,
+      sessionId: "ses_1",
+      weekKey: "2026-W47",
+      clientId: "c_lim",
+      createdAtMillis: 1794960000000,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(aliceDb.collection(`users/${ALICE_UID}/waitlist_entries`).get());
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/waitlist_entries`).get());
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/waitlist_entries`).doc("wl_1").delete()
+  );
+});
+
 
 
