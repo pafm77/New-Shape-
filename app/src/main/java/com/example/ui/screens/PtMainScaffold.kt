@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -12,14 +14,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.PtNotificationRecord
+import com.example.notifications.WorkoutNotificationHelper
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.GoldPrimaryButton
 import com.example.ui.components.NewShapeLogo
+import com.example.ui.components.StatusPill
+import com.example.ui.components.formatTimeAgo
 import com.example.ui.theme.*
 
 @Composable
@@ -28,9 +35,42 @@ fun PtMainScaffold(
     viewModel: NewShapeViewModel,
     onSignOut: () -> Unit
 ) {
+    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     var mgmtInitialSubTab by remember { mutableIntStateOf(0) }
     var mgmtChatClientId by remember { mutableStateOf<String?>(null) }
+    var showNotificationsDialog by remember { mutableStateOf(false) }
+    var seenNotificationIds by remember { mutableStateOf<Set<String>?>(null) }
+
+    LaunchedEffect(state.ptNotifications) {
+        val currentIds = state.ptNotifications.map { it.id }.toSet()
+        val prev = seenNotificationIds
+        if (prev == null) {
+            seenNotificationIds = currentIds
+        } else {
+            val newlyArrived = state.ptNotifications.filter { !it.read && it.id !in prev }
+            if (newlyArrived.isNotEmpty() &&
+                WorkoutNotificationHelper.isPtAlertsEnabled(context) &&
+                WorkoutNotificationHelper.hasNotificationPermission(context)
+            ) {
+                newlyArrived.forEach { n ->
+                    val title = when (n.type) {
+                        "CANCELLED" -> "Treino cancelado · ${n.clientName}"
+                        "UNAVAILABLE" -> "Aluno indisponível · ${n.clientName}"
+                        else -> "Horário alterado · ${n.clientName}"
+                    }
+                    WorkoutNotificationHelper.showImmediateNotification(
+                        context = context,
+                        channelId = WorkoutNotificationHelper.CHANNEL_PT_ALERTS,
+                        title = title,
+                        body = n.summary,
+                        notificationId = n.id.hashCode() and 0x7FFFFFFF
+                    )
+                }
+            }
+            seenNotificationIds = prev + currentIds
+        }
+    }
 
     val navItems = listOf(
         Triple("Início", Icons.Default.Home, "pt_nav_home"),
@@ -61,11 +101,43 @@ fun PtMainScaffold(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            NewShapeLogo(compact = true)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                NewShapeLogo(compact = true)
+                                if (state.isSuperAdmin) {
+                                    StatusPill(
+                                        text = "Admin",
+                                        textColor = TextOnGold,
+                                        containerColor = NewShapeGold
+                                    )
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { showNotificationsDialog = true },
+                                    modifier = Modifier.testTag("pt_notifications_bell_btn")
+                                ) {
+                                    BadgedBox(
+                                        badge = {
+                                            if (state.unreadPtNotificationsCount > 0) {
+                                                Badge(containerColor = DangerRed, contentColor = TextPrimaryDark) {
+                                                    Text(state.unreadPtNotificationsCount.toString())
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Notifications,
+                                            contentDescription = "Notificações de cancelamentos e alterações",
+                                            tint = if (state.unreadPtNotificationsCount > 0) NewShapeGoldBright else TextSecondaryDark
+                                        )
+                                    }
+                                }
                                 TextButton(
                                     onClick = { viewModel.enterStudentMode() },
                                     modifier = Modifier.testTag("switch_to_student_btn")
@@ -181,7 +253,11 @@ fun PtMainScaffold(
                 if (!isWide) {
                     NavigationBar(containerColor = CharcoalSurface, tonalElevation = 4.dp) {
                         navItems.forEachIndexed { idx, (label, icon, tag) ->
-                            val badgeCount = if (idx == 0) state.pendingQueue.size else 0
+                            val badgeCount = when (idx) {
+                                0 -> state.pendingQueue.size
+                                5 -> if (state.isSuperAdmin) state.pendingPtApprovalsCount else 0
+                                else -> 0
+                            }
                             NavigationBarItem(
                                 selected = selectedTab == idx,
                                 onClick = {
@@ -228,7 +304,11 @@ fun PtMainScaffold(
                     NavigationRail(containerColor = CharcoalSurface) {
                         Spacer(Modifier.height(12.dp))
                         navItems.forEachIndexed { idx, (label, icon, tag) ->
-                            val badgeCount = if (idx == 0) state.pendingQueue.size else 0
+                            val badgeCount = when (idx) {
+                                0 -> state.pendingQueue.size
+                                5 -> if (state.isSuperAdmin) state.pendingPtApprovalsCount else 0
+                                else -> 0
+                            }
                             NavigationRailItem(
                                 selected = selectedTab == idx,
                                 onClick = {
@@ -273,14 +353,23 @@ fun PtMainScaffold(
                 ) {
                     Box(modifier = Modifier.fillMaxSize().widthIn(max = 840.dp)) {
                         when (selectedTab) {
-                            0 -> PtHomeTab(state = state, viewModel = viewModel)
+                            0 -> PtHomeTab(
+                                state = state,
+                                viewModel = viewModel,
+                                onJumpToPtApprovals = {
+                                    if (state.isSuperAdmin) {
+                                        mgmtInitialSubTab = 3
+                                        selectedTab = 5
+                                    }
+                                }
+                            )
                             1 -> PtClientsTab(
                                 state = state,
                                 viewModel = viewModel,
                                 onJumpToWorkout = { selectedTab = 2 },
                                 onJumpToNutrition = { selectedTab = 3 },
                                 onJumpToChat = { cid ->
-                                    mgmtInitialSubTab = 2
+                                    mgmtInitialSubTab = if (state.isSuperAdmin) 2 else 1
                                     mgmtChatClientId = cid
                                     selectedTab = 5
                                 }
@@ -300,4 +389,128 @@ fun PtMainScaffold(
             }
         }
     }
+
+    if (showNotificationsDialog) {
+        PtNotificationsDialog(
+            notifications = state.ptNotifications,
+            onDismiss = { showNotificationsDialog = false },
+            onMarkRead = { id -> viewModel.markPtNotificationRead(id) },
+            onMarkAllRead = { viewModel.markAllPtNotificationsRead() },
+            onDelete = { id -> viewModel.deletePtNotification(id) }
+        )
+    }
+}
+
+@Composable
+private fun PtNotificationsDialog(
+    notifications: List<PtNotificationRecord>,
+    onDismiss: () -> Unit,
+    onMarkRead: (String) -> Unit,
+    onMarkAllRead: () -> Unit,
+    onDelete: (String) -> Unit
+) {
+    val hasUnread = notifications.any { !it.read }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Notificações do PT", color = TextPrimaryDark)
+                if (hasUnread) {
+                    TextButton(
+                        onClick = onMarkAllRead,
+                        modifier = Modifier.testTag("pt_mark_all_notifs_read")
+                    ) {
+                        Text("Marcar lidas", color = NewShapeGoldBright)
+                    }
+                }
+            }
+        },
+        text = {
+            if (notifications.isEmpty()) {
+                Text(
+                    "Sem notificações de cancelamentos ou alterações de horário.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(notifications, key = { it.id }) { notif ->
+                        val isCancel = notif.type == "CANCELLED" || notif.type == "UNAVAILABLE"
+                        Surface(
+                            color = if (!notif.read) ElevatedCharcoal else ObsidianBg,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(
+                                1.dp,
+                                if (!notif.read) (if (isCancel) DangerRed else PendingAmber) else HairlineBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = notif.clientName,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = TextPrimaryDark
+                                        )
+                                        StatusPill(
+                                            text = when (notif.type) {
+                                                "CANCELLED" -> "Cancelou"
+                                                "UNAVAILABLE" -> "Indisponível"
+                                                else -> "Alterou"
+                                            },
+                                            textColor = if (isCancel) DangerRed else PendingAmber,
+                                            containerColor = if (isCancel) DangerRedContainer else PendingAmberContainer
+                                        )
+                                    }
+                                    Text(
+                                        text = formatTimeAgo(notif.timestampMillis),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondaryDark
+                                    )
+                                }
+                                Text(
+                                    text = notif.summary,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextPrimaryDark
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    if (!notif.read) {
+                                        TextButton(onClick = { onMarkRead(notif.id) }) {
+                                            Text("Marcar lida", color = NewShapeGold, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                    TextButton(onClick = { onDelete(notif.id) }) {
+                                        Text("Apagar", color = DangerRed, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Fechar", color = NewShapeGoldBright) }
+        }
+    )
 }

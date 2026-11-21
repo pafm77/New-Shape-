@@ -28,7 +28,8 @@ import com.example.ui.theme.*
 @Composable
 fun PtHomeTab(
     state: StudioUiState,
-    viewModel: NewShapeViewModel
+    viewModel: NewShapeViewModel,
+    onJumpToPtApprovals: () -> Unit = {}
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) }
     val subTabs = listOf("Por confirmar", "Semanas", "Respostas", "Mensagens")
@@ -62,7 +63,8 @@ fun PtHomeTab(
             0 -> PorConfirmarSection(
                 state = state,
                 viewModel = viewModel,
-                onJumpToResponses = { selectedSubTab = 2 }
+                onJumpToResponses = { selectedSubTab = 2 },
+                onJumpToPtApprovals = onJumpToPtApprovals
             )
             1 -> SemanasSection(state = state, viewModel = viewModel)
             2 -> RespostasSection(state = state, viewModel = viewModel)
@@ -75,7 +77,8 @@ fun PtHomeTab(
 private fun PorConfirmarSection(
     state: StudioUiState,
     viewModel: NewShapeViewModel,
-    onJumpToResponses: () -> Unit
+    onJumpToResponses: () -> Unit,
+    onJumpToPtApprovals: () -> Unit
 ) {
     val context = LocalContext.current
     val activeWeek = state.activeWeek
@@ -91,11 +94,121 @@ private fun PorConfirmarSection(
     } else emptySet()
     val notRespondedCount = activeClients.count { it.id !in weekBookedClientIds && it.id !in unavailableClientIds }
 
+    val unreadAlerts = remember(state.ptNotifications) {
+        state.ptNotifications.filter { !it.read }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (state.isSuperAdmin && state.pendingPtApprovalsCount > 0) {
+            item {
+                Surface(
+                    color = NewShapeGoldMuted,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.5.dp, NewShapeGold),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Novos PTs por confirmar (${state.pendingPtApprovalsCount})",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = NewShapeGoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Existem registos de Personal Trainers à espera da tua aprovação.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark
+                            )
+                        }
+                        TextButton(
+                            onClick = onJumpToPtApprovals,
+                            modifier = Modifier.testTag("home_jump_pt_approvals_btn")
+                        ) {
+                            Text("Gerir", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (unreadAlerts.isNotEmpty()) {
+            item {
+                Surface(
+                    color = DangerRedContainer,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.7f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.NotificationsActive,
+                                    contentDescription = "Alertas de alterações",
+                                    tint = DangerRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Cancelamentos e Alterações (${unreadAlerts.size})",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = TextPrimaryDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            TextButton(
+                                onClick = { viewModel.markAllPtNotificationsRead() },
+                                modifier = Modifier.testTag("home_clear_alerts_btn")
+                            ) {
+                                Text("Marcar lidas", color = NewShapeGoldBright, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        unreadAlerts.take(3).forEach { alert ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${alert.clientName} · ${formatTimeAgo(alert.timestampMillis)}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = NewShapeGoldBright
+                                    )
+                                    Text(
+                                        text = alert.summary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextPrimaryDark
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { viewModel.markPtNotificationRead(alert.id) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = "Marcar alerta como lido", tint = ConfirmedGreen, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (activeWeek != null) {
             item {
                 Surface(

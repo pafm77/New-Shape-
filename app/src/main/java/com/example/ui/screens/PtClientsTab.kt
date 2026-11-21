@@ -162,11 +162,15 @@ fun PtClientsTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Mensalidade atual: ${state.currentMonthLabel}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = NewShapeGold
-                )
+                if (state.isSuperAdmin) {
+                    Text(
+                        text = "Mensalidade atual: ${state.currentMonthLabel}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NewShapeGold
+                    )
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Mostrar inativos", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
                     Spacer(Modifier.width(8.dp))
@@ -230,45 +234,49 @@ fun PtClientsTab(
                                     }
                                 }
                                 Text(client.phone, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
-                                if (client.monthlyFeeEur > 0.0 || client.fidelizacaoMonths > 0) {
-                                    val feeStr = if (client.monthlyFeeEur > 0.0) "€${String.format("%.0f", client.monthlyFeeEur)}/mês" else ""
+                                if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || client.fidelizacaoMonths > 0) {
+                                    val feeStr = if (state.isSuperAdmin && client.monthlyFeeEur > 0.0) "€${String.format("%.0f", client.monthlyFeeEur)}/mês" else ""
                                     val fidStr = if (client.fidelizacaoMonths > 0) "Fidelização ${client.fidelizacaoMonths}m" else ""
                                     val info = listOf(feeStr, fidStr).filter { it.isNotBlank() }.joinToString(" · ")
                                     Text(info, style = MaterialTheme.typography.labelSmall, color = NewShapeGold)
                                 }
                             }
-                            if (isPaidThisMonth) {
-                                StatusPill(
-                                    text = "Pago €${String.format("%.0f", monthPayment.amountEur)}",
-                                    textColor = ConfirmedGreen,
-                                    containerColor = ConfirmedGreenContainer
-                                )
-                            } else {
-                                StatusPill(
-                                    text = "Por pagar",
-                                    textColor = PendingAmber,
-                                    containerColor = PendingAmberContainer
-                                )
+                            if (state.isSuperAdmin) {
+                                if (isPaidThisMonth) {
+                                    StatusPill(
+                                        text = "Pago €${String.format("%.0f", monthPayment.amountEur)}",
+                                        textColor = ConfirmedGreen,
+                                        containerColor = ConfirmedGreenContainer
+                                    )
+                                } else {
+                                    StatusPill(
+                                        text = "Por pagar",
+                                        textColor = PendingAmber,
+                                        containerColor = PendingAmberContainer
+                                    )
+                                }
                             }
                         }
 
                         Spacer(Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = if (state.isSuperAdmin) Arrangement.SpaceBetween else Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TextButton(
-                                onClick = { paymentTargetClient = client },
-                                modifier = Modifier.testTag("quick_pay_${client.id}")
-                            ) {
-                                Icon(Icons.Default.Payments, contentDescription = null, tint = NewShapeGold, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = if (isPaidThisMonth) "Registar outro pagamento" else "Apontar pagamento",
-                                    color = NewShapeGold,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                            if (state.isSuperAdmin) {
+                                TextButton(
+                                    onClick = { paymentTargetClient = client },
+                                    modifier = Modifier.testTag("quick_pay_${client.id}")
+                                ) {
+                                    Icon(Icons.Default.Payments, contentDescription = null, tint = NewShapeGold, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isPaidThisMonth) "Registar outro pagamento" else "Apontar pagamento",
+                                        color = NewShapeGold,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                             Text("Ver perfil →", style = MaterialTheme.typography.labelLarge, color = TextSecondaryDark)
                         }
@@ -297,19 +305,21 @@ fun PtClientsTab(
         )
     }
 
-    paymentTargetClient?.let { client ->
-        RegisterPaymentDialog(
-            clientName = client.name,
-            defaultMonthYear = state.currentMonthYear,
-            defaultMonthLabel = state.currentMonthLabel,
-            defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
-            defaultDurationMonths = client.fidelizacaoMonths,
-            onDismiss = { paymentTargetClient = null },
-            onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
-                viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
-                paymentTargetClient = null
-            }
-        )
+    if (state.isSuperAdmin) {
+        paymentTargetClient?.let { client ->
+            RegisterPaymentDialog(
+                clientName = client.name,
+                defaultMonthYear = state.currentMonthYear,
+                defaultMonthLabel = state.currentMonthLabel,
+                defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
+                defaultDurationMonths = client.fidelizacaoMonths,
+                onDismiss = { paymentTargetClient = null },
+                onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
+                    viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
+                    paymentTargetClient = null
+                }
+            )
+        }
     }
 }
 
@@ -507,16 +517,18 @@ fun PtClientProfileScreen(
                                 modifier = Modifier.weight(1f),
                                 colors = darkFieldColors()
                             )
-                            OutlinedTextField(
-                                value = monthlyFeeText,
-                                onValueChange = { monthlyFeeText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                                label = { Text("Valor Mensalidade (€)") },
-                                placeholder = { Text("120") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                modifier = Modifier.weight(1f).testTag("profile_monthly_fee_input"),
-                                colors = darkFieldColors()
-                            )
+                            if (state.isSuperAdmin) {
+                                OutlinedTextField(
+                                    value = monthlyFeeText,
+                                    onValueChange = { monthlyFeeText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
+                                    label = { Text("Valor Mensalidade (€)") },
+                                    placeholder = { Text("120") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.weight(1f).testTag("profile_monthly_fee_input"),
+                                    colors = darkFieldColors()
+                                )
+                            }
                         }
                         Spacer(Modifier.height(10.dp))
                         Text("Período de Fidelização (se aplicável)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
@@ -574,7 +586,11 @@ fun PtClientProfileScreen(
                         GoldPrimaryButton(
                             text = "Guardar alterações",
                             onClick = {
-                                val parsedFee = monthlyFeeText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+                                val parsedFee = if (state.isSuperAdmin) {
+                                    monthlyFeeText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+                                } else {
+                                    client.monthlyFeeEur
+                                }
                                 viewModel.updateClient(
                                     client.copy(
                                         name = name,
@@ -593,62 +609,64 @@ fun PtClientProfileScreen(
                     }
                 }
 
-                // Mensalidade Card
-                item {
-                    BrandCard(highlightBorder = currentMonthPayment == null) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text("Mensalidade (${state.currentMonthLabel})", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
-                                if (currentMonthPayment != null) {
-                                    Text(
-                                        text = "Pago €${String.format("%.2f", currentMonthPayment.amountEur)} em ${formatShortDate(currentMonthPayment.paidAtMillis)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = ConfirmedGreen
-                                    )
-                                } else {
-                                    Text("Sem registo de pagamento este mês", style = MaterialTheme.typography.bodySmall, color = PendingAmber)
-                                }
-                            }
-                            StatusPill(
-                                text = if (currentMonthPayment != null) "Pago ✓" else "Pendente",
-                                textColor = if (currentMonthPayment != null) ConfirmedGreen else PendingAmber,
-                                containerColor = if (currentMonthPayment != null) ConfirmedGreenContainer else PendingAmberContainer
-                            )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        GoldPrimaryButton(
-                            text = "Registar Pagamento de Mensalidade",
-                            icon = Icons.Default.Payments,
-                            onClick = { showPayDialog = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            testTag = "profile_register_payment_btn"
-                        )
-                        if (clientPayments.isNotEmpty()) {
-                            Spacer(Modifier.height(14.dp))
-                            HorizontalDivider(color = HairlineBorder)
-                            Spacer(Modifier.height(10.dp))
-                            Text("Histórico de pagamentos", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
-                            Spacer(Modifier.height(6.dp))
-                            clientPayments.forEach { p ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text("${p.monthLabel} · €${String.format("%.2f", p.amountEur)}", style = MaterialTheme.typography.bodyMedium, color = TextPrimaryDark)
+                // Mensalidade Card (Admin Only)
+                if (state.isSuperAdmin) {
+                    item {
+                        BrandCard(highlightBorder = currentMonthPayment == null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("Mensalidade (${state.currentMonthLabel})", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                                    if (currentMonthPayment != null) {
                                         Text(
-                                            text = "${formatShortDate(p.paidAtMillis)}${if (p.note.isNotBlank()) " · ${p.note}" else ""}",
+                                            text = "Pago €${String.format("%.2f", currentMonthPayment.amountEur)} em ${formatShortDate(currentMonthPayment.paidAtMillis)}",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondaryDark
+                                            color = ConfirmedGreen
                                         )
+                                    } else {
+                                        Text("Sem registo de pagamento este mês", style = MaterialTheme.typography.bodySmall, color = PendingAmber)
                                     }
-                                    IconButton(onClick = { viewModel.deletePayment(p.id) }) {
-                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                                }
+                                StatusPill(
+                                    text = if (currentMonthPayment != null) "Pago ✓" else "Pendente",
+                                    textColor = if (currentMonthPayment != null) ConfirmedGreen else PendingAmber,
+                                    containerColor = if (currentMonthPayment != null) ConfirmedGreenContainer else PendingAmberContainer
+                                )
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            GoldPrimaryButton(
+                                text = "Registar Pagamento de Mensalidade",
+                                icon = Icons.Default.Payments,
+                                onClick = { showPayDialog = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                testTag = "profile_register_payment_btn"
+                            )
+                            if (clientPayments.isNotEmpty()) {
+                                Spacer(Modifier.height(14.dp))
+                                HorizontalDivider(color = HairlineBorder)
+                                Spacer(Modifier.height(10.dp))
+                                Text("Histórico de pagamentos", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                                Spacer(Modifier.height(6.dp))
+                                clientPayments.forEach { p ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text("${p.monthLabel} · €${String.format("%.2f", p.amountEur)}", style = MaterialTheme.typography.bodyMedium, color = TextPrimaryDark)
+                                            Text(
+                                                text = "${formatShortDate(p.paidAtMillis)}${if (p.note.isNotBlank()) " · ${p.note}" else ""}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = TextSecondaryDark
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.deletePayment(p.id) }) {
+                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                                        }
                                     }
                                 }
                             }
@@ -877,7 +895,7 @@ fun PtClientProfileScreen(
         }
     }
 
-    if (showPayDialog) {
+    if (state.isSuperAdmin && showPayDialog) {
         RegisterPaymentDialog(
             clientName = client.name,
             defaultMonthYear = state.currentMonthYear,

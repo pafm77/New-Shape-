@@ -46,6 +46,12 @@ sealed interface StudioStreamState {
 
 data class StudioUiState(
     val currentUserId: String = "",
+    val currentUserEmail: String = "",
+    val isSuperAdmin: Boolean = false,
+    val ownPtAccount: PtAccountRecord? = null,
+    val allPtAccounts: List<PtAccountRecord> = emptyList(),
+    val ptNotifications: List<PtNotificationRecord> = emptyList(),
+    val pendingWhatsAppPrompt: StudentWhatsAppAlertPrompt? = null,
     val role: AppRole = AppRole.ROLE_SELECTOR,
     val activeStudentId: String? = null,
     val selectedWeekKey: String = "",
@@ -69,6 +75,15 @@ data class StudioUiState(
     val undoSnapshot: UndoConfirmationSnapshot? = null,
     val statusBannerMessage: String? = null
 ) {
+    val isPtApproved: Boolean
+        get() = isSuperAdmin || ownPtAccount?.status == "APPROVED"
+
+    val unreadPtNotificationsCount: Int
+        get() = ptNotifications.count { !it.read }
+
+    val pendingPtApprovalsCount: Int
+        get() = allPtAccounts.count { it.status == "PENDING" }
+
     val activeWeek: TrainingWeekRecord?
         get() = weeks.find { it.weekKey == selectedWeekKey } ?: weeks.firstOrNull()
 
@@ -166,8 +181,12 @@ data class StudioUiState(
 
 class NewShapeViewModel(
     private val repository: FirestoreStudioRepository,
-    private val currentUserId: String
+    private val currentUserId: String,
+    private val currentUserEmail: String = "",
+    private val currentUserDisplayName: String = ""
 ) : ViewModel() {
+
+    private val isSuperAdmin: Boolean = isSuperAdminEmail(currentUserEmail)
 
     private val _role = MutableStateFlow(AppRole.ROLE_SELECTOR)
     private val _activeStudentId = MutableStateFlow<String?>(null)
@@ -175,12 +194,17 @@ class NewShapeViewModel(
     private val _waitingWhatsApp = MutableStateFlow(false)
     private val _undoSnapshot = MutableStateFlow<UndoConfirmationSnapshot?>(null)
     private val _statusBanner = MutableStateFlow<String?>(null)
+    private val _pendingWhatsAppPrompt = MutableStateFlow<StudentWhatsAppAlertPrompt?>(null)
 
     private var undoTimerJob: Job? = null
 
     init {
         viewModelScope.launch {
-            val res = repository.ensureSeeded(currentUserId)
+            repository.ensurePtAccount(currentUserId, currentUserEmail, currentUserDisplayName)
+                .onFailure { e ->
+                    Log.w(TAG, "ensurePtAccount failed", e)
+                }
+            val res = repository.ensureSeeded(currentUserId, isSuperAdmin = isSuperAdmin)
             res.onFailure { e ->
                 _statusBanner.value = e.localizedMessage ?: "Erro ao inicializar dados no Firestore."
             }
@@ -206,8 +230,11 @@ class NewShapeViewModel(
         BaseSlice(clients, weeks, sessions, bookings, responses)
     }
 
+    private val paymentsFlow: Flow<List<PaymentRecord>> =
+        if (isSuperAdmin) repository.observePayments(currentUserId) else flowOf(emptyList())
+
     private val mgmtDataFlow = combine(
-        repository.observePayments(currentUserId),
+        paymentsFlow,
         repository.observeFidelizacoes(currentUserId),
         repository.observeExercises(currentUserId),
         repository.observeWorkoutPlans(currentUserId),
@@ -229,6 +256,15 @@ class NewShapeViewModel(
         ExtraSlice(foods, nutrition, assessments, chats, templates, settings ?: StudioSettingsRecord())
     }
 
+    private val ptAdminFlow = combine(
+        repository.observeOwnPtAccount(currentUserId),
+        if (isSuperAdmin) repository.observeAllPtAccounts() else flowOf(emptyList()),
+        repository.observePtNotifications(currentUserId),
+        _pendingWhatsAppPrompt
+    ) { ownPt, allPts, notifications, waPrompt ->
+        PtAdminSlice(ownPt, allPts, notifications, waPrompt)
+    }
+
     private val controlFlow = combine(
         _role,
         _activeStudentId,
@@ -243,11 +279,17 @@ class NewShapeViewModel(
         baseDataFlow,
         mgmtDataFlow,
         extraDataFlow,
-        controlFlow,
+        combine(controlFlow, ptAdminFlow) { ctrl, admin -> ctrl to admin },
         _statusBanner
-    ) { base, mgmt, extra, ctrl, banner ->
+    ) { base, mgmt, extra, (ctrl, admin), banner ->
         val uiState = StudioUiState(
             currentUserId = currentUserId,
+            currentUserEmail = currentUserEmail,
+            isSuperAdmin = isSuperAdmin,
+            ownPtAccount = admin.ownPtAccount,
+            allPtAccounts = admin.allPtAccounts,
+            ptNotifications = admin.ptNotifications,
+            pendingWhatsAppPrompt = admin.pendingWhatsAppPrompt,
             role = ctrl.role,
             activeStudentId = ctrl.activeStudentId ?: base.clients.firstOrNull { it.active }?.id,
             selectedWeekKey = ctrl.selectedWeekKey.ifBlank { base.weeks.firstOrNull()?.weekKey.orEmpty() },
@@ -335,6 +377,45 @@ class NewShapeViewModel(
 
     fun confirmReturnedFromWhatsApp() {
         _waitingWhatsApp.value = false
+    }
+
+    fun dismissWhatsAppPrompt() {
+        _pendingWhatsAppPrompt.value = null
+    }
+
+    // --- Admin PT Approvals & PT Notifications ---
+    fun reviewPtAccount(ptUid: String, status: String) {
+        if (!isSuperAdmin) return
+        viewModelScope.launch {
+            repository.reviewPtAccount(ptUid, status)
+                .onSuccess {
+                    _statusBanner.value = if (status == "APPROVED") "Registo do PT aprovado!" else "Registo do PT recusado."
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun markPtNotificationRead(notificationId: String) {
+        viewModelScope.launch {
+            repository.markPtNotificationRead(notificationId)
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun markAllPtNotificationsRead() {
+        val unreadIds = currentData?.ptNotifications?.filter { !it.read }?.map { it.id }.orEmpty()
+        if (unreadIds.isEmpty()) return
+        viewModelScope.launch {
+            repository.markAllPtNotificationsRead(unreadIds)
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun deletePtNotification(notificationId: String) {
+        viewModelScope.launch {
+            repository.deletePtNotification(notificationId)
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
     }
 
     // --- Week Navigation ---
@@ -500,19 +581,90 @@ class NewShapeViewModel(
     }
 
     fun submitStudentBookings(weekKey: String, clientId: String, selectedSessionIds: Set<String>) {
-        val existing = currentData?.bookings?.filter { it.weekKey == weekKey && it.clientId == clientId }.orEmpty()
+        val data = currentData
+        val existing = data?.bookings?.filter {
+            it.weekKey == weekKey && it.clientId == clientId && it.status != BookingStatus.CANCELLED.name
+        }.orEmpty()
+        val existingIds = existing.map { it.sessionId }.toSet()
+        val isCancel = existing.isNotEmpty() && selectedSessionIds.isEmpty()
+        val isModify = existing.isNotEmpty() && selectedSessionIds.isNotEmpty() && existingIds != selectedSessionIds
+        val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
+        val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
+        val sessionMap = data?.sessions?.associateBy { it.id }.orEmpty()
+
+        fun formatList(ids: Collection<String>): String =
+            ids.mapNotNull { sessionMap[it] }
+                .sortedBy { it.startMillis }
+                .joinToString(", ") { "${it.dateLabel} ${it.timeLabel.replace(":", "h")}" }
+
         viewModelScope.launch {
             repository.submitStudentBookings(weekKey, clientId, selectedSessionIds, existing)
-                .onSuccess { _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp." }
+                .onSuccess {
+                    if (isCancel) {
+                        val removedText = formatList(existingIds)
+                        val summary = "Cancelou os treinos da semana $weekLabel ($removedText)."
+                        repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
+                        val waMsg = "Olá! Sou $clientName. Cancelei o(s) meu(s) treino(s) na New Shape (semana $weekLabel): $removedText. Podes confirmar?"
+                        _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                            type = "CANCELLED",
+                            title = "Treino cancelado — avisa o teu PT",
+                            detail = "O teu PT já recebeu uma notificação na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o cancelamento.",
+                            whatsappMessage = waMsg
+                        )
+                        _statusBanner.value = "Cancelamento registado. Avisa o PT pelo WhatsApp."
+                    } else if (isModify) {
+                        val removedIds = existingIds - selectedSessionIds
+                        val addedIds = selectedSessionIds - existingIds
+                        val newText = formatList(selectedSessionIds)
+                        val parts = mutableListOf<String>()
+                        if (removedIds.isNotEmpty()) parts.add("saiu de ${formatList(removedIds)}")
+                        if (addedIds.isNotEmpty()) parts.add("marcou ${formatList(addedIds)}")
+                        val summary = "Alterou o horário da semana $weekLabel (${parts.joinToString(" · ")})."
+                        repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
+                        val waMsg = "Olá! Sou $clientName. Alterei o meu horário de treino na New Shape (semana $weekLabel). Novo horário: $newText. Podes confirmar?"
+                        _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                            type = "ALTERED",
+                            title = "Horário alterado — avisa o teu PT",
+                            detail = "O teu PT já foi notificado na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o novo horário.",
+                            whatsappMessage = waMsg
+                        )
+                        _statusBanner.value = "Alteração guardada. Avisa o PT pelo WhatsApp."
+                    } else {
+                        _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp."
+                    }
+                }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
 
     fun markStudentUnavailable(weekKey: String, clientId: String) {
-        val existing = currentData?.bookings?.filter { it.weekKey == weekKey && it.clientId == clientId }.orEmpty()
+        val data = currentData
+        val existing = data?.bookings?.filter {
+            it.weekKey == weekKey && it.clientId == clientId && it.status != BookingStatus.CANCELLED.name
+        }.orEmpty()
+        val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
+        val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
+        val sessionMap = data?.sessions?.associateBy { it.id }.orEmpty()
+        val removedText = existing.mapNotNull { sessionMap[it.sessionId] }
+            .sortedBy { it.startMillis }
+            .joinToString(", ") { "${it.dateLabel} ${it.timeLabel.replace(":", "h")}" }
+
         viewModelScope.launch {
             repository.upsertWeekResponse(weekKey, clientId, "UNAVAILABLE", existing)
-                .onSuccess { _statusBanner.value = "Registado: esta semana não podes treinar." }
+                .onSuccess {
+                    if (existing.isNotEmpty()) {
+                        val summary = "Cancelou os treinos da semana $weekLabel ($removedText) e marcou 'Esta semana não posso'."
+                        repository.createPtNotification(clientId, clientName, "UNAVAILABLE", summary, weekKey)
+                        val waMsg = "Olá! Sou $clientName. Esta semana ($weekLabel) não vou poder treinar e cancelei o(s) horário(s): $removedText."
+                        _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                            type = "UNAVAILABLE",
+                            title = "Treino cancelado — avisa o teu PT",
+                            detail = "O teu PT já foi notificado na aplicação. Envia mensagem pelo WhatsApp para avisar que esta semana não podes treinar.",
+                            whatsappMessage = waMsg
+                        )
+                    }
+                    _statusBanner.value = "Registado: esta semana não podes treinar."
+                }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -675,10 +827,10 @@ class NewShapeViewModel(
         }
     }
 
-    fun updateWorkoutPlanItemLoad(itemId: String, loadKg: String) {
+    fun updateWorkoutPlanItemLoad(itemId: String, loadKg: String, previousLoadKg: String? = null) {
         viewModelScope.launch {
-            repository.updateWorkoutPlanItemLoad(itemId, loadKg)
-                .onSuccess { _statusBanner.value = "Carga atualizada." }
+            repository.updateWorkoutPlanItemLoad(itemId, loadKg, previousLoadKg)
+                .onSuccess { _statusBanner.value = "Carga guardada ($loadKg)." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -891,4 +1043,11 @@ private data class ControlSlice(
     val selectedWeekKey: String,
     val waitingWhatsAppReturn: Boolean,
     val undoSnapshot: UndoConfirmationSnapshot?
+)
+
+private data class PtAdminSlice(
+    val ownPtAccount: PtAccountRecord?,
+    val allPtAccounts: List<PtAccountRecord>,
+    val ptNotifications: List<PtNotificationRecord>,
+    val pendingWhatsAppPrompt: StudentWhatsAppAlertPrompt?
 )

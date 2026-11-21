@@ -1,19 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
+  Check,
   CreditCard,
   Edit3,
   MessageCircle,
   Plus,
   Send,
+  ShieldCheck,
   Trash2,
   ArrowLeft,
+  UserX,
 } from 'lucide-react';
 import {
   ChatMessageRecord,
   ClientRecord,
   FidelizacaoRecord,
   PaymentRecord,
+  PtAccountRecord,
   TrainingType,
 } from '../types/studio';
 import {
@@ -39,51 +43,86 @@ import {
 } from './UiPrimitives';
 import { RegisterPaymentModal } from './PtClientsSection';
 
+export type ManagementSubTab = 'finance' | 'team' | 'fidelizacao' | 'chat';
+
 interface PtManagementSectionProps {
   uid: string;
+  isSuperAdmin: boolean;
   clients: ClientRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   chatMessages: ChatMessageRecord[];
-  initialSubTab?: 'finance' | 'fidelizacao' | 'chat';
+  ptAccounts: PtAccountRecord[];
+  initialSubTab?: ManagementSubTab;
   initialChatClientId?: string;
   onBanner: (msg: string) => void;
 }
 
 export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
   uid,
+  isSuperAdmin,
   clients,
   payments,
   fidelizacoes,
   chatMessages,
+  ptAccounts,
   initialSubTab = 'finance',
   initialChatClientId = '',
   onBanner,
 }) => {
-  const [subTab, setSubTab] = useState<'finance' | 'fidelizacao' | 'chat'>(initialSubTab);
+  const safeInitial: ManagementSubTab =
+    !isSuperAdmin && (initialSubTab === 'finance' || initialSubTab === 'team')
+      ? 'fidelizacao'
+      : initialSubTab;
+  const [subTab, setSubTab] = useState<ManagementSubTab>(safeInitial);
   const [selectedChatClientId, setSelectedChatClientId] = useState(initialChatClientId);
 
   useEffect(() => {
-    if (initialSubTab) setSubTab(initialSubTab);
-  }, [initialSubTab]);
+    if (!initialSubTab) return;
+    if (!isSuperAdmin && (initialSubTab === 'finance' || initialSubTab === 'team')) {
+      setSubTab('fidelizacao');
+    } else {
+      setSubTab(initialSubTab);
+    }
+  }, [initialSubTab, isSuperAdmin]);
 
   useEffect(() => {
     if (initialChatClientId) setSelectedChatClientId(initialChatClientId);
   }, [initialChatClientId]);
 
+  const pendingPtCount = useMemo(
+    () => ptAccounts.filter((a) => !a.isAdmin && a.status === 'PENDING').length,
+    [ptAccounts]
+  );
+
+  const tabs: Array<{ id: ManagementSubTab; label: string }> = isSuperAdmin
+    ? [
+        { id: 'finance', label: 'Finanças' },
+        {
+          id: 'team',
+          label: pendingPtCount > 0 ? `Equipa PT (${pendingPtCount})` : 'Equipa PT',
+        },
+        { id: 'fidelizacao', label: 'Fidelizações' },
+        { id: 'chat', label: 'Chat' },
+      ]
+    : [
+        { id: 'fidelizacao', label: 'Fidelizações' },
+        { id: 'chat', label: 'Chat' },
+      ];
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
-        {[
-          { id: 'finance' as const, label: 'Finanças' },
-          { id: 'fidelizacao' as const, label: 'Fidelizações' },
-          { id: 'chat' as const, label: 'Chat' },
-        ].map((t) => (
+      <div
+        className={`grid gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5 ${
+          isSuperAdmin ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'
+        }`}
+      >
+        {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setSubTab(t.id)}
-            className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            className={`min-h-[40px] rounded-xl px-2 text-xs sm:text-sm font-bold transition ${
               subTab === t.id
                 ? 'bg-[#EAB308] text-[#121214]'
                 : 'text-[#A1A1AA] hover:text-white'
@@ -94,13 +133,17 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
         ))}
       </div>
 
-      {subTab === 'finance' && (
+      {isSuperAdmin && subTab === 'finance' && (
         <FinanceSubTab
           uid={uid}
           clients={clients}
           payments={payments}
           onBanner={onBanner}
         />
+      )}
+
+      {isSuperAdmin && subTab === 'team' && (
+        <TeamApprovalSubTab ptAccounts={ptAccounts} onBanner={onBanner} />
       )}
 
       {subTab === 'fidelizacao' && (
@@ -121,6 +164,161 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           onSelectClient={setSelectedChatClientId}
         />
       )}
+    </div>
+  );
+};
+
+const TeamApprovalSubTab: React.FC<{
+  ptAccounts: PtAccountRecord[];
+  onBanner: (msg: string) => void;
+}> = ({ ptAccounts, onBanner }) => {
+  const [busyUid, setBusyUid] = useState<string | null>(null);
+  const nonAdminAccounts = useMemo(
+    () => ptAccounts.filter((a) => !a.isAdmin),
+    [ptAccounts]
+  );
+  const pending = nonAdminAccounts.filter((a) => a.status === 'PENDING');
+  const reviewed = nonAdminAccounts.filter((a) => a.status !== 'PENDING');
+
+  const handleReview = async (acc: PtAccountRecord, status: 'APPROVED' | 'REJECTED') => {
+    setBusyUid(acc.uid);
+    try {
+      await repo.reviewPtAccount(acc.uid, status);
+      onBanner(
+        status === 'APPROVED'
+          ? `PT ${acc.displayName || acc.email} confirmado e autorizado!`
+          : `Registo de ${acc.displayName || acc.email} recusado.`
+      );
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold text-[#F4F4F5]">Aprovação de Personal Trainers</h2>
+        <p className="text-xs text-[#A1A1AA]">
+          Apenas o administrador pode confirmar novos PTs registados. Os restantes PTs não têm
+          acesso à faturação.
+        </p>
+      </div>
+
+      <BrandCard highlight={pending.length > 0}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-[#EAB308]" />
+            <h3 className="text-sm font-bold text-[#FACC15]">
+              Pedidos Pendentes ({pending.length})
+            </h3>
+          </div>
+          <StatusPill tone={pending.length > 0 ? 'amber' : 'green'}>
+            {pending.length > 0 ? 'Requer confirmação' : 'Tudo em dia'}
+          </StatusPill>
+        </div>
+
+        {pending.length === 0 ? (
+          <p className="mt-2.5 text-xs text-[#A1A1AA]">
+            Não há novos Personal Trainers a aguardar confirmação neste momento.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-2.5">
+            {pending.map((acc) => (
+              <div
+                key={acc.uid}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#EAB308]/40 bg-[#242429] p-3.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-[#F4F4F5]">
+                    {acc.displayName || 'Personal Trainer'}
+                  </p>
+                  <p className="truncate text-xs text-[#A1A1AA]">{acc.email}</p>
+                  {acc.requestedAtMillis > 0 && (
+                    <p className="mt-0.5 text-[11px] text-[#FACC15]">
+                      Registado em {formatShortDate(acc.requestedAtMillis)} ·{' '}
+                      {formatTimeAgo(acc.requestedAtMillis)}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <GoldButton
+                    disabled={busyUid === acc.uid}
+                    onClick={() => handleReview(acc, 'APPROVED')}
+                  >
+                    <Check className="h-4 w-4" />
+                    Confirmar PT
+                  </GoldButton>
+                  <button
+                    type="button"
+                    disabled={busyUid === acc.uid}
+                    onClick={() => handleReview(acc, 'REJECTED')}
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[#EF4444]/40 bg-[#3B1518] px-3 py-2 text-xs font-bold text-[#FCA5A5] hover:bg-[#521C20] disabled:opacity-50"
+                  >
+                    <UserX className="h-4 w-4" />
+                    Recusar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </BrandCard>
+
+      <BrandCard>
+        <h3 className="text-sm font-bold text-[#F4F4F5]">
+          Personal Trainers Registados ({reviewed.length})
+        </h3>
+        {reviewed.length === 0 ? (
+          <p className="mt-2 text-xs text-[#A1A1AA]">
+            Ainda não existem outros Personal Trainers aprovados ou recusados.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {reviewed.map((acc) => {
+              const approved = acc.status === 'APPROVED';
+              return (
+                <div
+                  key={acc.uid}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#323238] bg-[#242429] p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="text-sm font-bold text-[#F4F4F5]">
+                        {acc.displayName || 'Personal Trainer'}
+                      </p>
+                      <StatusPill tone={approved ? 'green' : 'red'}>
+                        {approved ? 'Aprovado · Sem faturação' : 'Recusado'}
+                      </StatusPill>
+                    </div>
+                    <p className="truncate text-xs text-[#A1A1AA]">{acc.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {approved ? (
+                      <button
+                        type="button"
+                        disabled={busyUid === acc.uid}
+                        onClick={() => handleReview(acc, 'REJECTED')}
+                        className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1.5 text-xs font-bold text-[#FCA5A5] hover:border-[#EF4444]"
+                      >
+                        Revogar acesso
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busyUid === acc.uid}
+                        onClick={() => handleReview(acc, 'APPROVED')}
+                        className="rounded-lg bg-[#EAB308] px-2.5 py-1.5 text-xs font-bold text-[#121214] hover:bg-[#FACC15]"
+                      >
+                        Aprovar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </BrandCard>
     </div>
   );
 };

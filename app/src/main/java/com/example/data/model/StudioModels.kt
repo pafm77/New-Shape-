@@ -6,6 +6,11 @@ import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
 
+const val SUPER_ADMIN_EMAIL = "pafm77pedrinho77@gmail.com"
+
+fun isSuperAdminEmail(email: String?): Boolean =
+    email?.trim()?.lowercase() == SUPER_ADMIN_EMAIL
+
 @Keep
 @IgnoreExtraProperties
 data class ClientRecord(
@@ -154,6 +159,8 @@ data class WorkoutPlanItemRecord(
     val sets: Int = 3,
     val reps: String = "10-12",
     val loadKg: String = "",
+    val lastLoadKg: String = "",
+    val lastLoggedAtMillis: Long = 0L,
     val restSeconds: Int = 90,
     val notes: String = "",
     val orderIndex: Int = 0,
@@ -242,9 +249,48 @@ data class StudioSettingsRecord(
     val whatsappWebMode: Boolean = false,
     val siteBaseUrl: String = "https://newshape.vercel.app",
     val studentPortalCode: String = "",
+    val ptWhatsappPhone: String = "",
     val seeded: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class PtAccountRecord(
+    @DocumentId val id: String = "",
+    val uid: String = "",
+    val email: String = "",
+    val displayName: String = "",
+    val status: String = "PENDING",
+    val isAdmin: Boolean = false,
+    val requestedAtMillis: Long = 0L,
+    val reviewedAtMillis: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class PtNotificationRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val clientId: String = "",
+    val clientName: String = "",
+    val type: String = "ALTERED",
+    val summary: String = "",
+    val weekKey: String = "",
+    val read: Boolean = false,
+    val timestampMillis: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+data class StudentWhatsAppAlertPrompt(
+    val type: String,
+    val title: String,
+    val detail: String,
+    val whatsappMessage: String
 )
 
 fun StudioSettingsRecord.effectiveCutoffMinutes(): Int =

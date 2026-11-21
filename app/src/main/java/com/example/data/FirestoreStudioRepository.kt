@@ -112,6 +112,210 @@ class FirestoreStudioRepository(
     fun observePhysicalAssessments(uid: String): Flow<List<PhysicalAssessmentRecord>> =
         observeSubcollection<PhysicalAssessmentRecord>(uid, "physical_assessments") { it.sortedBy { a -> a.dateMillis } }
 
+    fun observePtNotifications(uid: String): Flow<List<PtNotificationRecord>> =
+        observeSubcollection<PtNotificationRecord>(uid, "pt_notifications") { it.sortedByDescending { n -> n.timestampMillis } }
+
+    fun observeOwnPtAccount(uid: String): Flow<PtAccountRecord?> = flow {
+        require(uid.isNotBlank()) { "UID inválido." }
+        val docRef = db.collection("pt_accounts").document(uid)
+        emitAll(
+            docRef.snapshots()
+                .map { snap ->
+                    if (snap.exists()) snap.toObject(PtAccountRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    else null
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val toLog = firestoreError ?: (error as? Exception)
+                    if (toLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(toLog, OperationType.GET, docRef.path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeAllPtAccounts(): Flow<List<PtAccountRecord>> = flow {
+        val colRef = db.collection("pt_accounts")
+        emitAll(
+            colRef.snapshots()
+                .map { snapshot ->
+                    val list = snapshot.toObjects(PtAccountRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    list.sortedWith(
+                        compareBy<PtAccountRecord> {
+                            when (it.status) {
+                                "PENDING" -> 0
+                                "APPROVED" -> 1
+                                else -> 2
+                            }
+                        }.thenByDescending { it.requestedAtMillis }
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val toLog = firestoreError ?: (error as? Exception)
+                    if (toLog != null) {
+                        handleFirestoreError(toLog, OperationType.LIST, "pt_accounts")
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun ensurePtAccount(uid: String, email: String, displayName: String): Result<PtAccountRecord> = try {
+        val currentUid = requireUserId()
+        check(currentUid == uid)
+        val docRef = db.collection("pt_accounts").document(uid)
+        val snap = docRef.get().await()
+        if (snap.exists()) {
+            val existing = snap.toObject(PtAccountRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                ?: PtAccountRecord(id = uid, uid = uid, email = email, displayName = displayName)
+            Result.success(existing)
+        } else {
+            val cleanEmail = email.trim().lowercase().ifBlank { "$uid@newshape.local" }.take(160)
+            val cleanName = displayName.trim().ifBlank { cleanEmail.substringBefore("@") }.take(120)
+            val admin = isSuperAdminEmail(cleanEmail)
+            val status = if (admin) "APPROVED" else "PENDING"
+            val now = System.currentTimeMillis()
+            val reviewedAt = if (admin) now else 0L
+            docRef.set(
+                mapOf(
+                    "uid" to uid,
+                    "email" to cleanEmail,
+                    "displayName" to cleanName,
+                    "status" to status,
+                    "isAdmin" to admin,
+                    "requestedAtMillis" to now,
+                    "reviewedAtMillis" to reviewedAt,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(
+                PtAccountRecord(
+                    id = uid,
+                    uid = uid,
+                    email = cleanEmail,
+                    displayName = cleanName,
+                    status = status,
+                    isAdmin = admin,
+                    requestedAtMillis = now,
+                    reviewedAtMillis = reviewedAt
+                )
+            )
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "pt_accounts/$uid")
+        Result.failure(e)
+    }
+
+    suspend fun reviewPtAccount(ptUid: String, status: String): Result<Unit> = try {
+        requireUserId()
+        val safeStatus = if (status == "APPROVED") "APPROVED" else "REJECTED"
+        db.collection("pt_accounts").document(ptUid).update(
+            mapOf(
+                "status" to safeStatus,
+                "reviewedAtMillis" to System.currentTimeMillis(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "pt_accounts/$ptUid")
+        Result.failure(e)
+    }
+
+    suspend fun createPtNotification(
+        clientId: String,
+        clientName: String,
+        type: String,
+        summary: String,
+        weekKey: String
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        val safeType = when (type) {
+            "CANCELLED", "ALTERED", "UNAVAILABLE" -> type
+            else -> "ALTERED"
+        }
+        userDoc(uid).collection("pt_notifications").document().set(
+            mapOf(
+                "userId" to uid,
+                "clientId" to clientId.take(128),
+                "clientName" to clientName.trim().ifBlank { "Aluno" }.take(100),
+                "type" to safeType,
+                "summary" to summary.trim().ifBlank { "Alteração de horário" }.take(400),
+                "weekKey" to weekKey.take(30),
+                "read" to false,
+                "timestampMillis" to System.currentTimeMillis(),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/pt_notifications")
+        Result.failure(e)
+    }
+
+    suspend fun markPtNotificationRead(notificationId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("pt_notifications").document(notificationId).update(
+            mapOf(
+                "read" to true,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/pt_notifications/$notificationId")
+        Result.failure(e)
+    }
+
+    suspend fun markAllPtNotificationsRead(unreadIds: List<String>): Result<Unit> = try {
+        val uid = requireUserId()
+        unreadIds.distinct().chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { id ->
+                batch.update(
+                    userDoc(uid).collection("pt_notifications").document(id),
+                    mapOf("read" to true, "updatedAt" to FieldValue.serverTimestamp())
+                )
+            }
+            batch.commit().await()
+        }
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/pt_notifications")
+        Result.failure(e)
+    }
+
+    suspend fun deletePtNotification(notificationId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("pt_notifications").document(notificationId).delete().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/pt_notifications/$notificationId")
+        Result.failure(e)
+    }
+
     fun observeSettings(uid: String): Flow<StudioSettingsRecord?> = flow {
         require(uid.isNotBlank()) { "UID inválido." }
         val docRef = userDoc(uid).collection("settings").document("studio")
@@ -136,7 +340,7 @@ class FirestoreStudioRepository(
     }
 
     // --- Initial Seed (Idempotent) ---
-    suspend fun ensureSeeded(uid: String): Result<Unit> = try {
+    suspend fun ensureSeeded(uid: String, isSuperAdmin: Boolean = false): Result<Unit> = try {
         val currentUid = requireUserId()
         check(currentUid == uid)
         val settingsRef = userDoc(uid).collection("settings").document("studio")
@@ -401,31 +605,33 @@ class FirestoreStudioRepository(
                 )
             }
 
-            // Payments
+            // Payments (only seeded for Super-Admin PT due to billing access restriction)
             val dayMs = 86_400_000L
-            val samplePayments = listOf(
-                listOf("pay_1", "client_ana", "2026-11", "Nov 2026", 120.0, now - dayMs * 5, "MbWay"),
-                listOf("pay_2", "client_bruno", "2026-11", "Nov 2026", 95.0, now - dayMs * 3, "João"),
-                listOf("pay_3", "client_eva", "2026-11", "Nov 2026", 120.0, now - dayMs * 2, "MbWay"),
-                listOf("pay_4", "client_ana", "2026-10", "Out 2026", 120.0, now - dayMs * 35, "MbWay"),
-                listOf("pay_5", "client_bruno", "2026-10", "Out 2026", 95.0, now - dayMs * 34, "João"),
-                listOf("pay_6", "client_filipe", "2026-10", "Out 2026", 110.0, now - dayMs * 33, "Dinheiro"),
-                listOf("pay_7", "client_ana", "2026-09", "Set 2026", 120.0, now - dayMs * 65, "MbWay"),
-                listOf("pay_8", "client_eva", "2026-09", "Set 2026", 120.0, now - dayMs * 62, "Dinheiro")
-            )
-            samplePayments.forEach { p ->
-                writes += userDoc(uid).collection("payments").document(p[0] as String) to mapOf(
-                    "userId" to uid,
-                    "clientId" to (p[1] as String),
-                    "monthYear" to (p[2] as String),
-                    "monthLabel" to (p[3] as String),
-                    "amountEur" to (p[4] as Double),
-                    "paid" to true,
-                    "paidAtMillis" to (p[5] as Long),
-                    "note" to (p[6] as String),
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
+            if (isSuperAdmin) {
+                val samplePayments = listOf(
+                    listOf("pay_1", "client_ana", "2026-11", "Nov 2026", 120.0, now - dayMs * 5, "MbWay"),
+                    listOf("pay_2", "client_bruno", "2026-11", "Nov 2026", 95.0, now - dayMs * 3, "João"),
+                    listOf("pay_3", "client_eva", "2026-11", "Nov 2026", 120.0, now - dayMs * 2, "MbWay"),
+                    listOf("pay_4", "client_ana", "2026-10", "Out 2026", 120.0, now - dayMs * 35, "MbWay"),
+                    listOf("pay_5", "client_bruno", "2026-10", "Out 2026", 95.0, now - dayMs * 34, "João"),
+                    listOf("pay_6", "client_filipe", "2026-10", "Out 2026", 110.0, now - dayMs * 33, "Dinheiro"),
+                    listOf("pay_7", "client_ana", "2026-09", "Set 2026", 120.0, now - dayMs * 65, "MbWay"),
+                    listOf("pay_8", "client_eva", "2026-09", "Set 2026", 120.0, now - dayMs * 62, "Dinheiro")
                 )
+                samplePayments.forEach { p ->
+                    writes += userDoc(uid).collection("payments").document(p[0] as String) to mapOf(
+                        "userId" to uid,
+                        "clientId" to (p[1] as String),
+                        "monthYear" to (p[2] as String),
+                        "monthLabel" to (p[3] as String),
+                        "amountEur" to (p[4] as Double),
+                        "paid" to true,
+                        "paidAtMillis" to (p[5] as Long),
+                        "note" to (p[6] as String),
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                }
             }
 
             // Fidelizações
@@ -577,6 +783,7 @@ class FirestoreStudioRepository(
                 "whatsappWebMode" to false,
                 "siteBaseUrl" to "https://newshape.vercel.app",
                 "studentPortalCode" to generatePortalCode(),
+                "ptWhatsappPhone" to "",
                 "seeded" to true,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -1467,14 +1674,25 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
-    suspend fun updateWorkoutPlanItemLoad(itemId: String, loadKg: String): Result<Unit> = try {
+    suspend fun updateWorkoutPlanItemLoad(
+        itemId: String,
+        loadKg: String,
+        previousLoadKg: String? = null
+    ): Result<Unit> = try {
         val uid = requireUserId()
-        userDoc(uid).collection("workout_plan_items").document(itemId).update(
-            mapOf(
-                "loadKg" to loadKg.trim().take(40),
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-        ).await()
+        val cleanLoad = loadKg.trim().take(40)
+        val cleanPrev = previousLoadKg?.trim()?.take(40).orEmpty()
+        val payload = mutableMapOf<String, Any>(
+            "loadKg" to cleanLoad,
+            "lastLoggedAtMillis" to System.currentTimeMillis(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (cleanPrev.isNotBlank() && cleanPrev != cleanLoad) {
+            payload["lastLoadKg"] = cleanPrev
+        } else if (cleanPrev.isBlank() && cleanLoad.isNotBlank()) {
+            payload["lastLoadKg"] = cleanLoad
+        }
+        userDoc(uid).collection("workout_plan_items").document(itemId).update(payload).await()
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
@@ -1705,6 +1923,7 @@ class FirestoreStudioRepository(
                 "whatsappWebMode" to settings.whatsappWebMode,
                 "siteBaseUrl" to settings.siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" }.take(300),
                 "studentPortalCode" to code.take(64),
+                "ptWhatsappPhone" to normalizePortuguesePhone(settings.ptWhatsappPhone),
                 "seeded" to true,
                 "updatedAt" to FieldValue.serverTimestamp()
             )

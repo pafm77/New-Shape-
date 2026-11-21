@@ -1,11 +1,17 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -19,15 +25,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.notifications.WorkoutNotificationHelper
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 import java.util.Calendar
 
 @Composable
@@ -219,10 +228,41 @@ private fun StudentBookingScreen(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val context = LocalContext.current
     val firstName = student.name.trim().split(" ").firstOrNull().orEmpty()
     val publishedWeeks = remember(state.weeks) { state.weeks.filter { it.published } }
     var weekIndex by remember(publishedWeeks.size) { mutableIntStateOf(0) }
     val currentWeek = publishedWeeks.getOrNull(weekIndex.coerceIn(0, (publishedWeeks.size - 1).coerceAtLeast(0)))
+
+    var hasNotifPerm by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
+    var remindersEnabled by remember { mutableStateOf(WorkoutNotificationHelper.isStudentRemindersEnabled(context)) }
+    var leadMinutes by remember { mutableIntStateOf(WorkoutNotificationHelper.getStudentReminderLeadMinutes(context)) }
+    var scheduledCount by remember { mutableIntStateOf(0) }
+
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasNotifPerm = granted
+        if (granted) {
+            remindersEnabled = true
+            WorkoutNotificationHelper.setStudentRemindersEnabled(context, true)
+        }
+    }
+
+    LaunchedEffect(remindersEnabled, hasNotifPerm, leadMinutes, student.id, state.bookings, state.sessions) {
+        if (remindersEnabled && hasNotifPerm) {
+            scheduledCount = WorkoutNotificationHelper.scheduleConfirmedWorkoutReminders(
+                context = context,
+                clientId = student.id,
+                bookings = state.bookings,
+                sessions = state.sessions,
+                leadMinutes = leadMinutes
+            )
+        } else {
+            WorkoutNotificationHelper.cancelScheduledReminders(context)
+            scheduledCount = 0
+        }
+    }
 
     val weekSessions = remember(state.sessions, currentWeek?.weekKey) {
         if (currentWeek == null) emptyList()
@@ -256,6 +296,96 @@ private fun StudentBookingScreen(
             Column {
                 Text("Olá, $firstName! 👋", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
                 Text("Escolhe os teus treinos da semana", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            }
+        }
+
+        // Push Training Reminder Card
+        item {
+            BrandCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.NotificationsActive,
+                                contentDescription = "Lembretes de treino",
+                                tint = NewShapeGoldBright,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text("Lembretes de Treino", style = MaterialTheme.typography.titleSmall, color = NewShapeGoldBright)
+                        }
+                        Text(
+                            text = if (remindersEnabled && hasNotifPerm) {
+                                if (scheduledCount > 0) "$scheduledCount lembrete(s) agendado(s) para os teus treinos confirmados"
+                                else "Ativo · Agenda automaticamente os teus próximos treinos confirmados"
+                            } else {
+                                "Recebe uma notificação antes de cada treino confirmado"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    }
+                    Switch(
+                        checked = remindersEnabled && hasNotifPerm,
+                        onCheckedChange = { enable ->
+                            if (enable && !hasNotifPerm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                remindersEnabled = enable
+                                WorkoutNotificationHelper.setStudentRemindersEnabled(context, enable)
+                            }
+                        },
+                        modifier = Modifier.testTag("student_reminders_switch"),
+                        colors = SwitchDefaults.colors(checkedThumbColor = TextOnGold, checkedTrackColor = NewShapeGold)
+                    )
+                }
+
+                if (remindersEnabled && hasNotifPerm) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Avisar antes do treino:", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(15 to "15 min", 30 to "30 min", 60 to "1h", 120 to "2h").forEach { (mins, label) ->
+                            FilterChip(
+                                selected = leadMinutes == mins,
+                                onClick = {
+                                    leadMinutes = mins
+                                    WorkoutNotificationHelper.setStudentReminderLeadMinutes(context, mins)
+                                },
+                                label = { Text(label) },
+                                modifier = Modifier.testTag("student_reminder_lead_$mins"),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = NewShapeGold,
+                                    selectedLabelColor = TextOnGold
+                                )
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                WorkoutNotificationHelper.showImmediateNotification(
+                                    context = context,
+                                    channelId = WorkoutNotificationHelper.CHANNEL_REMINDERS,
+                                    title = "Lembrete de treino · New Shape",
+                                    body = "Os teus lembretes de treino estão ativos! Vais ser avisado antes de cada sessão confirmada.",
+                                    notificationId = 8001
+                                )
+                            },
+                            modifier = Modifier.testTag("student_test_reminder_btn")
+                        ) {
+                            Text("Testar", color = NewShapeGoldBright)
+                        }
+                    }
+                }
             }
         }
 
@@ -449,6 +579,71 @@ private fun StudentBookingScreen(
             }
         }
     }
+
+    // Mandatory WhatsApp Handoff Modal when Student Cancels or Modifies Schedule
+    state.pendingWhatsAppPrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissWhatsAppPrompt() },
+            containerColor = CharcoalSurface,
+            icon = {
+                Icon(
+                    Icons.Default.WarningAmber,
+                    contentDescription = "Avisar o PT pelo WhatsApp",
+                    tint = NewShapeGoldBright,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(prompt.title, color = TextPrimaryDark, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(prompt.detail, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                    Surface(
+                        color = ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, HairlineBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = prompt.whatsappMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextPrimaryDark,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    if (state.settings.ptWhatsappPhone.isBlank()) {
+                        Text(
+                            text = "Dica: ao abrir o WhatsApp, escolhe o contacto do teu PT na lista para enviar esta mensagem.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NewShapeGold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                GoldPrimaryButton(
+                    text = "Enviar pelo WhatsApp",
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    onClick = {
+                        openWhatsApp(
+                            context = context,
+                            phone9Digits = state.settings.ptWhatsappPhone.ifBlank { null },
+                            message = prompt.whatsappMessage,
+                            useWeb = state.settings.whatsappWebMode
+                        )
+                        viewModel.dismissWhatsAppPrompt()
+                    },
+                    testTag = "student_whatsapp_notify_pt_btn"
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissWhatsAppPrompt() }) {
+                    Text("Fechar", color = TextSecondaryDark)
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -460,6 +655,17 @@ private fun StudentWorkoutScreen(
     val plans = remember(state.workoutPlans, student.id) {
         state.workoutPlans.filter { it.clientId == student.id }
     }
+    var executingPlanId by remember { mutableStateOf<String?>(null) }
+    var completedExerciseIds by remember(executingPlanId) { mutableStateOf<Set<String>>(emptySet()) }
+    var restSecondsLeft by remember { mutableIntStateOf(0) }
+    var restExerciseName by remember { mutableStateOf("") }
+
+    LaunchedEffect(restSecondsLeft) {
+        if (restSecondsLeft > 0) {
+            delay(1000L)
+            restSecondsLeft -= 1
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -468,7 +674,46 @@ private fun StudentWorkoutScreen(
     ) {
         item {
             Text("Os Meus Planos de Treino", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-            Text("Podes registar e atualizar a tua carga (kg) em cada exercício", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            Text(
+                "Inicia o treino para ver a carga do último treino, cronómetro de descanso e registar novas cargas (kg)",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondaryDark
+            )
+        }
+
+        if (restSecondsLeft > 0) {
+            item {
+                Surface(
+                    color = NewShapeGoldMuted,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.5.dp, NewShapeGold),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Descanso em curso", style = MaterialTheme.typography.labelMedium, color = NewShapeGoldBright)
+                            Text(
+                                text = "${restSecondsLeft}s · $restExerciseName",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimaryDark
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { restSecondsLeft += 15 }) {
+                                Text("+15s", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                            }
+                            TextButton(onClick = { restSecondsLeft = 0 }) {
+                                Text("Parar", color = DangerRed)
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (plans.isEmpty()) {
@@ -482,12 +727,68 @@ private fun StudentWorkoutScreen(
         } else {
             items(plans, key = { it.id }) { plan ->
                 val items = state.workoutPlanItems.filter { it.planId == plan.id }.sortedBy { it.orderIndex }
+                val isExecuting = executingPlanId == plan.id
+                val doneCount = items.count { it.id in completedExerciseIds }
+
                 BrandCard(highlightBorder = true) {
-                    Text(plan.title, style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
-                    if (plan.splitLabel.isNotBlank()) {
-                        Text(plan.splitLabel, style = MaterialTheme.typography.bodySmall, color = NewShapeGoldBright)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(plan.title, style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                            if (plan.splitLabel.isNotBlank()) {
+                                Text(plan.splitLabel, style = MaterialTheme.typography.bodySmall, color = NewShapeGoldBright)
+                            }
+                        }
+                        if (items.isNotEmpty()) {
+                            if (isExecuting) {
+                                StatusPill(
+                                    text = "$doneCount/${items.size} feitos",
+                                    textColor = ConfirmedGreen,
+                                    containerColor = ConfirmedGreenContainer
+                                )
+                            } else {
+                                GoldPrimaryButton(
+                                    text = "Executar",
+                                    icon = Icons.Default.PlayArrow,
+                                    onClick = {
+                                        executingPlanId = plan.id
+                                        completedExerciseIds = emptySet()
+                                    },
+                                    testTag = "student_start_workout_${plan.id}"
+                                )
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(10.dp))
+
+                    if (isExecuting) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Modo Execução ativo · Carga do último treino visível em cada exercício",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ConfirmedGreen,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = {
+                                    executingPlanId = null
+                                    restSecondsLeft = 0
+                                },
+                                modifier = Modifier.testTag("student_finish_workout_${plan.id}")
+                            ) {
+                                Text("Terminar", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
                     HorizontalDivider(color = HairlineBorder)
                     if (items.isEmpty()) {
                         Spacer(Modifier.height(8.dp))
@@ -497,8 +798,25 @@ private fun StudentWorkoutScreen(
                             StudentExerciseLoadRow(
                                 index = idx + 1,
                                 item = exItem,
+                                isExecuting = isExecuting,
+                                isCompleted = exItem.id in completedExerciseIds,
+                                onToggleComplete = {
+                                    completedExerciseIds = if (exItem.id in completedExerciseIds) {
+                                        completedExerciseIds - exItem.id
+                                    } else {
+                                        completedExerciseIds + exItem.id
+                                    }
+                                },
+                                onStartRest = {
+                                    restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
+                                    restExerciseName = exItem.exerciseName
+                                },
                                 onSaveLoad = { newLoad ->
-                                    viewModel.updateWorkoutPlanItemLoad(exItem.id, newLoad)
+                                    viewModel.updateWorkoutPlanItemLoad(
+                                        itemId = exItem.id,
+                                        loadKg = newLoad,
+                                        previousLoadKg = exItem.loadKg
+                                    )
                                 }
                             )
                             if (idx < items.lastIndex) HorizontalDivider(color = HairlineBorder.copy(alpha = 0.5f))
@@ -514,11 +832,18 @@ private fun StudentWorkoutScreen(
 private fun StudentExerciseLoadRow(
     index: Int,
     item: WorkoutPlanItemRecord,
+    isExecuting: Boolean,
+    isCompleted: Boolean,
+    onToggleComplete: () -> Unit,
+    onStartRest: () -> Unit,
     onSaveLoad: (String) -> Unit
 ) {
     var loadInput by remember(item.id, item.loadKg) { mutableStateOf(item.loadKg) }
     val normalizedTrim = loadInput.trim()
     val hasChanges = normalizedTrim != item.loadKg.trim()
+
+    val lastWorkoutLoad = item.lastLoadKg.ifBlank { item.loadKg }
+    val lastDateSuffix = if (item.lastLoggedAtMillis > 0L) " · ${formatShortDate(item.lastLoggedAtMillis)}" else ""
 
     Column(
         modifier = Modifier
@@ -526,16 +851,103 @@ private fun StudentExerciseLoadRow(
             .padding(vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = "$index. ${item.exerciseName}",
-            style = MaterialTheme.typography.titleSmall,
-            color = TextPrimaryDark
-        )
-        Text(
-            text = "${item.sets} séries × ${item.reps} · Descanso ${item.restSeconds}s",
-            style = MaterialTheme.typography.bodySmall,
-            color = NewShapeGold
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "$index. ${item.exerciseName}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (isCompleted) ConfirmedGreen else TextPrimaryDark
+                )
+                Text(
+                    text = "${item.sets} séries × ${item.reps} · Descanso ${item.restSeconds}s",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NewShapeGold
+                )
+            }
+            if (isExecuting) {
+                IconButton(
+                    onClick = onToggleComplete,
+                    modifier = Modifier.testTag("student_done_ex_${item.id}")
+                ) {
+                    Icon(
+                        imageVector = if (isCompleted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = if (isCompleted) "Exercício concluído" else "Marcar exercício concluído",
+                        tint = if (isCompleted) ConfirmedGreen else TextSecondaryDark
+                    )
+                }
+            }
+        }
+
+        // Last Workout Load Display Box
+        Surface(
+            color = if (isExecuting) NewShapeGoldMuted else ElevatedCharcoal,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, if (isExecuting) NewShapeGold.copy(alpha = 0.7f) else HairlineBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.History,
+                        contentDescription = "Carga do último treino",
+                        tint = NewShapeGoldBright,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (lastWorkoutLoad.isNotBlank()) {
+                            "Último treino: $lastWorkoutLoad$lastDateSuffix"
+                        } else {
+                            "Último treino: sem carga registada"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (lastWorkoutLoad.isNotBlank()) NewShapeGoldBright else TextSecondaryDark
+                    )
+                }
+                if (isExecuting) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(
+                            onClick = {
+                                val numeric = Regex("(\\d+(?:[.,]\\d+)?)").find(loadInput.ifBlank { lastWorkoutLoad })?.value
+                                    ?.replace(',', '.')?.toDoubleOrNull()
+                                if (numeric != null) {
+                                    val next = numeric + 2.5
+                                    loadInput = if (next % 1.0 == 0.0) "${next.toInt()} kg" else "${String.format("%.1f", next)} kg"
+                                } else {
+                                    loadInput = "2.5 kg"
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.testTag("student_inc_load_${item.id}")
+                        ) {
+                            Text("+2.5 kg", color = NewShapeGoldBright, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
+                        if (item.restSeconds > 0) {
+                            TextButton(
+                                onClick = onStartRest,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("student_rest_timer_${item.id}")
+                            ) {
+                                Text("⏱ ${item.restSeconds}s", color = InfoBlue, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (item.notes.isNotBlank()) {
             Text(item.notes, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
         }
@@ -547,7 +959,7 @@ private fun StudentExerciseLoadRow(
             OutlinedTextField(
                 value = loadInput,
                 onValueChange = { loadInput = it.take(40) },
-                label = { Text("Carga (kg)") },
+                label = { Text(if (isExecuting) "Carga de hoje (kg)" else "Carga (kg)") },
                 placeholder = { Text("ex: 50 kg") },
                 singleLine = true,
                 modifier = Modifier
@@ -557,7 +969,7 @@ private fun StudentExerciseLoadRow(
             )
             GoldPrimaryButton(
                 text = "Guardar",
-                enabled = hasChanges,
+                enabled = hasChanges && normalizedTrim.isNotEmpty(),
                 onClick = {
                     val formatted = if (normalizedTrim.matches(Regex("^\\d+([.,]\\d+)?$"))) {
                         "$normalizedTrim kg"

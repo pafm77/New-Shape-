@@ -25,6 +25,8 @@ import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
 import com.example.data.model.FidelizacaoRecord
 import com.example.data.model.PaymentRecord
+import com.example.data.model.PtAccountRecord
+import com.example.data.model.SUPER_ADMIN_EMAIL
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
@@ -37,46 +39,87 @@ fun PtManagementTab(
     initialSubTab: Int = 0,
     initialChatClientId: String? = null
 ) {
-    var selectedSubTab by remember(initialSubTab) { mutableIntStateOf(initialSubTab) }
+    val subTabs = remember(state.isSuperAdmin, state.pendingPtApprovalsCount) {
+        if (state.isSuperAdmin) {
+            val teamTitle = if (state.pendingPtApprovalsCount > 0) "Equipa PT (${state.pendingPtApprovalsCount})" else "Equipa PT"
+            listOf("FINANCES" to "Finanças", "FIDELIZACOES" to "Fidelizações", "CHAT" to "Chat", "TEAM" to teamTitle)
+        } else {
+            listOf("FIDELIZACOES" to "Fidelizações", "CHAT" to "Chat")
+        }
+    }
+
+    var selectedSubTab by remember(initialSubTab, state.isSuperAdmin) {
+        mutableIntStateOf(initialSubTab.coerceIn(0, subTabs.lastIndex))
+    }
     var activeChatClientId by remember(initialChatClientId) { mutableStateOf(initialChatClientId) }
 
-    val subTabs = listOf("Finanças", "Fidelizações", "Chat")
+    val safeIndex = selectedSubTab.coerceIn(0, subTabs.lastIndex)
+    val currentKey = subTabs[safeIndex].first
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(
-            selectedTabIndex = selectedSubTab,
-            containerColor = CharcoalSurface,
-            contentColor = NewShapeGold,
-            divider = { HorizontalDivider(color = HairlineBorder) }
-        ) {
-            subTabs.forEachIndexed { idx, title ->
-                Tab(
-                    selected = selectedSubTab == idx,
-                    onClick = {
-                        selectedSubTab = idx
-                        if (idx != 2) activeChatClientId = null
-                    },
-                    modifier = Modifier.testTag("pt_mgmt_subtab_$idx"),
-                    text = {
-                        Text(
-                            text = title,
-                            fontWeight = if (selectedSubTab == idx) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selectedSubTab == idx) NewShapeGold else TextSecondaryDark
-                        )
-                    }
-                )
+        if (subTabs.size > 3) {
+            ScrollableTabRow(
+                selectedTabIndex = safeIndex,
+                containerColor = CharcoalSurface,
+                contentColor = NewShapeGold,
+                edgePadding = 12.dp,
+                divider = { HorizontalDivider(color = HairlineBorder) }
+            ) {
+                subTabs.forEachIndexed { idx, (key, title) ->
+                    Tab(
+                        selected = safeIndex == idx,
+                        onClick = {
+                            selectedSubTab = idx
+                            if (key != "CHAT") activeChatClientId = null
+                        },
+                        modifier = Modifier.testTag("pt_mgmt_subtab_$key"),
+                        text = {
+                            Text(
+                                text = title,
+                                fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
+                                color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
+                            )
+                        }
+                    )
+                }
+            }
+        } else {
+            TabRow(
+                selectedTabIndex = safeIndex,
+                containerColor = CharcoalSurface,
+                contentColor = NewShapeGold,
+                divider = { HorizontalDivider(color = HairlineBorder) }
+            ) {
+                subTabs.forEachIndexed { idx, (key, title) ->
+                    Tab(
+                        selected = safeIndex == idx,
+                        onClick = {
+                            selectedSubTab = idx
+                            if (key != "CHAT") activeChatClientId = null
+                        },
+                        modifier = Modifier.testTag("pt_mgmt_subtab_$key"),
+                        text = {
+                            Text(
+                                text = title,
+                                fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
+                                color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
+                            )
+                        }
+                    )
+                }
             }
         }
 
-        when (selectedSubTab) {
-            0 -> FinancesSection(state = state, viewModel = viewModel)
-            1 -> FidelizacoesSection(state = state, viewModel = viewModel)
-            2 -> PtChatSection(
+        when (currentKey) {
+            "FINANCES" -> if (state.isSuperAdmin) FinancesSection(state = state, viewModel = viewModel)
+            "FIDELIZACOES" -> FidelizacoesSection(state = state, viewModel = viewModel)
+            "CHAT" -> PtChatSection(
                 state = state,
                 viewModel = viewModel,
                 activeChatClientId = activeChatClientId,
                 onSelectClient = { activeChatClientId = it }
             )
+            "TEAM" -> if (state.isSuperAdmin) PtTeamApprovalsSection(state = state, viewModel = viewModel)
         }
     }
 }
@@ -915,6 +958,160 @@ private fun PtChatSection(
                             StatusPill("${clientMsgs.size}", NewShapeGoldBright, NewShapeGoldMuted)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PtTeamApprovalsSection(
+    state: StudioUiState,
+    viewModel: NewShapeViewModel
+) {
+    val pendingAccounts = remember(state.allPtAccounts) { state.allPtAccounts.filter { it.status == "PENDING" } }
+    val reviewedAccounts = remember(state.allPtAccounts) { state.allPtAccounts.filter { it.status != "PENDING" } }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            BrandCard(highlightBorder = true) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.AdminPanelSettings, contentDescription = "Administrador", tint = NewShapeGoldBright)
+                    Text("Gestão da Equipa PT (Admin)", style = MaterialTheme.typography.titleMedium, color = NewShapeGoldBright)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Apenas o administrador ($SUPER_ADMIN_EMAIL) tem acesso à faturação e pode confirmar novos Personal Trainers que se registem na aplicação.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+            }
+        }
+
+        item {
+            Text(
+                text = "Pedidos pendentes (${pendingAccounts.size})",
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimaryDark
+            )
+        }
+
+        if (pendingAccounts.isEmpty()) {
+            item {
+                EmptyStateBox(
+                    icon = Icons.Default.VerifiedUser,
+                    title = "Sem pedidos pendentes",
+                    subtitle = "Quando um novo PT se registar na aplicação, o pedido aparece aqui para aprovares."
+                )
+            }
+        } else {
+            items(pendingAccounts, key = { it.uid }) { pt ->
+                PtAccountApprovalCard(
+                    pt = pt,
+                    onApprove = { viewModel.reviewPtAccount(pt.uid, "APPROVED") },
+                    onReject = { viewModel.reviewPtAccount(pt.uid, "REJECTED") }
+                )
+            }
+        }
+
+        if (reviewedAccounts.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "PTs registados (${reviewedAccounts.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimaryDark
+                )
+            }
+            items(reviewedAccounts, key = { it.uid }) { pt ->
+                PtAccountApprovalCard(
+                    pt = pt,
+                    onApprove = { viewModel.reviewPtAccount(pt.uid, "APPROVED") },
+                    onReject = { viewModel.reviewPtAccount(pt.uid, "REJECTED") }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PtAccountApprovalCard(
+    pt: PtAccountRecord,
+    onApprove: () -> Unit,
+    onReject: () -> Unit
+) {
+    val isPending = pt.status == "PENDING"
+    val isApproved = pt.status == "APPROVED"
+
+    BrandCard(highlightBorder = isPending) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = pt.displayName.ifBlank { pt.email },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimaryDark
+                )
+                Text(pt.email, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                if (pt.requestedAtMillis > 0L) {
+                    Text(
+                        text = "Pedido: ${formatShortDate(pt.requestedAtMillis)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondaryDark
+                    )
+                }
+            }
+            StatusPill(
+                text = when {
+                    pt.isAdmin -> "Admin"
+                    isApproved -> "Aprovado ✓"
+                    isPending -> "Pendente"
+                    else -> "Recusado"
+                },
+                textColor = when {
+                    pt.isAdmin -> TextOnGold
+                    isApproved -> ConfirmedGreen
+                    isPending -> PendingAmber
+                    else -> DangerRed
+                },
+                containerColor = when {
+                    pt.isAdmin -> NewShapeGold
+                    isApproved -> ConfirmedGreenContainer
+                    isPending -> PendingAmberContainer
+                    else -> DangerRedContainer
+                }
+            )
+        }
+
+        if (!pt.isAdmin) {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                if (!isApproved) {
+                    GoldPrimaryButton(
+                        text = "Confirmar PT",
+                        icon = Icons.Default.Check,
+                        onClick = onApprove,
+                        modifier = Modifier.weight(1f),
+                        testTag = "approve_pt_${pt.uid}"
+                    )
+                }
+                if (isPending || isApproved) {
+                    DarkSecondaryButton(
+                        text = if (isApproved) "Revogar acesso" else "Recusar",
+                        icon = Icons.Default.Close,
+                        onClick = onReject,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }

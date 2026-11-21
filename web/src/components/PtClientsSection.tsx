@@ -47,6 +47,7 @@ import {
 
 interface PtClientsSectionProps {
   uid: string;
+  isSuperAdmin: boolean;
   clients: ClientRecord[];
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
@@ -60,6 +61,7 @@ interface PtClientsSectionProps {
 
 export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   uid,
+  isSuperAdmin,
   clients,
   sessions,
   bookings,
@@ -88,6 +90,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
     return (
       <ClientProfileView
         uid={uid}
+        isSuperAdmin={isSuperAdmin}
         client={selectedClient}
         sessions={sessions}
         bookings={bookings.filter((b) => b.clientId === selectedClient.id)}
@@ -212,10 +215,10 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       {!c.active && <StatusPill>Inativo</StatusPill>}
                     </div>
                     <p className="text-xs text-[#A1A1AA]">{formatPhoneDisplay(c.phone)}</p>
-                    {(c.monthlyFeeEur > 0 || c.fidelizacaoMonths > 0) && (
+                    {((isSuperAdmin && c.monthlyFeeEur > 0) || c.fidelizacaoMonths > 0) && (
                       <p className="mt-1 text-xs font-semibold text-[#EAB308]">
                         {[
-                          c.monthlyFeeEur > 0 ? `€${c.monthlyFeeEur.toFixed(0)}/mês` : '',
+                          isSuperAdmin && c.monthlyFeeEur > 0 ? `€${c.monthlyFeeEur.toFixed(0)}/mês` : '',
                           c.fidelizacaoMonths > 0 ? `Fidelização ${c.fidelizacaoMonths}m` : '',
                         ]
                           .filter(Boolean)
@@ -223,23 +226,29 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       </p>
                     )}
                   </div>
-                  <StatusPill tone={monthPay ? 'green' : 'amber'}>
-                    {monthPay ? `Pago €${monthPay.amountEur.toFixed(0)}` : 'Por pagar'}
-                  </StatusPill>
+                  {isSuperAdmin && (
+                    <StatusPill tone={monthPay ? 'green' : 'amber'}>
+                      {monthPay ? `Pago €${monthPay.amountEur.toFixed(0)}` : 'Por pagar'}
+                    </StatusPill>
+                  )}
                 </div>
 
                 <div
                   className="mt-3 flex items-center justify-between border-t border-[#323238] pt-2.5"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    type="button"
-                    onClick={() => setPayTarget(c)}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#EAB308] hover:underline"
-                  >
-                    <CreditCard className="h-3.5 w-3.5" />
-                    {monthPay ? 'Registar outro pagamento' : 'Apontar pagamento'}
-                  </button>
+                  {isSuperAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => setPayTarget(c)}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-[#EAB308] hover:underline"
+                    >
+                      <CreditCard className="h-3.5 w-3.5" />
+                      {monthPay ? 'Registar outro pagamento' : 'Apontar pagamento'}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-[#71717A]">Perfil & Assiduidade</span>
+                  )}
                   <button
                     type="button"
                     onClick={() => setSelectedClientId(c.id)}
@@ -272,7 +281,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         />
       )}
 
-      {payTarget && (
+      {isSuperAdmin && payTarget && (
         <RegisterPaymentModal
           clientName={payTarget.name}
           defaultAmount={payTarget.monthlyFeeEur > 0 ? payTarget.monthlyFeeEur : 120}
@@ -305,6 +314,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
 
 const ClientProfileView: React.FC<{
   uid: string;
+  isSuperAdmin: boolean;
   client: ClientRecord;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
@@ -319,6 +329,7 @@ const ClientProfileView: React.FC<{
   onBanner: (msg: string) => void;
 }> = ({
   uid,
+  isSuperAdmin,
   client,
   sessions,
   bookings,
@@ -627,20 +638,22 @@ const ClientProfileView: React.FC<{
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className={`grid grid-cols-1 ${isSuperAdmin ? 'sm:grid-cols-2' : ''} gap-3`}>
             <div>
               <FieldLabel>Telemóvel WhatsApp</FieldLabel>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
-            <div>
-              <FieldLabel>Valor Mensalidade (€)</FieldLabel>
-              <Input
-                type="number"
-                value={monthlyFee}
-                onChange={(e) => setMonthlyFee(e.target.value)}
-                placeholder="120"
-              />
-            </div>
+            {isSuperAdmin && (
+              <div>
+                <FieldLabel>Valor Mensalidade (€)</FieldLabel>
+                <Input
+                  type="number"
+                  value={monthlyFee}
+                  onChange={(e) => setMonthlyFee(e.target.value)}
+                  placeholder="120"
+                />
+              </div>
+            )}
           </div>
 
           <div>
@@ -701,6 +714,7 @@ const ClientProfileView: React.FC<{
         </div>
       </BrandCard>
 
+      {isSuperAdmin && (
       <BrandCard highlight={!monthPayment}>
         <div className="flex items-center justify-between gap-2">
           <div>
@@ -756,6 +770,7 @@ const ClientProfileView: React.FC<{
           </div>
         )}
       </BrandCard>
+      )}
 
       {fidelizacoes.length > 0 && (
         <BrandCard>
@@ -786,7 +801,7 @@ const ClientProfileView: React.FC<{
         </>
       )}
 
-      {showPay && (
+      {isSuperAdmin && showPay && (
         <RegisterPaymentModal
           clientName={client.name}
           defaultAmount={client.monthlyFeeEur > 0 ? client.monthlyFeeEur : 120}

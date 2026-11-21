@@ -22,7 +22,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import com.example.data.model.*
+import com.example.notifications.WorkoutNotificationHelper
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
@@ -852,6 +859,19 @@ fun MensagensSettingsSection(
     var cutoffMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveCutoffMinutes().toString()) }
     var whatsappWeb by remember(state.settings) { mutableStateOf(state.settings.whatsappWebMode) }
     var siteBaseUrl by remember(state.settings) { mutableStateOf(state.settings.siteBaseUrl) }
+    var ptWhatsappPhone by remember(state.settings) { mutableStateOf(state.settings.ptWhatsappPhone) }
+
+    var hasNotifPermission by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
+    var ptAlertsEnabled by remember { mutableStateOf(WorkoutNotificationHelper.isPtAlertsEnabled(context)) }
+    val ptNotifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasNotifPermission = granted
+        if (granted) {
+            ptAlertsEnabled = true
+            WorkoutNotificationHelper.setPtAlertsEnabled(context, true)
+        }
+    }
 
     val cleanBaseUrl = state.settings.siteBaseUrl.trimEnd('/').ifBlank { "https://newshape.vercel.app" }
     val ptLink = "$cleanBaseUrl/painel"
@@ -1068,6 +1088,22 @@ fun MensagensSettingsSection(
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
+                    value = ptWhatsappPhone,
+                    onValueChange = { ptWhatsappPhone = it.filter { c -> c.isDigit() }.take(9) },
+                    label = { Text("Telemóvel WhatsApp do PT (9 dígitos)") },
+                    supportingText = {
+                        Text(
+                            "Usado quando um aluno cancela ou altera o horário para te enviar aviso pelo WhatsApp.",
+                            color = TextSecondaryDark
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth().testTag("pt_whatsapp_phone_input"),
+                    colors = darkFieldColors()
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
                     value = siteBaseUrl,
                     onValueChange = { siteBaseUrl = it },
                     label = { Text("Endereço do site nos links") },
@@ -1087,12 +1123,73 @@ fun MensagensSettingsSection(
                                 cutoffMinutes = mins,
                                 whatsappWebMode = whatsappWeb,
                                 siteBaseUrl = siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" },
+                                ptWhatsappPhone = ptWhatsappPhone,
                                 seeded = true
                             )
                         )
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "save_studio_settings_btn"
                 )
+            }
+        }
+
+        item {
+            BrandCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Notificações Push (PT)", style = MaterialTheme.typography.titleMedium, color = NewShapeGoldBright)
+                        Text(
+                            "Recebe um alerta imediato no telemóvel sempre que um aluno cancelar ou alterar o horário.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    }
+                    Switch(
+                        checked = ptAlertsEnabled && hasNotifPermission,
+                        onCheckedChange = { enable ->
+                            if (enable && !hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                ptNotifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                ptAlertsEnabled = enable
+                                WorkoutNotificationHelper.setPtAlertsEnabled(context, enable)
+                            }
+                        },
+                        modifier = Modifier.testTag("pt_push_alerts_switch"),
+                        colors = SwitchDefaults.colors(checkedThumbColor = TextOnGold, checkedTrackColor = NewShapeGold)
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        GoldPrimaryButton(
+                            text = "Permitir notificações",
+                            icon = Icons.Default.NotificationsActive,
+                            onClick = { ptNotifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "pt_request_notif_perm_btn"
+                        )
+                    } else {
+                        DarkSecondaryButton(
+                            text = "Testar notificação",
+                            icon = Icons.Default.NotificationsActive,
+                            onClick = {
+                                WorkoutNotificationHelper.showImmediateNotification(
+                                    context = context,
+                                    channelId = WorkoutNotificationHelper.CHANNEL_PT_ALERTS,
+                                    title = "New Shape · Alertas ativos",
+                                    body = "Vais ser notificado sempre que um aluno cancelar ou mudar de horário.",
+                                    notificationId = 9001
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         }
     }

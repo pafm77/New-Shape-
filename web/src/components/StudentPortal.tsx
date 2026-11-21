@@ -1,15 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Bell,
   Calendar,
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock,
   CreditCard,
   Dumbbell,
+  History,
   LogOut,
   MessageCircle,
+  Play,
   Plus,
   Scale,
+  Send,
+  Square,
+  Timer,
   UserCheck,
   Users,
   Utensils,
@@ -34,17 +41,28 @@ import {
 } from '../types/studio';
 import {
   buildRecentMonthOptions,
+  buildWhatsAppUrl,
   formatCutoffLabel,
   formatShortDate,
   getEffectiveCutoffMinutes,
   MEAL_TYPES,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
+import {
+  dispatchLocalPushNotification,
+  formatLeadMinutesLabel,
+  getNotificationPermission,
+  getReminderPreferences,
+  requestNotificationPermission,
+  saveReminderPreferences,
+  scheduleConfirmedWorkoutReminders,
+} from '../services/notificationService';
 import { NewShapeLogo } from './NewShapeLogo';
 import {
   BrandCard,
   EmptyState,
   GoldButton,
+  Modal,
   SecondaryButton,
   StatusPill,
 } from './UiPrimitives';
@@ -106,6 +124,85 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   } | null>(null);
   const [showNewAssessmentModal, setShowNewAssessmentModal] = useState(false);
   const firstName = client.name.trim().split(/\s+/)[0] || client.name;
+
+  // Push / local training reminders
+  const [notifPerm, setNotifPerm] = useState(() => getNotificationPermission());
+  const [reminderEnabled, setReminderEnabled] = useState(() => getReminderPreferences().enabled);
+  const [reminderLeadMins, setReminderLeadMins] = useState(
+    () => getReminderPreferences().leadMinutes
+  );
+
+  // WhatsApp prompt modal after cancelling or modifying schedule
+  const [whatsAppAlertModal, setWhatsAppAlertModal] = useState<{
+    title: string;
+    subtitle: string;
+    message: string;
+  } | null>(null);
+
+  // Active workout execution state (captures last-workout baseline loads per item)
+  const [executingPlanId, setExecutingPlanId] = useState<string | null>(null);
+  const [baselineLoads, setBaselineLoads] = useState<Record<string, string>>({});
+  const [completedItemIds, setCompletedItemIds] = useState<Set<string>>(new Set());
+  const [restSecondsLeft, setRestSecondsLeft] = useState<number>(0);
+  const restIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!reminderEnabled || notifPerm !== 'granted') return;
+    return scheduleConfirmedWorkoutReminders(client.id, bookings, sessions, reminderLeadMins);
+  }, [reminderEnabled, notifPerm, client.id, bookings, sessions, reminderLeadMins]);
+
+  useEffect(() => {
+    if (restSecondsLeft <= 0) {
+      if (restIntervalRef.current) {
+        window.clearInterval(restIntervalRef.current);
+        restIntervalRef.current = null;
+      }
+      return;
+    }
+    if (!restIntervalRef.current) {
+      restIntervalRef.current = window.setInterval(() => {
+        setRestSecondsLeft((prev) => {
+          if (prev <= 1) {
+            if (restIntervalRef.current) {
+              window.clearInterval(restIntervalRef.current);
+              restIntervalRef.current = null;
+            }
+            if (notifPerm === 'granted') {
+              void dispatchLocalPushNotification(
+                'Descanso terminado · New Shape',
+                'Hora da próxima série! Bora 💪',
+                'newshape-rest-timer'
+              );
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (restIntervalRef.current) {
+        window.clearInterval(restIntervalRef.current);
+        restIntervalRef.current = null;
+      }
+    };
+  }, [restSecondsLeft > 0, notifPerm]);
+
+  const startRestTimer = (seconds: number) => {
+    const safeSec = Math.max(10, Math.min(600, seconds || 60));
+    setRestSecondsLeft(safeSec);
+  };
+
+  const startWorkoutExecution = (planId: string, items: WorkoutPlanItemRecord[]) => {
+    const snapshot: Record<string, string> = {};
+    items.forEach((it) => {
+      snapshot[it.id] = (it.loadKg || it.lastLoadKg || '').trim();
+    });
+    setBaselineLoads(snapshot);
+    setCompletedItemIds(new Set());
+    setExecutingPlanId(planId);
+    onBanner('Modo execução iniciado! A carga do último treino está visível em cada exercício.');
+  };
 
   const publishedWeeks = useMemo(
     () => weeks.filter((w) => w.published),
@@ -402,6 +499,112 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     </div>
                   </BrandCard>
 
+                  {/* Training Reminder Push Notification Card */}
+                  <BrandCard>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Bell className="h-4 w-4 text-[#EAB308]" />
+                        <div>
+                          <p className="text-xs sm:text-sm font-bold text-[#F4F4F5]">
+                            Lembretes de Treino (Notificações Push)
+                          </p>
+                          <p className="text-[11px] text-[#A1A1AA]">
+                            Recebe um aviso antes de cada treino confirmado.
+                          </p>
+                        </div>
+                      </div>
+                      {notifPerm === 'granted' && reminderEnabled ? (
+                        <StatusPill tone="green">
+                          Ativo · {formatLeadMinutesLabel(reminderLeadMins)} antes
+                        </StatusPill>
+                      ) : (
+                        <StatusPill tone="neutral">Desativado</StatusPill>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {notifPerm !== 'granted' ? (
+                        <GoldButton
+                          onClick={async () => {
+                            const res = await requestNotificationPermission();
+                            setNotifPerm(res);
+                            if (res === 'granted') {
+                              setReminderEnabled(true);
+                              saveReminderPreferences(true, reminderLeadMins);
+                              onBanner('Lembretes de treino ativados!');
+                            } else {
+                              onBanner('Autoriza as notificações nas definições do browser.');
+                            }
+                          }}
+                        >
+                          <Bell className="h-4 w-4" />
+                          {notifPerm === 'unsupported'
+                            ? 'Indisponível neste browser'
+                            : 'Ativar lembretes push'}
+                        </GoldButton>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = !reminderEnabled;
+                              setReminderEnabled(next);
+                              saveReminderPreferences(next, reminderLeadMins);
+                              onBanner(
+                                next
+                                  ? 'Lembretes de treino ativados!'
+                                  : 'Lembretes de treino desativados.'
+                              );
+                            }}
+                            className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                              reminderEnabled
+                                ? 'border-[#22C55E] bg-[#143521] text-[#86EFAC]'
+                                : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+                            }`}
+                          >
+                            {reminderEnabled ? 'Lembretes ligados ✓' : 'Ligar lembretes'}
+                          </button>
+
+                          {[15, 30, 60, 120].map((mins) => (
+                            <button
+                              key={mins}
+                              type="button"
+                              onClick={() => {
+                                setReminderLeadMins(mins);
+                                setReminderEnabled(true);
+                                saveReminderPreferences(true, mins);
+                                onBanner(
+                                  `Lembrete definido para ${formatLeadMinutesLabel(mins)} antes do treino.`
+                                );
+                              }}
+                              className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                                reminderLeadMins === mins && reminderEnabled
+                                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                                  : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                              }`}
+                            >
+                              {formatLeadMinutesLabel(mins)}
+                            </button>
+                          ))}
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await dispatchLocalPushNotification(
+                                'Lembrete de Treino · New Shape',
+                                `Olá ${firstName}! Os teus lembretes push estão a funcionar 💪`
+                              );
+                              onBanner('Notificação de teste enviada!');
+                            }}
+                            className="rounded-lg border border-[#323238] bg-[#242429] px-2.5 py-1 text-xs font-semibold text-[#FACC15] hover:border-[#EAB308]"
+                          >
+                            Testar
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </BrandCard>
+
                   {weekResponse?.status === 'UNAVAILABLE' && (
                     <div className="rounded-2xl border border-[#F59E0B]/50 bg-[#3B2A10] p-4 text-sm text-[#FDE68A]">
                       Marcaste que <strong>não podes treinar</strong> esta semana. Se mudares de
@@ -528,6 +731,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         fullWidth
                         disabled={!settings.clientsCanEdit}
                         onClick={async () => {
+                          const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+                          const prevIds = new Set(clientWeekBookings.map((b) => b.sessionId));
+                          const removedIds = Array.from(prevIds).filter(
+                            (id) => !draftSessionIds.has(id)
+                          );
+                          const addedIds = Array.from(draftSessionIds).filter(
+                            (id) => !prevIds.has(id)
+                          );
+                          const hadExisting = clientWeekBookings.length > 0;
+                          const hasScheduleChange =
+                            hadExisting && (removedIds.length > 0 || addedIds.length > 0);
+                          const isFullCancel = hadExisting && draftSessionIds.size === 0;
+
                           await repo.submitStudentBookings(
                             uid,
                             activeWeek.weekKey,
@@ -535,7 +751,62 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             draftSessionIds,
                             clientWeekBookings
                           );
-                          onBanner('Marcação enviada ao Personal Trainer!');
+
+                          if (isFullCancel || hasScheduleChange) {
+                            const fmtSessions = (ids: string[]) =>
+                              ids
+                                .map((id) => sessionMap.get(id))
+                                .filter((s): s is TrainingSessionRecord => Boolean(s))
+                                .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
+                                .join(', ');
+
+                            const removedTxt = fmtSessions(removedIds);
+                            const nextTxt = fmtSessions(Array.from(draftSessionIds));
+
+                            const notifType = isFullCancel ? 'CANCELLED' : 'ALTERED';
+                            const summary = isFullCancel
+                              ? `${client.name} cancelou o(s) treino(s) da semana ${activeWeek.label}${
+                                  removedTxt ? ` (${removedTxt})` : ''
+                                }.`
+                              : `${client.name} alterou o horário na semana ${activeWeek.label}.${
+                                  removedTxt ? ` Retirou: ${removedTxt}.` : ''
+                                }${nextTxt ? ` Novo horário: ${nextTxt}.` : ''}`;
+
+                            await repo
+                              .createPtNotification(uid, {
+                                clientId: client.id,
+                                clientName: client.name,
+                                type: notifType,
+                                summary,
+                                weekKey: activeWeek.weekKey,
+                              })
+                              .catch(() => {});
+
+                            const waMsg = isFullCancel
+                              ? `Olá! Sou ${client.name} (New Shape). Tive de cancelar o meu treino da semana ${activeWeek.label}${
+                                  removedTxt ? ` (${removedTxt})` : ''
+                                }. Já atualizei na app!`
+                              : `Olá! Sou ${client.name} (New Shape). Modifiquei o meu horário de treino da semana ${activeWeek.label}.${
+                                  removedTxt ? `\n• Retirado: ${removedTxt}` : ''
+                                }${nextTxt ? `\n• Novo horário: ${nextTxt}` : ''}\nJá atualizei na app!`;
+
+                            setWhatsAppAlertModal({
+                              title: isFullCancel
+                                ? 'Treino cancelado — Avisa o PT no WhatsApp'
+                                : 'Horário modificado — Avisa o PT no WhatsApp',
+                              subtitle:
+                                'O teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
+                              message: waMsg,
+                            });
+                          }
+
+                          onBanner(
+                            isFullCancel
+                              ? 'Treino cancelado e PT notificado!'
+                              : hasScheduleChange
+                              ? 'Alteração de horário enviada e PT notificado!'
+                              : 'Marcação enviada ao Personal Trainer!'
+                          );
                         }}
                       >
                         <Check className="h-4 w-4" />
@@ -548,6 +819,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         fullWidth
                         disabled={!settings.clientsCanEdit}
                         onClick={async () => {
+                          const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+                          const hadExisting = clientWeekBookings.length > 0;
+                          const prevSessionsTxt = clientWeekBookings
+                            .map((b) => sessionMap.get(b.sessionId))
+                            .filter((s): s is TrainingSessionRecord => Boolean(s))
+                            .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
+                            .join(', ');
+
                           await repo.markStudentUnavailable(
                             uid,
                             activeWeek.weekKey,
@@ -555,6 +834,31 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             clientWeekBookings
                           );
                           setDraftSessionIds(new Set());
+
+                          if (hadExisting) {
+                            const summary = `${client.name} cancelou os treinos e marcou indisponibilidade na semana ${activeWeek.label}${
+                              prevSessionsTxt ? ` (${prevSessionsTxt})` : ''
+                            }.`;
+                            await repo
+                              .createPtNotification(uid, {
+                                clientId: client.id,
+                                clientName: client.name,
+                                type: 'UNAVAILABLE',
+                                summary,
+                                weekKey: activeWeek.weekKey,
+                              })
+                              .catch(() => {});
+
+                            setWhatsAppAlertModal({
+                              title: 'Treinos cancelados — Avisa o PT no WhatsApp',
+                              subtitle:
+                                'O teu PT foi notificado na app de que não podes treinar esta semana. Envia-lhe a mensagem pelo WhatsApp.',
+                              message: `Olá! Sou ${client.name} (New Shape). Esta semana (${activeWeek.label}) não vou conseguir treinar e cancelei a minha marcação${
+                                prevSessionsTxt ? ` (${prevSessionsTxt})` : ''
+                              } na app.`,
+                            });
+                          }
+
                           onBanner('Registado: indisponível esta semana.');
                         }}
                       >
@@ -572,9 +876,28 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               <div>
                 <h2 className="text-xl font-bold text-[#F4F4F5]">Os Teus Planos de Treino</h2>
                 <p className="text-xs text-[#A1A1AA]">
-                  Prescritos pelo teu Personal Trainer · Regista a carga (kg) que usas em cada exercício
+                  Inicia o treino para veres a carga do último treino em cada exercício, usar o temporizador de descanso e registar a carga de hoje.
                 </p>
               </div>
+
+              {restSecondsLeft > 0 && (
+                <div className="sticky top-16 z-20 flex items-center justify-between gap-3 rounded-2xl border border-[#EAB308] bg-[#3D3314] px-4 py-3 shadow-lg">
+                  <div className="flex items-center gap-2.5">
+                    <Timer className="h-5 w-5 text-[#FACC15]" />
+                    <div>
+                      <p className="text-xs font-semibold text-[#FACC15]">Descanso em curso</p>
+                      <p className="text-xl font-extrabold text-white">
+                        {Math.floor(restSecondsLeft / 60)}:
+                        {String(restSecondsLeft % 60).padStart(2, '0')}
+                      </p>
+                    </div>
+                  </div>
+                  <SecondaryButton onClick={() => setRestSecondsLeft(0)}>
+                    Saltar descanso
+                  </SecondaryButton>
+                </div>
+              )}
+
               {clientPlans.length === 0 ? (
                 <EmptyState
                   icon={<Dumbbell className="h-6 w-6" />}
@@ -586,24 +909,85 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   const items = workoutPlanItems
                     .filter((i) => i.planId === plan.id)
                     .sort((a, b) => a.orderIndex - b.orderIndex);
+                  const isExecuting = executingPlanId === plan.id;
+                  const doneCount = items.filter((i) => completedItemIds.has(i.id)).length;
+
                   return (
                     <BrandCard key={plan.id} highlight>
-                      <h3 className="text-base font-bold text-[#FACC15]">{plan.title}</h3>
-                      {plan.splitLabel && (
-                        <p className="text-xs text-[#A1A1AA]">{plan.splitLabel}</p>
-                      )}
-                      <div className="mt-3 space-y-2.5 border-t border-[#323238] pt-3">
-                        {items.map((item, idx) => (
-                          <StudentExerciseLoadCard
-                            key={item.id}
-                            index={idx}
-                            item={item}
-                            onSaveLoad={async (newLoad) => {
-                              await repo.updateWorkoutPlanItemLoad(uid, item.id, newLoad);
-                              onBanner(`Carga de "${item.exerciseName}" atualizada!`);
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h3 className="text-base font-bold text-[#FACC15]">{plan.title}</h3>
+                          {plan.splitLabel && (
+                            <p className="text-xs text-[#A1A1AA]">{plan.splitLabel}</p>
+                          )}
+                          {isExecuting && (
+                            <p className="mt-1 text-xs font-bold text-[#22C55E]">
+                              Em execução · {doneCount}/{items.length} exercício(s) concluído(s)
+                            </p>
+                          )}
+                        </div>
+                        {isExecuting ? (
+                          <SecondaryButton
+                            onClick={() => {
+                              setExecutingPlanId(null);
+                              setRestSecondsLeft(0);
+                              onBanner('Treino terminado! Bom trabalho 💪');
                             }}
-                          />
-                        ))}
+                          >
+                            <Square className="h-3.5 w-3.5 text-[#EF4444]" />
+                            Terminar treino
+                          </SecondaryButton>
+                        ) : (
+                          <GoldButton
+                            disabled={items.length === 0}
+                            onClick={() => startWorkoutExecution(plan.id, items)}
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                            Executar Treino
+                          </GoldButton>
+                        )}
+                      </div>
+
+                      <div className="mt-3 space-y-2.5 border-t border-[#323238] pt-3">
+                        {items.map((item, idx) => {
+                          const prevLoadReference = isExecuting
+                            ? baselineLoads[item.id] ?? item.lastLoadKg ?? item.loadKg
+                            : item.lastLoadKg || item.loadKg;
+                          return (
+                            <StudentExerciseLoadCard
+                              key={item.id}
+                              index={idx}
+                              item={item}
+                              isExecuting={isExecuting}
+                              isDone={completedItemIds.has(item.id)}
+                              lastWorkoutLoad={prevLoadReference}
+                              onToggleDone={() => {
+                                setCompletedItemIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(item.id)) next.delete(item.id);
+                                  else next.add(item.id);
+                                  return next;
+                                });
+                              }}
+                              onStartRest={() => startRestTimer(item.restSeconds)}
+                              onSaveLoad={async (newLoad) => {
+                                const prevForStorage = (
+                                  baselineLoads[item.id] ||
+                                  item.loadKg ||
+                                  item.lastLoadKg ||
+                                  newLoad
+                                ).trim();
+                                await repo.updateWorkoutPlanItemLoad(
+                                  uid,
+                                  item.id,
+                                  newLoad,
+                                  prevForStorage
+                                );
+                                onBanner(`Carga de "${item.exerciseName}" atualizada!`);
+                              }}
+                            />
+                          );
+                        })}
                       </div>
                     </BrandCard>
                   );
@@ -868,6 +1252,47 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           </button>
         ))}
       </nav>
+
+      {/* WhatsApp Handoff Modal on Cancel / Schedule Change */}
+      {whatsAppAlertModal && (
+        <Modal
+          open
+          title={whatsAppAlertModal.title}
+          subtitle={whatsAppAlertModal.subtitle}
+          onClose={() => setWhatsAppAlertModal(null)}
+        >
+          <div className="space-y-3">
+            <pre className="whitespace-pre-wrap rounded-xl border border-[#323238] bg-[#242429] p-3 text-xs text-[#F4F4F5] font-sans">
+              {whatsAppAlertModal.message}
+            </pre>
+            {!settings.ptWhatsappPhone && (
+              <p className="text-[11px] text-[#F59E0B]">
+                Dica: o WhatsApp vai abrir para escolheres o contacto do teu PT (o PT pode configurar
+                o seu número em Definições).
+              </p>
+            )}
+            <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">
+              <SecondaryButton onClick={() => setWhatsAppAlertModal(null)}>
+                Fechar
+              </SecondaryButton>
+              <GoldButton
+                onClick={() => {
+                  const url = buildWhatsAppUrl(
+                    settings.ptWhatsappPhone || null,
+                    whatsAppAlertModal.message,
+                    settings.whatsappWebMode
+                  );
+                  window.open(url, '_blank', 'noopener,noreferrer');
+                  setWhatsAppAlertModal(null);
+                }}
+              >
+                <Send className="h-4 w-4" />
+                Enviar mensagem pelo WhatsApp
+              </GoldButton>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
@@ -875,8 +1300,22 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 const StudentExerciseLoadCard: React.FC<{
   index: number;
   item: WorkoutPlanItemRecord;
+  isExecuting: boolean;
+  isDone: boolean;
+  lastWorkoutLoad: string;
+  onToggleDone: () => void;
+  onStartRest: () => void;
   onSaveLoad: (newLoad: string) => Promise<void>;
-}> = ({ index, item, onSaveLoad }) => {
+}> = ({
+  index,
+  item,
+  isExecuting,
+  isDone,
+  lastWorkoutLoad,
+  onToggleDone,
+  onStartRest,
+  onSaveLoad,
+}) => {
   const [draft, setDraft] = useState(item.loadKg);
   const [saving, setSaving] = useState(false);
 
@@ -896,6 +1335,11 @@ const StudentExerciseLoadCard: React.FC<{
   const formatted = formatLoadInput(draft);
   const hasChanged = formatted !== item.loadKg.trim();
 
+  const parseNumericLoad = (raw: string): number | null => {
+    const m = raw.replace(',', '.').match(/\d+(\.\d+)?/);
+    return m ? Number(m[0]) : null;
+  };
+
   const handleSave = async () => {
     if (saving || !hasChanged) return;
     setSaving(true);
@@ -906,21 +1350,64 @@ const StudentExerciseLoadCard: React.FC<{
     }
   };
 
+  const lastRef = (lastWorkoutLoad || '').trim();
+  const baseNum = parseNumericLoad(lastRef || item.loadKg);
+
   return (
-    <div className="rounded-xl border border-[#323238] bg-[#242429] p-3 space-y-2.5">
-      <div>
-        <p className="text-sm font-bold text-[#F4F4F5]">
-          {index + 1}. {item.exerciseName}
-        </p>
-        <p className="mt-0.5 text-xs font-semibold text-[#EAB308]">
-          {item.sets} séries × {item.reps}
-          {item.loadKg ? ` · ${item.loadKg}` : ''} · descanso {item.restSeconds}s
-        </p>
-        {item.notes && <p className="mt-1 text-xs text-[#A1A1AA]">{item.notes}</p>}
+    <div
+      className={`rounded-xl border p-3 space-y-2.5 transition ${
+        isDone
+          ? 'border-[#22C55E]/60 bg-[#143521]/40'
+          : isExecuting
+          ? 'border-[#EAB308]/50 bg-[#242429]'
+          : 'border-[#323238] bg-[#242429]'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-[#F4F4F5]">
+            {index + 1}. {item.exerciseName}
+          </p>
+          <p className="mt-0.5 text-xs font-semibold text-[#EAB308]">
+            {item.sets} séries × {item.reps}
+            {item.loadKg ? ` · Atual: ${item.loadKg}` : ''} · descanso {item.restSeconds}s
+          </p>
+          {item.notes && <p className="mt-1 text-xs text-[#A1A1AA]">{item.notes}</p>}
+        </div>
+        {isExecuting && (
+          <button
+            type="button"
+            onClick={onToggleDone}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
+              isDone
+                ? 'border-[#22C55E] bg-[#22C55E] text-[#121214]'
+                : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#22C55E] hover:text-[#22C55E]'
+            }`}
+          >
+            <Check className="h-3.5 w-3.5" />
+            {isDone ? 'Feito' : 'Concluir'}
+          </button>
+        )}
+      </div>
+
+      {/* Carga do Último Treino */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#EAB308]/35 bg-[#3D3314]/45 px-2.5 py-1.5 text-xs">
+        <span className="inline-flex items-center gap-1.5 font-semibold text-[#FACC15]">
+          <History className="h-3.5 w-3.5" />
+          Último treino:{' '}
+          <strong className="text-white">{lastRef || 'Sem registo anterior'}</strong>
+        </span>
+        {item.lastLoggedAtMillis ? (
+          <span className="text-[11px] text-[#A1A1AA]">
+            {formatShortDate(item.lastLoggedAtMillis)}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-[#323238]/70 pt-2">
-        <label className="text-[11px] font-semibold text-[#A1A1AA]">Carga (kg):</label>
+        <label className="text-[11px] font-semibold text-[#A1A1AA]">
+          {isExecuting ? 'Carga hoje (kg):' : 'Carga (kg):'}
+        </label>
         <input
           type="text"
           value={draft}
@@ -932,8 +1419,27 @@ const StudentExerciseLoadCard: React.FC<{
             }
           }}
           placeholder="Ex: 40 kg"
-          className="min-w-[110px] flex-1 rounded-lg border border-[#323238] bg-[#18181B] px-2.5 py-1.5 text-xs font-semibold text-[#F4F4F5] placeholder-[#71717A] outline-none focus:border-[#EAB308]"
+          className="min-w-[100px] flex-1 rounded-lg border border-[#323238] bg-[#18181B] px-2.5 py-1.5 text-xs font-semibold text-[#F4F4F5] placeholder-[#71717A] outline-none focus:border-[#EAB308]"
         />
+        {baseNum !== null && (
+          <button
+            type="button"
+            onClick={() => setDraft(`${baseNum + 2.5} kg`)}
+            className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2 py-1.5 text-[11px] font-bold text-[#FACC15] hover:border-[#EAB308]"
+          >
+            +2.5 kg
+          </button>
+        )}
+        {isExecuting && item.restSeconds > 0 && (
+          <button
+            type="button"
+            onClick={onStartRest}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#323238] bg-[#1B1B1E] px-2 py-1.5 text-[11px] font-bold text-[#A1A1AA] hover:border-[#EAB308] hover:text-white"
+          >
+            <Clock className="h-3 w-3 text-[#EAB308]" />
+            {item.restSeconds}s
+          </button>
+        )}
         <button
           type="button"
           disabled={!hasChanged || saving}

@@ -26,6 +26,12 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isSuperAdmin() {
+      return isSignedIn() &&
+             request.auth.token.email is string &&
+             request.auth.token.email.lower() == 'pafm77pedrinho77@gmail.com';
+    }
+
     function isStudioMember(userId) {
       return isSignedIn() &&
              exists(/databases/$(database)/documents/users/$(userId)/portal_members/$(request.auth.uid));
@@ -136,6 +142,8 @@ service cloud.firestore {
              data.sets is int && data.sets >= 1 && data.sets <= 30 &&
              data.reps is string && data.reps.size() >= 1 && data.reps.size() <= 40 &&
              data.loadKg is string && data.loadKg.size() <= 40 &&
+             (!('lastLoadKg' in data) || (data.lastLoadKg is string && data.lastLoadKg.size() <= 40)) &&
+             (!('lastLoggedAtMillis' in data) || (data.lastLoggedAtMillis is int && data.lastLoggedAtMillis >= 0)) &&
              data.restSeconds is int && data.restSeconds >= 0 && data.restSeconds <= 600 &&
              data.notes is string && data.notes.size() <= 300 &&
              data.orderIndex is int && data.orderIndex >= 0 && data.orderIndex <= 200;
@@ -190,7 +198,29 @@ service cloud.firestore {
              data.whatsappWebMode is bool &&
              data.siteBaseUrl is string && data.siteBaseUrl.size() >= 1 && data.siteBaseUrl.size() <= 300 &&
              (!('studentPortalCode' in data) || (data.studentPortalCode is string && data.studentPortalCode.size() <= 64)) &&
+             (!('ptWhatsappPhone' in data) || (data.ptWhatsappPhone is string && data.ptWhatsappPhone.size() <= 20)) &&
              data.seeded is bool;
+    }
+
+    function isValidPtAccount(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+             data.displayName is string && data.displayName.size() <= 120 &&
+             data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+             data.isAdmin is bool &&
+             data.requestedAtMillis is int && data.requestedAtMillis >= 0 &&
+             data.reviewedAtMillis is int && data.reviewedAtMillis >= 0;
+    }
+
+    function isValidPtNotification(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 100 &&
+             data.type in ['CANCELLED', 'ALTERED', 'UNAVAILABLE'] &&
+             data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 400 &&
+             data.weekKey is string && data.weekKey.size() <= 30 &&
+             data.read is bool &&
+             data.timestampMillis is int && data.timestampMillis >= 0;
     }
 
     function isValidPhysicalAssessment(data) {
@@ -207,6 +237,31 @@ service cloud.firestore {
              data.bmi is number && data.bmi > 0 && data.bmi <= 150 &&
              data.bmrKcal is number && data.bmrKcal >= 0 && data.bmrKcal <= 10000 &&
              data.notes is string && data.notes.size() <= 500;
+    }
+
+    // --- PT Registration & Approval (Admin: pafm77pedrinho77@gmail.com) ---
+    match /pt_accounts/{ptUid} {
+      allow get: if isSuperAdmin() || (isSignedIn() && request.auth.uid == ptUid);
+      allow list: if isSuperAdmin();
+      allow create: if isSignedIn() && request.auth.uid == ptUid && isValidId(ptUid) &&
+                       incoming().uid == request.auth.uid &&
+                       incoming().keys().hasAll(['uid', 'email', 'displayName', 'status', 'isAdmin', 'requestedAtMillis', 'reviewedAtMillis', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['uid', 'email', 'displayName', 'status', 'isAdmin', 'requestedAtMillis', 'reviewedAtMillis', 'createdAt', 'updatedAt']) &&
+                       isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                       isValidPtAccount(incoming()) &&
+                       (
+                         (isSuperAdmin() && incoming().isAdmin == true && incoming().status == 'APPROVED') ||
+                         (!isSuperAdmin() && incoming().isAdmin == false && incoming().status == 'PENDING')
+                       );
+      allow update: if isSuperAdmin() && isValidId(ptUid) &&
+                       isValidPtAccount(incoming()) &&
+                       incoming().uid == existing().uid &&
+                       incoming().email == existing().email &&
+                       incoming().isAdmin == existing().isAdmin &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidTimestamp(incoming().updatedAt) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedAtMillis', 'displayName', 'updatedAt']);
+      allow delete: if isSuperAdmin() && isValidId(ptUid);
     }
 
     // --- User-Scoped Subcollections ---
@@ -310,21 +365,21 @@ service cloud.firestore {
       }
 
       match /payments/{paymentId} {
-        allow get: if canAccessStudio(userId) && isValidId(paymentId);
-        allow list: if canAccessStudio(userId);
-        allow create: if isOwner(userId) && isValidId(paymentId) &&
+        allow get: if ((isOwner(userId) && isSuperAdmin()) || isStudioMember(userId)) && isValidId(paymentId);
+        allow list: if (isOwner(userId) && isSuperAdmin()) || isStudioMember(userId);
+        allow create: if isOwner(userId) && isSuperAdmin() && isValidId(paymentId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientId', 'monthYear', 'monthLabel', 'amountEur', 'paid', 'paidAtMillis', 'note', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['userId', 'clientId', 'monthYear', 'monthLabel', 'amountEur', 'paid', 'paidAtMillis', 'note', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidPayment(incoming());
-        allow update: if isOwner(userId) && isValidId(paymentId) &&
+        allow update: if isOwner(userId) && isSuperAdmin() && isValidId(paymentId) &&
                          isValidPayment(incoming()) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['amountEur', 'paid', 'paidAtMillis', 'note', 'updatedAt']);
-        allow delete: if isOwner(userId) && isValidId(paymentId);
+        allow delete: if isOwner(userId) && isSuperAdmin() && isValidId(paymentId);
       }
 
       match /fidelizacoes/{fidelizacaoId} {
@@ -387,7 +442,7 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(itemId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidWorkoutPlanItem(incoming());
         allow update: if canAccessStudio(userId) && isValidId(itemId) &&
@@ -396,8 +451,8 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          (
-                           (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'updatedAt'])) ||
-                           (isStudioMember(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['loadKg', 'updatedAt']))
+                           (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['sets', 'reps', 'loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'restSeconds', 'notes', 'orderIndex', 'updatedAt'])) ||
+                           (isStudioMember(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'updatedAt']))
                          );
         allow delete: if isOwner(userId) && isValidId(itemId);
       }
@@ -476,7 +531,7 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(settingId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientsCanEdit', 'cutoffHours', 'whatsappWebMode', 'siteBaseUrl', 'seeded', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'clientsCanEdit', 'cutoffHours', 'cutoffMinutes', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientsCanEdit', 'cutoffHours', 'cutoffMinutes', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'ptWhatsappPhone', 'seeded', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidStudioSettings(incoming());
         allow update: if isOwner(userId) && isValidId(settingId) &&
@@ -484,7 +539,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['clientsCanEdit', 'cutoffHours', 'cutoffMinutes', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'seeded', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['clientsCanEdit', 'cutoffHours', 'cutoffMinutes', 'whatsappWebMode', 'siteBaseUrl', 'studentPortalCode', 'ptWhatsappPhone', 'seeded', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(settingId);
       }
 
@@ -530,6 +585,25 @@ service cloud.firestore {
                          isValidTimestamp(incoming().updatedAt) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['clientId', 'updatedAt']);
         allow delete: if isOwner(userId) || (isSignedIn() && request.auth.uid == memberUid);
+      }
+
+      match /pt_notifications/{notificationId} {
+        allow get: if isOwner(userId) && isValidId(notificationId);
+        allow list: if isOwner(userId);
+        allow create: if canAccessStudio(userId) && isValidId(notificationId) &&
+                         incoming().userId == userId &&
+                         incoming().read == false &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'clientName', 'type', 'summary', 'weekKey', 'read', 'timestampMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'clientName', 'type', 'summary', 'weekKey', 'read', 'timestampMillis', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidPtNotification(incoming());
+        allow update: if isOwner(userId) && isValidId(notificationId) &&
+                         isValidPtNotification(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(notificationId);
       }
     }
   }

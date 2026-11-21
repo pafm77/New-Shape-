@@ -12,6 +12,39 @@ export type TrainingType = 'PERSONALIZADO' | 'GRUPO';
 
 export type AttendanceStatus = '' | 'PENDING' | 'PRESENT' | 'ABSENT';
 
+export const SUPER_ADMIN_EMAIL = 'pafm77pedrinho77@gmail.com';
+
+export function isSuperAdminEmail(email?: string | null): boolean {
+  return (email || '').trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+}
+
+export type PtAccountStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface PtAccountRecord {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  status: PtAccountStatus;
+  isAdmin: boolean;
+  requestedAtMillis: number;
+  reviewedAtMillis: number;
+}
+
+export type PtNotificationType = 'CANCELLED' | 'ALTERED' | 'UNAVAILABLE';
+
+export interface PtNotificationRecord {
+  id: string;
+  userId: string;
+  clientId: string;
+  clientName: string;
+  type: PtNotificationType;
+  summary: string;
+  weekKey: string;
+  read: boolean;
+  timestampMillis: number;
+}
+
 export interface ClientRecord {
   id: string;
   userId: string;
@@ -118,6 +151,8 @@ export interface WorkoutPlanItemRecord {
   sets: number;
   reps: string;
   loadKg: string;
+  lastLoadKg?: string;
+  lastLoggedAtMillis?: number;
   restSeconds: number;
   notes: string;
   orderIndex: number;
@@ -177,6 +212,7 @@ export interface StudioSettingsRecord {
   whatsappWebMode: boolean;
   siteBaseUrl: string;
   studentPortalCode?: string;
+  ptWhatsappPhone?: string;
   seeded: boolean;
 }
 

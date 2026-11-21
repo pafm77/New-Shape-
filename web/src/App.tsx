@@ -10,12 +10,16 @@ import {
 } from 'firebase/auth';
 import {
   AlertCircle,
+  Bell,
   Briefcase,
+  Clock,
   Dumbbell,
   Home,
   LogOut,
   RotateCcw,
   Scale,
+  ShieldCheck,
+  Trash2,
   UserCheck,
   Users,
   Utensils,
@@ -34,20 +38,30 @@ import {
   PaymentRecord,
   PendingConfirmationCard,
   PhysicalAssessmentRecord,
+  PtAccountRecord,
+  PtNotificationRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
   WeekResponseRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
+  SUPER_ADMIN_EMAIL,
+  isSuperAdminEmail,
 } from './types/studio';
 import {
   DEFAULT_TEMPLATES,
   DEFAULT_WEB_BASE_URL,
+  formatTimeAgo,
   getMondayOfWeek,
   formatWeekKey,
 } from './data/seedCatalog';
 import * as repo from './services/firestoreRepository';
+import {
+  dispatchLocalPushNotification,
+  getPtAlertsPreference,
+  registerNotificationServiceWorker,
+} from './services/notificationService';
 import { NewShapeLogo } from './components/NewShapeLogo';
 import { AuthRoleScreen, PtEmailSignInScreen } from './components/AuthScreens';
 import { PtHomeSection } from './components/PtHomeSection';
@@ -55,9 +69,9 @@ import { PtClientsSection } from './components/PtClientsSection';
 import { PtTrainingSection } from './components/PtTrainingSection';
 import { PtNutritionSection } from './components/PtNutritionSection';
 import { PtAssessmentSection } from './components/PtAssessmentSection';
-import { PtManagementSection } from './components/PtManagementSection';
+import { ManagementSubTab, PtManagementSection } from './components/PtManagementSection';
 import { StudentPortal } from './components/StudentPortal';
-import { BrandCard, GoldButton } from './components/UiPrimitives';
+import { BrandCard, GoldButton, Modal, SecondaryButton, StatusPill } from './components/UiPrimitives';
 
 type PtMainTab = 'home' | 'clients' | 'training' | 'nutrition' | 'assessment' | 'management';
 
@@ -190,13 +204,19 @@ export function App() {
   const [assessments, setAssessments] = useState<PhysicalAssessmentRecord[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessageRecord[]>([]);
   const [templates, setTemplates] = useState<MessageTemplateRecord[]>([]);
+  const [ptNotifications, setPtNotifications] = useState<PtNotificationRecord[]>([]);
+  const [ownPtAccount, setOwnPtAccount] = useState<PtAccountRecord | null>(null);
+  const [ptAccountReady, setPtAccountReady] = useState(false);
+  const [allPtAccounts, setAllPtAccounts] = useState<PtAccountRecord[]>([]);
   const [settingsState, setSettingsState] = useState<StudioSettingsRecord | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   // UI state
   const [ptTab, setPtTab] = useState<PtMainTab>('home');
   const [jumpClientId, setJumpClientId] = useState<string | undefined>(undefined);
-  const [mgmtSubTab, setMgmtSubTab] = useState<'finance' | 'fidelizacao' | 'chat'>('finance');
+  const [mgmtSubTab, setMgmtSubTab] = useState<ManagementSubTab>('finance');
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const seenNotifIdsRef = useRef<Set<string> | null>(null);
   const [activeMondayMs, setActiveMondayMs] = useState<number>(() =>
     getMondayOfWeek(new Date()).getTime()
   );
@@ -214,6 +234,10 @@ export function App() {
     if (bannerTimerRef.current) window.clearTimeout(bannerTimerRef.current);
     bannerTimerRef.current = window.setTimeout(() => setBannerMsg(null), 4000);
   };
+
+  useEffect(() => {
+    void registerNotificationServiceWorker();
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -305,44 +329,141 @@ export function App() {
   }, [isExternalStudentPortal, portalJoinState, pathInfo.portalPtUid, authUser?.uid]);
 
   const isStudioOwner = Boolean(authUser && studioUid && authUser.uid === studioUid);
+  const isSuperAdmin = useMemo(
+    () => !isExternalStudentPortal && isSuperAdminEmail(authUser?.email),
+    [isExternalStudentPortal, authUser?.email]
+  );
+
+  // Register/sync PT account & approval status (external student portal accounts never touch pt_accounts)
+  useEffect(() => {
+    if (isExternalStudentPortal || !authUser) {
+      setOwnPtAccount(null);
+      setPtAccountReady(true);
+      setAllPtAccounts([]);
+      return;
+    }
+
+    const email = authUser.email || '';
+    if (email.endsWith('@portal.newshape.local')) {
+      setOwnPtAccount(null);
+      setPtAccountReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    setPtAccountReady(false);
+    repo
+      .ensurePtAccount(authUser.uid, email, authUser.displayName || '')
+      .then((acc) => {
+        if (!cancelled) {
+          setOwnPtAccount(acc);
+          setPtAccountReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPtAccountReady(true);
+      });
+
+    const unsubOwn = repo.subscribeOwnPtAccount(
+      authUser.uid,
+      (acc) => {
+        if (!cancelled) {
+          setOwnPtAccount(acc);
+          setPtAccountReady(true);
+        }
+      },
+      () => {}
+    );
+
+    const unsubAll = isSuperAdmin
+      ? repo.subscribeAllPtAccounts(
+          (list) => {
+            if (!cancelled) setAllPtAccounts(list);
+          },
+          () => {}
+        )
+      : () => {};
+
+    return () => {
+      cancelled = true;
+      unsubOwn();
+      unsubAll();
+    };
+  }, [isExternalStudentPortal, authUser, isSuperAdmin]);
+
+  const isPtApproved = isSuperAdmin || ownPtAccount?.status === 'APPROVED';
 
   useEffect(() => {
     if (!studioUid) {
       setDataLoaded(false);
       return;
     }
+    if (isStudioOwner && !isPtApproved) {
+      setDataLoaded(false);
+      return;
+    }
 
     if (isStudioOwner) {
-      repo.ensureSeeded(studioUid).catch((e) => {
+      repo.ensureSeeded(studioUid, isSuperAdmin).catch((e) => {
         showBanner(e?.message || 'Erro ao inicializar base de dados.');
       });
     }
 
-    const unsub = repo.subscribeStudioData(studioUid, {
-      clients: (list) => {
-        setClients(list);
-        setDataLoaded(true);
+    seenNotifIdsRef.current = null;
+    const unsub = repo.subscribeStudioData(
+      studioUid,
+      {
+        clients: (list) => {
+          setClients(list);
+          setDataLoaded(true);
+        },
+        weeks: setWeeks,
+        sessions: setSessions,
+        bookings: setBookings,
+        weekResponses: setWeekResponses,
+        payments: setPayments,
+        fidelizacoes: setFidelizacoes,
+        exercises: setExercises,
+        workoutPlans: setWorkoutPlans,
+        workoutPlanItems: setWorkoutPlanItems,
+        foods: setFoods,
+        nutritionEntries: setNutritionEntries,
+        physicalAssessments: setAssessments,
+        chatMessages: setChatMessages,
+        templates: setTemplates,
+        ptNotifications: (list) => {
+          setPtNotifications(list);
+          if (seenNotifIdsRef.current === null) {
+            seenNotifIdsRef.current = new Set(list.map((n) => n.id));
+            return;
+          }
+          const newUnread = list.filter(
+            (n) => !n.read && !seenNotifIdsRef.current!.has(n.id)
+          );
+          list.forEach((n) => seenNotifIdsRef.current!.add(n.id));
+          if (newUnread.length > 0 && getPtAlertsPreference()) {
+            const first = newUnread[0];
+            const title =
+              first.type === 'CANCELLED'
+                ? 'Treino cancelado · New Shape'
+                : first.type === 'UNAVAILABLE'
+                ? 'Aluno indisponível · New Shape'
+                : 'Horário alterado · New Shape';
+            void dispatchLocalPushNotification(title, first.summary, first.id, '/painel');
+          }
+        },
+        settings: setSettingsState,
+        onError: (err) => showBanner(err.message),
       },
-      weeks: setWeeks,
-      sessions: setSessions,
-      bookings: setBookings,
-      weekResponses: setWeekResponses,
-      payments: setPayments,
-      fidelizacoes: setFidelizacoes,
-      exercises: setExercises,
-      workoutPlans: setWorkoutPlans,
-      workoutPlanItems: setWorkoutPlanItems,
-      foods: setFoods,
-      nutritionEntries: setNutritionEntries,
-      physicalAssessments: setAssessments,
-      chatMessages: setChatMessages,
-      templates: setTemplates,
-      settings: setSettingsState,
-      onError: (err) => showBanner(err.message),
-    });
+      {
+        includePayments: isExternalStudentPortal || isSuperAdmin,
+        includePtNotifications: isStudioOwner,
+        includeTemplates: isStudioOwner,
+      }
+    );
 
     return unsub;
-  }, [studioUid, isStudioOwner]);
+  }, [studioUid, isStudioOwner, isPtApproved, isSuperAdmin, isExternalStudentPortal]);
 
   const effectiveSettings: StudioSettingsRecord = useMemo(
     () =>
@@ -602,6 +723,71 @@ export function App() {
     );
   }
 
+  // PT Registration Approval Gate (non-admin PTs must be approved by pafm77pedrinho77@gmail.com)
+  if (!isExternalStudentPortal && authUser && !isSuperAdmin) {
+    if (!ptAccountReady) {
+      return (
+        <div className="min-h-screen bg-[#121214] flex items-center justify-center text-sm text-[#A1A1AA]">
+          A verificar estado da conta PT...
+        </div>
+      );
+    }
+    const ptStatus = ownPtAccount?.status || 'PENDING';
+    if (ptStatus !== 'APPROVED') {
+      const isRejected = ptStatus === 'REJECTED';
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-[#1A1811] via-[#121214] to-[#121214] px-4 py-10 flex items-center justify-center">
+          <div className="w-full max-w-md space-y-5">
+            <div className="h-1.5 w-24 rounded-full bg-[#EAB308]" />
+            <NewShapeLogo />
+            <BrandCard highlight>
+              <div className="flex items-start gap-3">
+                {isRejected ? (
+                  <AlertCircle className="h-6 w-6 shrink-0 text-[#EF4444] mt-0.5" />
+                ) : (
+                  <Clock className="h-6 w-6 shrink-0 text-[#FACC15] mt-0.5" />
+                )}
+                <div className="space-y-2">
+                  <StatusPill tone={isRejected ? 'red' : 'amber'}>
+                    {isRejected ? 'Acesso recusado' : 'A aguardar confirmação'}
+                  </StatusPill>
+                  <h1 className="text-lg font-bold text-[#F4F4F5]">
+                    {isRejected
+                      ? 'Registo não autorizado'
+                      : 'Registo PT enviado para confirmação'}
+                  </h1>
+                  <p className="text-xs leading-relaxed text-[#A1A1AA]">
+                    {isRejected ? (
+                      <>
+                        O administrador da aplicação New Shape recusou ou revogou o acesso da conta{' '}
+                        <strong className="text-[#F4F4F5]">{authUser.email}</strong>. Contacta o
+                        administrador se precisares de ajuda.
+                      </>
+                    ) : (
+                      <>
+                        A tua conta{' '}
+                        <strong className="text-[#F4F4F5]">{authUser.email}</strong> foi registada
+                        com sucesso e aguarda confirmação do administrador (
+                        <span className="text-[#FACC15]">{SUPER_ADMIN_EMAIL}</span>). Assim que for
+                        aprovada, este ecrã desbloqueia automaticamente.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end">
+                <SecondaryButton fullWidth onClick={handleSignOut}>
+                  <LogOut className="h-4 w-4" />
+                  Terminar sessão
+                </SecondaryButton>
+              </div>
+            </BrandCard>
+          </div>
+        </div>
+      );
+    }
+  }
+
   const activeStudent = studentId ? clients.find((c) => c.id === studentId) || null : null;
   const lockedStudentOnly = isExternalStudentPortal;
 
@@ -717,6 +903,11 @@ export function App() {
     );
   }
 
+  const unreadNotifCount = ptNotifications.filter((n) => !n.read).length;
+  const pendingPtCount = isSuperAdmin
+    ? allPtAccounts.filter((a) => !a.isAdmin && a.status === 'PENDING').length
+    : 0;
+
   const navItems: {
     id: PtMainTab;
     label: string;
@@ -727,13 +918,18 @@ export function App() {
       id: 'home',
       label: 'Início',
       icon: <Home className="h-4 w-4" />,
-      badge: pendingQueue.length,
+      badge: pendingQueue.length + unreadNotifCount,
     },
     { id: 'clients', label: 'Alunos', icon: <Users className="h-4 w-4" /> },
     { id: 'training', label: 'Treino', icon: <Dumbbell className="h-4 w-4" /> },
     { id: 'nutrition', label: 'Nutrição', icon: <Utensils className="h-4 w-4" /> },
     { id: 'assessment', label: 'Avaliação', icon: <Scale className="h-4 w-4" /> },
-    { id: 'management', label: 'Gestão', icon: <Briefcase className="h-4 w-4" /> },
+    {
+      id: 'management',
+      label: 'Gestão',
+      icon: <Briefcase className="h-4 w-4" />,
+      badge: pendingPtCount > 0 ? pendingPtCount : undefined,
+    },
   ];
 
   return (
@@ -743,6 +939,12 @@ export function App() {
         <div className="mb-6">
           <NewShapeLogo compact />
           <p className="mt-2 truncate text-xs text-[#A1A1AA]">{authUser?.email}</p>
+          {isSuperAdmin && (
+            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-[#EAB308]/50 bg-[#3D3314] px-2 py-0.5 text-[10px] font-bold text-[#FACC15]">
+              <ShieldCheck className="h-3 w-3" />
+              Administrador
+            </span>
+          )}
         </div>
 
         <nav className="flex-1 space-y-1">
@@ -779,6 +981,21 @@ export function App() {
         <div className="mt-4 space-y-2 border-t border-[#323238] pt-4">
           <button
             type="button"
+            onClick={() => setShowNotifModal(true)}
+            className="flex w-full items-center justify-between rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
+          >
+            <span className="flex items-center gap-2">
+              <Bell className="h-4 w-4 text-[#EAB308]" />
+              Notificações
+            </span>
+            {unreadNotifCount > 0 && (
+              <span className="rounded-full bg-[#EF4444] px-2 py-0.5 text-[10px] font-extrabold text-white">
+                {unreadNotifCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => setRole('NONE')}
             className="flex w-full items-center gap-2 rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
           >
@@ -802,6 +1019,19 @@ export function App() {
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-[#323238] bg-[#121214]/95 px-4 py-3 backdrop-blur-md lg:hidden">
           <NewShapeLogo compact />
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowNotifModal(true)}
+              aria-label="Notificações"
+              className="relative rounded-xl border border-[#323238] bg-[#1B1B1E] p-1.5 text-[#FACC15]"
+            >
+              <Bell className="h-4 w-4" />
+              {unreadNotifCount > 0 && (
+                <span className="absolute -right-1 -top-1 rounded-full bg-[#EF4444] px-1.5 text-[9px] font-extrabold text-white">
+                  {unreadNotifCount}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setRole('NONE')}
@@ -856,12 +1086,15 @@ export function App() {
           {ptTab === 'home' && (
             <PtHomeSection
               uid={studioUid}
+              isSuperAdmin={isSuperAdmin}
               clients={clients}
               weeks={weeks}
               activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
               weekResponses={weekResponses}
+              ptNotifications={ptNotifications}
+              pendingPtCount={pendingPtCount}
               templates={effectiveTemplates}
               settings={effectiveSettings}
               pendingQueue={pendingQueue}
@@ -873,6 +1106,10 @@ export function App() {
               }}
               onWhatsAppOpened={() => setLockedByWhatsApp(true)}
               onConfirmCard={handleConfirmCard}
+              onJumpToTeamApprovals={() => {
+                setMgmtSubTab('team');
+                setPtTab('management');
+              }}
               onBanner={showBanner}
             />
           )}
@@ -880,6 +1117,7 @@ export function App() {
           {ptTab === 'clients' && (
             <PtClientsSection
               uid={studioUid}
+              isSuperAdmin={isSuperAdmin}
               clients={clients}
               sessions={sessions}
               bookings={bookings}
@@ -935,10 +1173,12 @@ export function App() {
           {ptTab === 'management' && (
             <PtManagementSection
               uid={studioUid}
+              isSuperAdmin={isSuperAdmin}
               clients={clients}
               payments={payments}
               fidelizacoes={fidelizacoes}
               chatMessages={chatMessages}
+              ptAccounts={allPtAccounts}
               initialSubTab={mgmtSubTab}
               initialChatClientId={jumpClientId}
               onBanner={showBanner}
@@ -968,6 +1208,97 @@ export function App() {
           </button>
         ))}
       </nav>
+
+      {/* PT Notifications Modal */}
+      {showNotifModal && (
+        <Modal
+          open
+          title="Notificações do Estúdio"
+          subtitle="Cancelamentos e alterações de horário feitos pelos alunos"
+          onClose={() => setShowNotifModal(false)}
+        >
+          <div className="space-y-3">
+            {unreadNotifCount > 0 && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await repo.markAllPtNotificationsRead(studioUid, ptNotifications);
+                    showBanner('Todas as notificações marcadas como lidas.');
+                  }}
+                  className="text-xs font-bold text-[#FACC15] hover:underline"
+                >
+                  Marcar todas como lidas
+                </button>
+              </div>
+            )}
+            {ptNotifications.length === 0 ? (
+              <p className="py-6 text-center text-xs text-[#A1A1AA]">
+                Sem notificações de cancelamento ou alteração ainda.
+              </p>
+            ) : (
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {ptNotifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className={`rounded-xl border p-3 ${
+                      n.read
+                        ? 'border-[#323238] bg-[#242429]/60'
+                        : 'border-[#EAB308]/60 bg-[#3D3314]/40'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-bold text-[#F4F4F5]">{n.clientName}</span>
+                          <StatusPill
+                            tone={
+                              n.type === 'CANCELLED'
+                                ? 'red'
+                                : n.type === 'UNAVAILABLE'
+                                ? 'amber'
+                                : 'gold'
+                            }
+                          >
+                            {n.type === 'CANCELLED'
+                              ? 'Cancelou'
+                              : n.type === 'UNAVAILABLE'
+                              ? 'Indisponível'
+                              : 'Alterou'}
+                          </StatusPill>
+                          <span className="text-[11px] text-[#A1A1AA]">
+                            {formatTimeAgo(n.timestampMillis)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-[#D4D4D8]">{n.summary}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!n.read && (
+                          <button
+                            type="button"
+                            onClick={() => repo.markPtNotificationRead(studioUid, n.id)}
+                            className="rounded-lg bg-[#EAB308] px-2 py-1 text-[10px] font-bold text-[#121214]"
+                          >
+                            Lida
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => repo.deletePtNotification(studioUid, n.id)}
+                          aria-label="Apagar notificação"
+                          className="rounded-lg p-1 text-[#EF4444] hover:bg-[#3B1518]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {bannerMsg && <FloatingToast message={bannerMsg} />}
     </div>

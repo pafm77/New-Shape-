@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Bell,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   RotateCcw,
   Share2,
+  ShieldCheck,
   Trash2,
   Calendar,
   CheckCheck,
@@ -26,6 +28,7 @@ import {
   ClientRecord,
   MessageTemplateRecord,
   PendingConfirmationCard,
+  PtNotificationRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
@@ -44,6 +47,13 @@ import {
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
 import {
+  dispatchLocalPushNotification,
+  getNotificationPermission,
+  getPtAlertsPreference,
+  requestNotificationPermission,
+  savePtAlertsPreference,
+} from '../services/notificationService';
+import {
   BrandCard,
   EmptyState,
   FieldLabel,
@@ -57,12 +67,15 @@ import {
 
 interface PtHomeSectionProps {
   uid: string;
+  isSuperAdmin: boolean;
   clients: ClientRecord[];
   weeks: TrainingWeekRecord[];
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
   weekResponses: WeekResponseRecord[];
+  ptNotifications: PtNotificationRecord[];
+  pendingPtCount: number;
   templates: MessageTemplateRecord[];
   settings: StudioSettingsRecord;
   pendingQueue: PendingConfirmationCard[];
@@ -70,16 +83,20 @@ interface PtHomeSectionProps {
   onShiftWeek: (delta: number) => void;
   onWhatsAppOpened: () => void;
   onConfirmCard: (card: PendingConfirmationCard) => Promise<void>;
+  onJumpToTeamApprovals: () => void;
   onBanner: (msg: string) => void;
 }
 
 export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   uid,
+  isSuperAdmin,
   clients,
   activeWeek,
   sessions,
   bookings,
   weekResponses,
+  ptNotifications,
+  pendingPtCount,
   templates,
   settings,
   pendingQueue,
@@ -87,6 +104,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   onShiftWeek,
   onWhatsAppOpened,
   onConfirmCard,
+  onJumpToTeamApprovals,
   onBanner,
 }) => {
   const [subTab, setSubTab] = useState<'confirm' | 'weeks' | 'responses' | 'messages'>('confirm');
@@ -128,16 +146,20 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
       {subTab === 'confirm' && (
         <PorConfirmarView
           uid={uid}
+          isSuperAdmin={isSuperAdmin}
           clients={clients}
           activeWeek={activeWeek}
           sessions={sessions}
           bookings={bookings}
           weekResponses={weekResponses}
+          ptNotifications={ptNotifications}
+          pendingPtCount={pendingPtCount}
           templates={templates}
           settings={settings}
           pendingQueue={pendingQueue}
           lockedByWhatsApp={lockedByWhatsApp}
           onJumpToResponses={() => setSubTab('responses')}
+          onJumpToTeamApprovals={onJumpToTeamApprovals}
           onConfirmCard={onConfirmCard}
           onOpenWhatsApp={(phone, msg) => openWa(phone, msg, true)}
           onBanner={onBanner}
@@ -189,36 +211,48 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
 // ---------------- Por Confirmar ----------------
 const PorConfirmarView: React.FC<{
   uid: string;
+  isSuperAdmin: boolean;
   clients: ClientRecord[];
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
   weekResponses: WeekResponseRecord[];
+  ptNotifications: PtNotificationRecord[];
+  pendingPtCount: number;
   templates: MessageTemplateRecord[];
   settings: StudioSettingsRecord;
   pendingQueue: PendingConfirmationCard[];
   lockedByWhatsApp: boolean;
   onJumpToResponses: () => void;
+  onJumpToTeamApprovals: () => void;
   onConfirmCard: (card: PendingConfirmationCard) => Promise<void>;
   onOpenWhatsApp: (phone: string | null, msg: string) => void;
   onBanner: (msg: string) => void;
 }> = ({
   uid,
+  isSuperAdmin,
   clients,
   activeWeek,
   sessions,
   bookings,
   weekResponses,
+  ptNotifications,
+  pendingPtCount,
   templates,
   settings,
   pendingQueue,
   lockedByWhatsApp,
   onJumpToResponses,
+  onJumpToTeamApprovals,
   onConfirmCard,
   onOpenWhatsApp,
   onBanner,
 }) => {
   const activeClients = clients.filter((c) => c.active);
+  const unreadNotifs = useMemo(
+    () => ptNotifications.filter((n) => !n.read),
+    [ptNotifications]
+  );
   const weekBookedIds = useMemo(() => {
     if (!activeWeek) return new Set<string>();
     return new Set(
@@ -243,6 +277,80 @@ const PorConfirmarView: React.FC<{
 
   return (
     <div className="space-y-4">
+      {isSuperAdmin && pendingPtCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#EAB308] bg-[#3D3314] p-4">
+          <div className="flex items-start gap-2.5">
+            <ShieldCheck className="h-5 w-5 shrink-0 text-[#FACC15] mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-[#FACC15]">
+                {pendingPtCount} Personal Trainer(s) a aguardar confirmação
+              </p>
+              <p className="text-xs text-[#F4F4F5]">
+                Confirma ou recusa o registo em Gestão → Equipa PT.
+              </p>
+            </div>
+          </div>
+          <GoldButton onClick={onJumpToTeamApprovals}>Ver pedidos PT</GoldButton>
+        </div>
+      )}
+
+      {unreadNotifs.length > 0 && (
+        <BrandCard highlight>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Bell className="h-4 w-4 text-[#FACC15]" />
+              <h3 className="text-sm font-bold text-[#FACC15]">
+                Alertas de Cancelamento / Alteração ({unreadNotifs.length})
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                await repo.markAllPtNotificationsRead(uid, ptNotifications);
+                onBanner('Alertas marcados como lidos.');
+              }}
+              className="text-xs font-bold text-[#FACC15] hover:underline"
+            >
+              Marcar todos lidos
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {unreadNotifs.slice(0, 5).map((n) => (
+              <div
+                key={n.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#323238] bg-[#242429] p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-bold text-[#F4F4F5]">{n.clientName}</span>
+                    <StatusPill
+                      tone={n.type === 'CANCELLED' ? 'red' : n.type === 'UNAVAILABLE' ? 'amber' : 'gold'}
+                    >
+                      {n.type === 'CANCELLED'
+                        ? 'Cancelou treino'
+                        : n.type === 'UNAVAILABLE'
+                        ? 'Indisponível'
+                        : 'Alterou horário'}
+                    </StatusPill>
+                    <span className="text-[11px] text-[#A1A1AA]">
+                      {formatTimeAgo(n.timestampMillis)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[#D4D4D8]">{n.summary}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => repo.markPtNotificationRead(uid, n.id)}
+                  className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1 text-[11px] font-bold text-[#FACC15] hover:border-[#EAB308]"
+                >
+                  OK
+                </button>
+              </div>
+            ))}
+          </div>
+        </BrandCard>
+      )}
+
       <PortalLinksCard
         uid={uid}
         settings={settings}
@@ -1367,12 +1475,16 @@ const MensagensSettingsView: React.FC<{
   );
   const [whatsappWebMode, setWhatsappWebMode] = useState(settings.whatsappWebMode);
   const [siteBaseUrl, setSiteBaseUrl] = useState(settings.siteBaseUrl);
+  const [ptWhatsappPhone, setPtWhatsappPhone] = useState(settings.ptWhatsappPhone || '');
+  const [notifPerm, setNotifPerm] = useState(() => getNotificationPermission());
+  const [ptAlertsEnabled, setPtAlertsEnabled] = useState(() => getPtAlertsPreference());
 
   useEffect(() => {
     setClientsCanEdit(settings.clientsCanEdit);
     setCutoffMinutes(String(getEffectiveCutoffMinutes(settings)));
     setWhatsappWebMode(settings.whatsappWebMode);
     setSiteBaseUrl(settings.siteBaseUrl);
+    setPtWhatsappPhone(settings.ptWhatsappPhone || '');
   }, [settings]);
 
   const parsedMinutes =
@@ -1492,6 +1604,77 @@ const MensagensSettingsView: React.FC<{
           </div>
 
           <div>
+            <FieldLabel>Telemóvel WhatsApp do PT (para avisos de cancelamento/alteração)</FieldLabel>
+            <Input
+              type="tel"
+              value={ptWhatsappPhone}
+              onChange={(e) => setPtWhatsappPhone(e.target.value)}
+              placeholder="Ex: 912 345 678"
+            />
+            <p className="mt-1 text-[11px] text-[#A1A1AA]">
+              Quando um aluno cancela ou altera o horário, a app abre logo o WhatsApp dirigido a este número.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-[#323238] bg-[#242429]/70 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-[#F4F4F5]">Notificações Push no Browser (PT)</p>
+                <p className="text-xs text-[#A1A1AA]">
+                  Recebe um alerta imediato sempre que um aluno cancelar ou alterar o horário.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={ptAlertsEnabled}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setPtAlertsEnabled(next);
+                  savePtAlertsPreference(next);
+                }}
+                className="h-5 w-5 accent-[#EAB308]"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {notifPerm !== 'granted' ? (
+                <SecondaryButton
+                  onClick={async () => {
+                    const res = await requestNotificationPermission();
+                    setNotifPerm(res);
+                    if (res === 'granted') {
+                      setPtAlertsEnabled(true);
+                      savePtAlertsPreference(true);
+                      onBanner('Notificações push ativadas!');
+                    } else {
+                      onBanner('Permissão de notificações não autorizada neste browser.');
+                    }
+                  }}
+                >
+                  <Bell className="h-4 w-4 text-[#EAB308]" />
+                  {notifPerm === 'unsupported'
+                    ? 'Não suportado neste browser'
+                    : 'Ativar notificações push'}
+                </SecondaryButton>
+              ) : (
+                <>
+                  <StatusPill tone="green">Push ativo ✓</StatusPill>
+                  <SecondaryButton
+                    onClick={async () => {
+                      await dispatchLocalPushNotification(
+                        'New Shape · Teste de Alerta PT',
+                        'As notificações de cancelamento e alteração de horário estão ativas!'
+                      );
+                      onBanner('Notificação de teste enviada.');
+                    }}
+                  >
+                    Testar notificação
+                  </SecondaryButton>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div>
             <FieldLabel>Endereço do site nos links</FieldLabel>
             <Input
               value={siteBaseUrl}
@@ -1510,6 +1693,7 @@ const MensagensSettingsView: React.FC<{
                 cutoffMinutes: parsedMinutes,
                 whatsappWebMode,
                 siteBaseUrl: siteBaseUrl.trim() || window.location.origin || DEFAULT_WEB_BASE_URL,
+                ptWhatsappPhone,
                 seeded: true,
               });
               onBanner('Definições guardadas!');

@@ -29,6 +29,10 @@ import {
   NutritionEntryRecord,
   PaymentRecord,
   PhysicalAssessmentRecord,
+  PtAccountRecord,
+  PtAccountStatus,
+  PtNotificationRecord,
+  PtNotificationType,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingType,
@@ -36,6 +40,7 @@ import {
   WeekResponseRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
+  isSuperAdminEmail,
 } from '../types/studio';
 import {
   buildConsecutiveMonths,
@@ -80,11 +85,27 @@ export interface StudioStreams {
   physicalAssessments: (items: PhysicalAssessmentRecord[]) => void;
   chatMessages: (items: ChatMessageRecord[]) => void;
   templates: (items: MessageTemplateRecord[]) => void;
+  ptNotifications?: (items: PtNotificationRecord[]) => void;
   settings: (item: StudioSettingsRecord | null) => void;
   onError: (err: Error) => void;
 }
 
-export function subscribeStudioData(uid: string, handlers: StudioStreams): () => void {
+export interface StudioSubscriptionOptions {
+  includePayments?: boolean;
+  includePtNotifications?: boolean;
+  includeTemplates?: boolean;
+}
+
+export function subscribeStudioData(
+  uid: string,
+  handlers: StudioStreams,
+  options: StudioSubscriptionOptions = {}
+): () => void {
+  const {
+    includePayments = true,
+    includePtNotifications = false,
+    includeTemplates = true,
+  } = options;
   const unsubs: Unsubscribe[] = [];
 
   const listen = <T>(
@@ -194,22 +215,26 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
     handlers.weekResponses
   );
 
-  listen<PaymentRecord>(
-    'payments',
-    (id, d) => ({
-      id,
-      userId: String(d.userId ?? uid),
-      clientId: String(d.clientId ?? ''),
-      monthYear: String(d.monthYear ?? ''),
-      monthLabel: String(d.monthLabel ?? ''),
-      amountEur: Number(d.amountEur ?? 0),
-      paid: Boolean(d.paid ?? true),
-      paidAtMillis: Number(d.paidAtMillis ?? 0),
-      note: String(d.note ?? ''),
-    }),
-    (list) => list.sort((a, b) => b.paidAtMillis - a.paidAtMillis),
-    handlers.payments
-  );
+  if (includePayments) {
+    listen<PaymentRecord>(
+      'payments',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        clientId: String(d.clientId ?? ''),
+        monthYear: String(d.monthYear ?? ''),
+        monthLabel: String(d.monthLabel ?? ''),
+        amountEur: Number(d.amountEur ?? 0),
+        paid: Boolean(d.paid ?? true),
+        paidAtMillis: Number(d.paidAtMillis ?? 0),
+        note: String(d.note ?? ''),
+      }),
+      (list) => list.sort((a, b) => b.paidAtMillis - a.paidAtMillis),
+      handlers.payments
+    );
+  } else {
+    handlers.payments([]);
+  }
 
   listen<FidelizacaoRecord>(
     'fidelizacoes',
@@ -271,6 +296,8 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
       sets: Number(d.sets ?? 3),
       reps: String(d.reps ?? '10-12'),
       loadKg: String(d.loadKg ?? ''),
+      lastLoadKg: typeof d.lastLoadKg === 'string' ? d.lastLoadKg : '',
+      lastLoggedAtMillis: Number(d.lastLoggedAtMillis ?? 0),
       restSeconds: Number(d.restSeconds ?? 90),
       notes: String(d.notes ?? ''),
       orderIndex: Number(d.orderIndex ?? 0),
@@ -351,20 +378,44 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
     handlers.chatMessages
   );
 
-  listen<MessageTemplateRecord>(
-    'templates',
-    (id, d) => ({
-      id,
-      userId: String(d.userId ?? uid),
-      templateKey: String(d.templateKey ?? id),
-      title: String(d.title ?? ''),
-      description: String(d.description ?? ''),
-      body: String(d.body ?? ''),
-      defaultBody: String(d.defaultBody ?? ''),
-    }),
-    (list) => list,
-    handlers.templates
-  );
+  if (includeTemplates) {
+    listen<MessageTemplateRecord>(
+      'templates',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        templateKey: String(d.templateKey ?? id),
+        title: String(d.title ?? ''),
+        description: String(d.description ?? ''),
+        body: String(d.body ?? ''),
+        defaultBody: String(d.defaultBody ?? ''),
+      }),
+      (list) => list,
+      handlers.templates
+    );
+  }
+
+  if (includePtNotifications && handlers.ptNotifications) {
+    listen<PtNotificationRecord>(
+      'pt_notifications',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        clientId: String(d.clientId ?? ''),
+        clientName: String(d.clientName ?? ''),
+        type:
+          d.type === 'CANCELLED' || d.type === 'UNAVAILABLE' ? d.type : 'ALTERED',
+        summary: String(d.summary ?? ''),
+        weekKey: String(d.weekKey ?? ''),
+        read: Boolean(d.read ?? false),
+        timestampMillis: Number(d.timestampMillis ?? 0),
+      }),
+      (list) => list.sort((a, b) => b.timestampMillis - a.timestampMillis),
+      handlers.ptNotifications
+    );
+  } else if (handlers.ptNotifications) {
+    handlers.ptNotifications([]);
+  }
 
   unsubs.push(
     onSnapshot(
@@ -385,6 +436,7 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
           whatsappWebMode: Boolean(d.whatsappWebMode ?? false),
           siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin ?? DEFAULT_WEB_BASE_URL),
           studentPortalCode: String(d.studentPortalCode ?? ''),
+          ptWhatsappPhone: String(d.ptWhatsappPhone ?? ''),
           seeded: Boolean(d.seeded ?? false),
         });
       },
@@ -395,6 +447,161 @@ export function subscribeStudioData(uid: string, handlers: StudioStreams): () =>
   return () => unsubs.forEach((u) => u());
 }
 
+// --- PT Accounts & Admin Approval ---
+function mapPtAccount(id: string, d: Record<string, unknown>): PtAccountRecord {
+  const rawStatus = String(d.status ?? 'PENDING');
+  const status: PtAccountStatus =
+    rawStatus === 'APPROVED' || rawStatus === 'REJECTED' ? rawStatus : 'PENDING';
+  return {
+    id,
+    uid: String(d.uid ?? id),
+    email: String(d.email ?? ''),
+    displayName: String(d.displayName ?? ''),
+    status,
+    isAdmin: Boolean(d.isAdmin ?? false),
+    requestedAtMillis: Number(d.requestedAtMillis ?? 0),
+    reviewedAtMillis: Number(d.reviewedAtMillis ?? 0),
+  };
+}
+
+export async function ensurePtAccount(
+  uid: string,
+  email: string,
+  displayName: string
+): Promise<PtAccountRecord> {
+  const cleanEmail = email.trim().toLowerCase();
+  const isAdmin = isSuperAdminEmail(cleanEmail);
+  const ref = doc(db, 'pt_accounts', uid);
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    return mapPtAccount(snap.id, snap.data() as Record<string, unknown>);
+  }
+  const now = Date.now();
+  const status: PtAccountStatus = isAdmin ? 'APPROVED' : 'PENDING';
+  const safeName = (displayName.trim() || cleanEmail.split('@')[0] || 'Personal Trainer').slice(0, 120);
+  await setDoc(ref, {
+    uid,
+    email: cleanEmail.slice(0, 160),
+    displayName: safeName,
+    status,
+    isAdmin,
+    requestedAtMillis: now,
+    reviewedAtMillis: isAdmin ? now : 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return {
+    id: uid,
+    uid,
+    email: cleanEmail,
+    displayName: safeName,
+    status,
+    isAdmin,
+    requestedAtMillis: now,
+    reviewedAtMillis: isAdmin ? now : 0,
+  };
+}
+
+export function subscribeOwnPtAccount(
+  uid: string,
+  cb: (account: PtAccountRecord | null) => void,
+  onError?: (err: Error) => void
+): () => void {
+  return onSnapshot(
+    doc(db, 'pt_accounts', uid),
+    (snap) => {
+      if (!snap.exists()) {
+        cb(null);
+        return;
+      }
+      cb(mapPtAccount(snap.id, snap.data() as Record<string, unknown>));
+    },
+    (err) => onError?.(err)
+  );
+}
+
+export function subscribeAllPtAccounts(
+  cb: (accounts: PtAccountRecord[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  return onSnapshot(
+    collection(db, 'pt_accounts'),
+    (snap) => {
+      const list = snap.docs
+        .map((d) => mapPtAccount(d.id, d.data() as Record<string, unknown>))
+        .sort((a, b) => {
+          const rank = (s: PtAccountStatus) => (s === 'PENDING' ? 0 : s === 'APPROVED' ? 1 : 2);
+          return rank(a.status) - rank(b.status) || b.requestedAtMillis - a.requestedAtMillis;
+        });
+      cb(list);
+    },
+    (err) => onError?.(err)
+  );
+}
+
+export async function reviewPtAccount(
+  ptUid: string,
+  status: 'APPROVED' | 'REJECTED'
+): Promise<void> {
+  await updateDoc(doc(db, 'pt_accounts', ptUid), {
+    status,
+    reviewedAtMillis: Date.now(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// --- PT Notifications (Cancelamentos & Alterações) ---
+export async function createPtNotification(
+  uid: string,
+  payload: {
+    clientId: string;
+    clientName: string;
+    type: PtNotificationType;
+    summary: string;
+    weekKey: string;
+  }
+): Promise<void> {
+  await setDoc(doc(subcol(uid, 'pt_notifications')), {
+    userId: uid,
+    clientId: payload.clientId.slice(0, 128),
+    clientName: payload.clientName.trim().slice(0, 100) || 'Aluno',
+    type: payload.type,
+    summary: payload.summary.trim().slice(0, 400),
+    weekKey: payload.weekKey.slice(0, 30),
+    read: false,
+    timestampMillis: Date.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function markPtNotificationRead(uid: string, notificationId: string): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'pt_notifications'), notificationId), {
+    read: true,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function markAllPtNotificationsRead(
+  uid: string,
+  notifications: PtNotificationRecord[]
+): Promise<void> {
+  const unread = notifications.filter((n) => !n.read);
+  if (unread.length === 0) return;
+  const batch = writeBatch(db);
+  unread.forEach((n) => {
+    batch.update(doc(subcol(uid, 'pt_notifications'), n.id), {
+      read: true,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  await batch.commit();
+}
+
+export async function deletePtNotification(uid: string, notificationId: string): Promise<void> {
+  await deleteDoc(doc(subcol(uid, 'pt_notifications'), notificationId));
+}
+
 async function commitWrites(writes: Array<[DocumentReference, Record<string, unknown>]>) {
   for (let i = 0; i < writes.length; i += 400) {
     const batch = writeBatch(db);
@@ -403,7 +610,7 @@ async function commitWrites(writes: Array<[DocumentReference, Record<string, unk
   }
 }
 
-export async function ensureSeeded(uid: string): Promise<void> {
+export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<void> {
   const settingsRef = doc(subcol(uid, 'settings'), 'studio');
   const settingsSnap = await getDoc(settingsRef);
   const now = Date.now();
@@ -665,32 +872,34 @@ export async function ensureSeeded(uid: string): Promise<void> {
   const l2 = `${monthsPt[d2.getMonth()]} ${d2.getFullYear()}`;
   void recentMonths;
 
-  [
-    ['pay_1', 'client_ana', m0, l0, 120, now - dayMs * 5, 'MbWay'],
-    ['pay_2', 'client_bruno', m0, l0, 95, now - dayMs * 3, 'João'],
-    ['pay_3', 'client_eva', m0, l0, 120, now - dayMs * 2, 'MbWay'],
-    ['pay_4', 'client_ana', m1, l1, 120, now - dayMs * 35, 'MbWay'],
-    ['pay_5', 'client_bruno', m1, l1, 95, now - dayMs * 34, 'João'],
-    ['pay_6', 'client_filipe', m1, l1, 110, now - dayMs * 33, 'Dinheiro'],
-    ['pay_7', 'client_ana', m2, l2, 120, now - dayMs * 65, 'MbWay'],
-    ['pay_8', 'client_eva', m2, l2, 120, now - dayMs * 62, 'MbWay'],
-  ].forEach(([pid, cid, my, ml, amt, paidAt, note]) => {
-    writes.push([
-      doc(subcol(uid, 'payments'), String(pid)),
-      {
-        userId: uid,
-        clientId: String(cid),
-        monthYear: String(my),
-        monthLabel: String(ml),
-        amountEur: Number(amt),
-        paid: true,
-        paidAtMillis: Math.round(Number(paidAt)),
-        note: String(note),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-    ]);
-  });
+  if (isSuperAdmin) {
+    [
+      ['pay_1', 'client_ana', m0, l0, 120, now - dayMs * 5, 'MbWay'],
+      ['pay_2', 'client_bruno', m0, l0, 95, now - dayMs * 3, 'João'],
+      ['pay_3', 'client_eva', m0, l0, 120, now - dayMs * 2, 'MbWay'],
+      ['pay_4', 'client_ana', m1, l1, 120, now - dayMs * 35, 'MbWay'],
+      ['pay_5', 'client_bruno', m1, l1, 95, now - dayMs * 34, 'João'],
+      ['pay_6', 'client_filipe', m1, l1, 110, now - dayMs * 33, 'Dinheiro'],
+      ['pay_7', 'client_ana', m2, l2, 120, now - dayMs * 65, 'MbWay'],
+      ['pay_8', 'client_eva', m2, l2, 120, now - dayMs * 62, 'MbWay'],
+    ].forEach(([pid, cid, my, ml, amt, paidAt, note]) => {
+      writes.push([
+        doc(subcol(uid, 'payments'), String(pid)),
+        {
+          userId: uid,
+          clientId: String(cid),
+          monthYear: String(my),
+          monthLabel: String(ml),
+          amountEur: Number(amt),
+          paid: true,
+          paidAtMillis: Math.round(Number(paidAt)),
+          note: String(note),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+      ]);
+    });
+  }
 
   [
     ['fid_1', 'client_ana', 12, now - dayMs * 60, now + dayMs * 305, 'Plano Anual 3x/sem'],
@@ -1510,10 +1719,15 @@ export async function addExerciseToPlan(
 export async function updateWorkoutPlanItemLoad(
   uid: string,
   itemId: string,
-  loadKg: string
+  loadKg: string,
+  previousLoadKg?: string
 ): Promise<void> {
+  const cleanLoad = loadKg.trim().slice(0, 40);
+  const cleanPrev = (previousLoadKg !== undefined ? previousLoadKg : cleanLoad).trim().slice(0, 40);
   await updateDoc(doc(subcol(uid, 'workout_plan_items'), itemId), {
-    loadKg: loadKg.trim().slice(0, 40),
+    loadKg: cleanLoad,
+    lastLoadKg: cleanPrev || cleanLoad,
+    lastLoggedAtMillis: Date.now(),
     updatedAt: serverTimestamp(),
   });
 }
@@ -1681,6 +1895,7 @@ export async function saveStudioSettings(
       : generatePortalCode();
 
   const cutoffMins = getEffectiveCutoffMinutes(settings);
+  const cleanPtPhone = normalizePortuguesePhone(settings.ptWhatsappPhone || '').slice(0, 20);
 
   if (snap.exists()) {
     await updateDoc(ref, {
@@ -1690,6 +1905,7 @@ export async function saveStudioSettings(
       whatsappWebMode: settings.whatsappWebMode,
       siteBaseUrl: cleanUrl,
       studentPortalCode: code,
+      ptWhatsappPhone: cleanPtPhone,
       seeded: true,
       updatedAt: serverTimestamp(),
     });
@@ -1702,6 +1918,7 @@ export async function saveStudioSettings(
       whatsappWebMode: settings.whatsappWebMode,
       siteBaseUrl: cleanUrl,
       studentPortalCode: code,
+      ptWhatsappPhone: cleanPtPhone,
       seeded: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

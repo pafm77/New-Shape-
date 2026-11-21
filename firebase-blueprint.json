@@ -163,6 +163,8 @@
         "sets": { "type": "integer" },
         "reps": { "type": "string" },
         "loadKg": { "type": "string" },
+        "lastLoadKg": { "type": "string" },
+        "lastLoggedAtMillis": { "type": "integer" },
         "restSeconds": { "type": "integer" },
         "notes": { "type": "string" },
         "orderIndex": { "type": "integer" },
@@ -252,6 +254,7 @@
         "whatsappWebMode": { "type": "boolean" },
         "siteBaseUrl": { "type": "string" },
         "studentPortalCode": { "type": "string" },
+        "ptWhatsappPhone": { "type": "string" },
         "seeded": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -294,6 +297,41 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "clientId", "dateMillis", "weightKg", "ageYears", "heightCm", "sex", "bodyFatPct", "muscleMassKg", "visceralFat", "bmi", "bmrKcal", "notes", "createdAt", "updatedAt"]
+    },
+    "PtAccount": {
+      "title": "PtAccount",
+      "description": "Conta de Personal Trainer e estado de aprovação pelo administrador",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "isAdmin": { "type": "boolean" },
+        "requestedAtMillis": { "type": "integer" },
+        "reviewedAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "status", "isAdmin", "requestedAtMillis", "reviewedAtMillis", "createdAt", "updatedAt"]
+    },
+    "PtNotification": {
+      "title": "PtNotification",
+      "description": "Notificação em tempo real ao PT por cancelamento ou alteração de horário",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "type": { "type": "string", "enum": ["CANCELLED", "ALTERED", "UNAVAILABLE"] },
+        "summary": { "type": "string" },
+        "weekKey": { "type": "string" },
+        "read": { "type": "boolean" },
+        "timestampMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "clientName", "type", "summary", "weekKey", "read", "timestampMillis", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -364,6 +402,14 @@
     "/users/{userId}/portal_members/{memberUid}": {
       "schema": { "$ref": "#/entities/StudioMember" },
       "description": "Membros autenticados via Link do Aluno autorizado"
+    },
+    "/users/{userId}/pt_notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/PtNotification" },
+      "description": "Alertas ao PT de cancelamentos e alterações de horário"
+    },
+    "/pt_accounts/{ptUid}": {
+      "schema": { "$ref": "#/entities/PtAccount" },
+      "description": "Registos de Personal Trainers sujeitos a aprovação do administrador"
     }
   }
 }

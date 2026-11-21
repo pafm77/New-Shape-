@@ -9,7 +9,9 @@ const fs = require("node:fs");
 let testEnv;
 const PROJECT_ID = process.env.GCP_PROJECT || "demo-no-project";
 const ALICE_UID = "alice_pt_123";
+const ADMIN_EMAIL = "pafm77pedrinho77@gmail.com";
 const BOB_UID = "bob_pt_456";
+const BOB_EMAIL = "outro.pt@newshape.pt";
 
 const [emulatorHost, emulatorPortStr] = (
   process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085"
@@ -60,8 +62,8 @@ test("Unauthenticated user cannot read or write any New Shape collection", async
   await assertFails(unauthDb.collection(`users/${ALICE_UID}/payments`).get());
 });
 
-test("Owner can create and partially update Client, Week, Session, Booking, Payment, Fidelizacao, Exercise, Plan, Food, Nutrition, Chat, Template, Settings", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+test("Owner (Super-Admin) can create and partially update Client, Week, Session, Booking, Payment, Fidelizacao, Exercise, Plan, Food, Nutrition, Chat, Template, Settings", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
   const created = new Date(Date.now() - 10000);
   const updated = new Date(Date.now() - 1000);
 
@@ -280,6 +282,7 @@ test("Owner can create and partially update Client, Week, Session, Booking, Paym
     aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").update({
       cutoffMinutes: 30,
       cutoffHours: 0,
+      ptWhatsappPhone: "912345678",
       updatedAt: updated,
     })
   );
@@ -598,6 +601,8 @@ test("Student portal link access: requires valid studentPortalCode and enforces 
   await assertSucceeds(
     studentDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_stu").update({
       loadKg: "45 kg",
+      lastLoadKg: "40 kg",
+      lastLoggedAtMillis: 1794910000000,
       updatedAt: updated,
     })
   );
@@ -608,6 +613,126 @@ test("Student portal link access: requires valid studentPortalCode and enforces 
       updatedAt: new Date(Date.now() - 500),
     })
   );
+
+  // Student CAN create pt_notifications (read: false), CANNOT read or mark as read
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/pt_notifications`).doc("notif_1").set({
+      userId: ALICE_UID,
+      clientId: "c_student",
+      clientName: "Beatriz Silva",
+      type: "CANCELLED",
+      summary: "Beatriz Silva cancelou o treino de Segunda 18:00.",
+      weekKey: "2026-W47",
+      read: false,
+      timestampMillis: 1794920000000,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/pt_notifications`).doc("notif_1").update({
+      read: true,
+      updatedAt: updated,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/pt_notifications`).doc("notif_1").update({
+      read: true,
+      updatedAt: updated,
+    })
+  );
 });
+
+test("Super-Admin PT (pafm77pedrinho77@gmail.com) manages PT approvals and is the only PT with billing access", async () => {
+  const adminDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
+  const otherPtDb = testEnv.authenticatedContext(BOB_UID, { email: BOB_EMAIL }).firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+
+  // Non-admin PT cannot self-approve or claim isAdmin
+  await assertFails(
+    otherPtDb.collection("pt_accounts").doc(BOB_UID).set({
+      uid: BOB_UID,
+      email: BOB_EMAIL,
+      displayName: "Outro PT",
+      status: "APPROVED",
+      isAdmin: false,
+      requestedAtMillis: 1794900000000,
+      reviewedAtMillis: 0,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Non-admin PT can register with status PENDING, isAdmin false
+  await assertSucceeds(
+    otherPtDb.collection("pt_accounts").doc(BOB_UID).set({
+      uid: BOB_UID,
+      email: BOB_EMAIL,
+      displayName: "Outro PT",
+      status: "PENDING",
+      isAdmin: false,
+      requestedAtMillis: 1794900000000,
+      reviewedAtMillis: 0,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Non-admin PT cannot list all pt_accounts or approve themselves
+  await assertFails(otherPtDb.collection("pt_accounts").get());
+  await assertFails(
+    otherPtDb.collection("pt_accounts").doc(BOB_UID).update({
+      status: "APPROVED",
+      reviewedAtMillis: 1794910000000,
+      updatedAt: updated,
+    })
+  );
+
+  // Super-Admin can list and approve non-admin PT
+  await assertSucceeds(adminDb.collection("pt_accounts").get());
+  await assertSucceeds(
+    adminDb.collection("pt_accounts").doc(BOB_UID).update({
+      status: "APPROVED",
+      reviewedAtMillis: 1794910000000,
+      updatedAt: updated,
+    })
+  );
+
+  // Non-admin PT CANNOT read or create payments even under their own userId
+  await assertFails(otherPtDb.collection(`users/${BOB_UID}/payments`).get());
+  await assertFails(
+    otherPtDb.collection(`users/${BOB_UID}/payments`).doc("pay_bob").set({
+      userId: BOB_UID,
+      clientId: "c1",
+      monthYear: "2026-11",
+      monthLabel: "Nov 2026",
+      amountEur: 100.0,
+      paid: true,
+      paidAtMillis: 1794900000000,
+      note: "MbWay",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Super-Admin CAN read and create payments
+  await assertSucceeds(
+    adminDb.collection(`users/${ALICE_UID}/payments`).doc("pay_admin").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      monthYear: "2026-11",
+      monthLabel: "Nov 2026",
+      amountEur: 120.0,
+      paid: true,
+      paidAtMillis: 1794900000000,
+      note: "MbWay",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(adminDb.collection(`users/${ALICE_UID}/payments`).get());
+});
+
 
 
