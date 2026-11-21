@@ -410,7 +410,8 @@ class FirestoreStudioRepository(
             val existingCode = settingsSnap.getString("studentPortalCode").orEmpty()
             val missingCode = existingCode.length < 8
             val missingCutoff = !settingsSnap.contains("cutoffMinutes")
-            if (missingCode || missingCutoff) {
+            val missingReminderLead = !settingsSnap.contains("reminderLeadMinutes")
+            if (missingCode || missingCutoff || missingReminderLead) {
                 val updates = mutableMapOf<String, Any>(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -420,6 +421,9 @@ class FirestoreStudioRepository(
                 if (missingCutoff) {
                     updates["cutoffMinutes"] = 15
                     updates["cutoffHours"] = 0
+                }
+                if (missingReminderLead) {
+                    updates["reminderLeadMinutes"] = 60
                 }
                 settingsRef.update(updates).await()
             }
@@ -780,6 +784,7 @@ class FirestoreStudioRepository(
                 "clientsCanEdit" to true,
                 "cutoffHours" to 0,
                 "cutoffMinutes" to 15,
+                "reminderLeadMinutes" to 60,
                 "whatsappWebMode" to false,
                 "siteBaseUrl" to "https://newshape.vercel.app",
                 "studentPortalCode" to generatePortalCode(),
@@ -1915,11 +1920,13 @@ class FirestoreStudioRepository(
         val uid = requireUserId()
         val code = settings.studentPortalCode.takeIf { it.length >= 8 } ?: generatePortalCode()
         val cutoffMins = settings.effectiveCutoffMinutes()
+        val reminderLeadMins = settings.effectiveReminderLeadMinutes()
         userDoc(uid).collection("settings").document("studio").update(
             mapOf(
                 "clientsCanEdit" to settings.clientsCanEdit,
                 "cutoffHours" to (cutoffMins / 60),
                 "cutoffMinutes" to cutoffMins,
+                "reminderLeadMinutes" to reminderLeadMins,
                 "whatsappWebMode" to settings.whatsappWebMode,
                 "siteBaseUrl" to settings.siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" }.take(300),
                 "studentPortalCode" to code.take(64),

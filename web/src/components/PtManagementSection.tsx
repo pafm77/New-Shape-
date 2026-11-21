@@ -42,6 +42,7 @@ import {
   Textarea,
 } from './UiPrimitives';
 import { RegisterPaymentModal } from './PtClientsSection';
+import { FinanceChart } from './FinanceChart';
 
 export type ManagementSubTab = 'finance' | 'team' | 'fidelizacao' | 'chat';
 
@@ -136,6 +137,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
       {isSuperAdmin && subTab === 'finance' && (
         <FinanceSubTab
           uid={uid}
+          isSuperAdmin={isSuperAdmin}
           clients={clients}
           payments={payments}
           onBanner={onBanner}
@@ -325,10 +327,11 @@ const TeamApprovalSubTab: React.FC<{
 
 const FinanceSubTab: React.FC<{
   uid: string;
+  isSuperAdmin: boolean;
   clients: ClientRecord[];
   payments: PaymentRecord[];
   onBanner: (msg: string) => void;
-}> = ({ uid, clients, payments, onBanner }) => {
+}> = ({ uid, isSuperAdmin, clients, payments, onBanner }) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [pickClientModal, setPickClientModal] = useState(false);
   const [payClient, setPayClient] = useState<ClientRecord | null>(null);
@@ -390,44 +393,6 @@ const FinanceSubTab: React.FC<{
     [paidPayments]
   );
 
-  const monthBuckets = useMemo(() => {
-    const bucketMap = new Map<
-      string,
-      { monthYear: string; monthLabel: string; total: number; count: number }
-    >();
-    recentMonths
-      .slice()
-      .reverse()
-      .forEach((m) => {
-        bucketMap.set(m.monthYear, {
-          monthYear: m.monthYear,
-          monthLabel: m.monthLabel,
-          total: 0,
-          count: 0,
-        });
-      });
-
-    paidPayments.forEach((p) => {
-      if (!p.monthYear) return;
-      const existing = bucketMap.get(p.monthYear);
-      if (existing) {
-        existing.total += p.amountEur;
-        existing.count += 1;
-      } else {
-        bucketMap.set(p.monthYear, {
-          monthYear: p.monthYear,
-          monthLabel: p.monthLabel || p.monthYear,
-          total: p.amountEur,
-          count: 1,
-        });
-      }
-    });
-
-    return Array.from(bucketMap.values())
-      .sort((a, b) => a.monthYear.localeCompare(b.monthYear))
-      .slice(-12);
-  }, [paidPayments, recentMonths]);
-
   const activeMonthsCount = Math.max(
     1,
     new Set(paidPayments.map((p) => p.monthYear).filter(Boolean)).size
@@ -453,8 +418,6 @@ const FinanceSubTab: React.FC<{
     currentMonthUniqueStudents > 0
       ? currentMonthRevenue / currentMonthUniqueStudents
       : 0;
-
-  const maxBucket = Math.max(100, ...monthBuckets.map((b) => b.total));
 
   const groupedByMethod = useMemo(() => {
     const groups: Record<PaymentMethod, PaymentRecord[]> = {
@@ -622,47 +585,11 @@ const FinanceSubTab: React.FC<{
         </BrandCard>
       </div>
 
-      <BrandCard>
-        <h3 className="text-sm font-bold text-[#F4F4F5]">Receita Mensal (€ / mês)</h3>
-        <div className="mt-4 flex items-end gap-2 h-44 pt-4 overflow-x-auto pb-1">
-          {monthBuckets.map((b) => {
-            const pct = Math.max(4, Math.round((b.total / maxBucket) * 100));
-            const isCurrent = b.monthYear === currentMonthYear;
-            return (
-              <div
-                key={b.monthYear}
-                className="flex h-full min-w-[54px] flex-1 flex-col items-center justify-end gap-1"
-              >
-                <span className="text-[11px] font-bold text-[#FACC15]">
-                  {b.total > 0 ? `€${b.total.toFixed(0)}` : '—'}
-                </span>
-                <div className="flex w-full flex-1 items-end justify-center">
-                  <div
-                    style={{ height: `${b.total > 0 ? pct : 4}%` }}
-                    className={`w-full max-w-[38px] rounded-t-lg transition-all ${
-                      b.total > 0
-                        ? isCurrent
-                          ? 'bg-[#FACC15]'
-                          : 'bg-[#EAB308]/80'
-                        : 'bg-[#242429]'
-                    }`}
-                  />
-                </div>
-                <span
-                  className={`text-[11px] truncate max-w-full ${
-                    isCurrent ? 'font-bold text-[#FACC15]' : 'text-[#A1A1AA]'
-                  }`}
-                >
-                  {b.monthLabel}
-                </span>
-                <span className="text-[10px] text-[#A1A1AA]">
-                  {b.count > 0 ? `${b.count} mens.` : ''}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </BrandCard>
+      <FinanceChart
+        payments={payments}
+        clients={clients}
+        isSuperAdmin={isSuperAdmin}
+      />
 
       {/* Totais por Método de Pagamento + Filtro */}
       <div className="space-y-3">

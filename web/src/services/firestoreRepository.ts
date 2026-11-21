@@ -55,6 +55,7 @@ import {
   formatWeekRangeLabel,
   generatePortalCode,
   getEffectiveCutoffMinutes,
+  getEffectiveReminderLeadMinutes,
   getMondayOfWeek,
   isValidPortuguesePhone,
   normalizePaymentMethod,
@@ -433,6 +434,8 @@ export function subscribeStudioData(
           cutoffHours: Number(d.cutoffHours ?? 0),
           cutoffMinutes:
             d.cutoffMinutes !== undefined ? Number(d.cutoffMinutes) : undefined,
+          reminderLeadMinutes:
+            d.reminderLeadMinutes !== undefined ? Number(d.reminderLeadMinutes) : undefined,
           whatsappWebMode: Boolean(d.whatsappWebMode ?? false),
           siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin ?? DEFAULT_WEB_BASE_URL),
           studentPortalCode: String(d.studentPortalCode ?? ''),
@@ -676,17 +679,24 @@ export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<v
     const currentCode = settingsData?.studentPortalCode;
     const missingPortalCode = typeof currentCode !== 'string' || currentCode.length < 8;
     const missingCutoffMinutes = settingsData?.cutoffMinutes === undefined;
+    const missingReminderLeadMinutes = settingsData?.reminderLeadMinutes === undefined;
     const savedBaseUrl = typeof settingsData?.siteBaseUrl === 'string' ? settingsData.siteBaseUrl : '';
     const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
     const shouldSyncNewShapeDomain =
       currentOrigin === DEFAULT_WEB_BASE_URL &&
       savedBaseUrl !== DEFAULT_WEB_BASE_URL &&
       savedBaseUrl.includes('.vercel.app');
-    if (missingPortalCode || missingCutoffMinutes || shouldSyncNewShapeDomain) {
+    if (
+      missingPortalCode ||
+      missingCutoffMinutes ||
+      missingReminderLeadMinutes ||
+      shouldSyncNewShapeDomain
+    ) {
       await updateDoc(settingsRef, {
         updatedAt: serverTimestamp(),
         ...(missingPortalCode ? { studentPortalCode: generatePortalCode() } : {}),
         ...(missingCutoffMinutes ? { cutoffMinutes: 15, cutoffHours: 0 } : {}),
+        ...(missingReminderLeadMinutes ? { reminderLeadMinutes: 60 } : {}),
         ...(shouldSyncNewShapeDomain ? { siteBaseUrl: DEFAULT_WEB_BASE_URL } : {}),
       });
     }
@@ -1043,6 +1053,7 @@ export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<v
       clientsCanEdit: true,
       cutoffHours: 0,
       cutoffMinutes: 15,
+      reminderLeadMinutes: 60,
       whatsappWebMode: false,
       siteBaseUrl: window.location.origin || DEFAULT_WEB_BASE_URL,
       studentPortalCode: generatePortalCode(),
@@ -1895,6 +1906,7 @@ export async function saveStudioSettings(
       : generatePortalCode();
 
   const cutoffMins = getEffectiveCutoffMinutes(settings);
+  const reminderLeadMins = getEffectiveReminderLeadMinutes(settings);
   const cleanPtPhone = normalizePortuguesePhone(settings.ptWhatsappPhone || '').slice(0, 20);
 
   if (snap.exists()) {
@@ -1902,6 +1914,7 @@ export async function saveStudioSettings(
       clientsCanEdit: settings.clientsCanEdit,
       cutoffHours: Math.floor(cutoffMins / 60),
       cutoffMinutes: cutoffMins,
+      reminderLeadMinutes: reminderLeadMins,
       whatsappWebMode: settings.whatsappWebMode,
       siteBaseUrl: cleanUrl,
       studentPortalCode: code,
@@ -1915,6 +1928,7 @@ export async function saveStudioSettings(
       clientsCanEdit: settings.clientsCanEdit,
       cutoffHours: Math.floor(cutoffMins / 60),
       cutoffMinutes: cutoffMins,
+      reminderLeadMinutes: reminderLeadMins,
       whatsappWebMode: settings.whatsappWebMode,
       siteBaseUrl: cleanUrl,
       studentPortalCode: code,

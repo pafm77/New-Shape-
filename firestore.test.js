@@ -271,6 +271,7 @@ test("Owner (Super-Admin) can create and partially update Client, Week, Session,
       clientsCanEdit: true,
       cutoffHours: 0,
       cutoffMinutes: 15,
+      reminderLeadMinutes: 60,
       whatsappWebMode: false,
       siteBaseUrl: "https://newshape.vercel.app",
       seeded: true,
@@ -282,7 +283,20 @@ test("Owner (Super-Admin) can create and partially update Client, Week, Session,
     aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").update({
       cutoffMinutes: 30,
       cutoffHours: 0,
+      reminderLeadMinutes: 45,
       ptWhatsappPhone: "912345678",
+      updatedAt: updated,
+    })
+  );
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").update({
+      reminderLeadMinutes: 2,
+      updatedAt: updated,
+    })
+  );
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").update({
+      reminderLeadMinutes: 2000,
       updatedAt: updated,
     })
   );

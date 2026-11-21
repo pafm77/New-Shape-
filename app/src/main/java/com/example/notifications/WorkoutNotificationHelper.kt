@@ -72,15 +72,29 @@ object WorkoutNotificationHelper {
             .apply()
     }
 
-    fun getStudentReminderLeadMinutes(context: Context): Int {
+    fun hasStudentCustomReminderLead(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getInt(KEY_STUDENT_LEAD_MINUTES, 60).coerceIn(15, 180)
+        return prefs.contains(KEY_STUDENT_LEAD_MINUTES)
+    }
+
+    fun getStudentReminderLeadMinutes(context: Context, defaultMinutes: Int = 60): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val fallback = defaultMinutes.coerceIn(5, 1440)
+        if (!prefs.contains(KEY_STUDENT_LEAD_MINUTES)) return fallback
+        return prefs.getInt(KEY_STUDENT_LEAD_MINUTES, fallback).coerceIn(5, 1440)
     }
 
     fun setStudentReminderLeadMinutes(context: Context, leadMinutes: Int) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putInt(KEY_STUDENT_LEAD_MINUTES, leadMinutes.coerceIn(15, 180))
+            .putInt(KEY_STUDENT_LEAD_MINUTES, leadMinutes.coerceIn(5, 1440))
+            .apply()
+    }
+
+    fun clearStudentCustomReminderLead(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_STUDENT_LEAD_MINUTES)
             .apply()
     }
 
@@ -169,11 +183,12 @@ object WorkoutNotificationHelper {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return 0
         val sessionMap = sessions.associateBy { it.id }
         val nowMs = System.currentTimeMillis()
-        val leadMs = leadMinutes.coerceIn(15, 180) * 60_000L
-        val leadLabel = if (leadMinutes >= 60 && leadMinutes % 60 == 0) {
-            "${leadMinutes / 60}h"
-        } else {
-            "$leadMinutes min"
+        val safeLead = leadMinutes.coerceIn(5, 1440)
+        val leadMs = safeLead * 60_000L
+        val leadLabel = when {
+            safeLead >= 60 && safeLead % 60 == 0 -> "${safeLead / 60}h"
+            safeLead > 60 -> "${safeLead / 60}h ${safeLead % 60} min"
+            else -> "$safeLead min"
         }
 
         val scheduledCodes = mutableSetOf<String>()

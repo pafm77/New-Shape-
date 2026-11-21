@@ -243,6 +243,18 @@ export function formatCutoffLabel(minutes: number): string {
   return `${m} min`;
 }
 
+export function getEffectiveReminderLeadMinutes(settings: {
+  reminderLeadMinutes?: number;
+}): number {
+  if (
+    typeof settings.reminderLeadMinutes === 'number' &&
+    !Number.isNaN(settings.reminderLeadMinutes)
+  ) {
+    return Math.max(5, Math.min(1440, Math.round(settings.reminderLeadMinutes)));
+  }
+  return 60;
+}
+
 export function generatePortalCode(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
   let out = 'ns_';

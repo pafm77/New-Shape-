@@ -857,6 +857,7 @@ fun MensagensSettingsSection(
     val context = LocalContext.current
     var clientsCanEdit by remember(state.settings) { mutableStateOf(state.settings.clientsCanEdit) }
     var cutoffMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveCutoffMinutes().toString()) }
+    var reminderLeadMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveReminderLeadMinutes().toString()) }
     var whatsappWeb by remember(state.settings) { mutableStateOf(state.settings.whatsappWebMode) }
     var siteBaseUrl by remember(state.settings) { mutableStateOf(state.settings.siteBaseUrl) }
     var ptWhatsappPhone by remember(state.settings) { mutableStateOf(state.settings.ptWhatsappPhone) }
@@ -1070,6 +1071,49 @@ fun MensagensSettingsSection(
                         )
                     }
                 }
+                Spacer(Modifier.height(14.dp))
+                val parsedReminderMins = (reminderLeadMinutesText.toIntOrNull() ?: 60).coerceIn(5, 1440)
+                val reminderPreviewLabel = formatReminderLeadLabel(parsedReminderMins)
+                OutlinedTextField(
+                    value = reminderLeadMinutesText,
+                    onValueChange = { reminderLeadMinutesText = it.filter { c -> c.isDigit() }.take(4) },
+                    label = { Text("Antecedência dos lembretes push de treino (minutos)") },
+                    supportingText = {
+                        Text(
+                            "Atual: $reminderPreviewLabel antes do treino (entre 5 min e 24h)",
+                            color = NewShapeGoldBright
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().testTag("reminder_lead_minutes_input"),
+                    colors = darkFieldColors()
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        15 to "15 min",
+                        30 to "30 min",
+                        45 to "45 min",
+                        60 to "1h",
+                        120 to "2h",
+                        1440 to "24h"
+                    ).forEach { (mins, label) ->
+                        FilterChip(
+                            selected = parsedReminderMins == mins,
+                            onClick = { reminderLeadMinutesText = mins.toString() },
+                            label = { Text(label) },
+                            modifier = Modifier.testTag("reminder_lead_preset_$mins"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1116,11 +1160,13 @@ fun MensagensSettingsSection(
                     text = "Guardar definições",
                     onClick = {
                         val mins = (cutoffMinutesText.toIntOrNull() ?: 15).coerceIn(0, 4320)
+                        val reminderMins = (reminderLeadMinutesText.toIntOrNull() ?: 60).coerceIn(5, 1440)
                         viewModel.saveSettings(
                             state.settings.copy(
                                 clientsCanEdit = clientsCanEdit,
                                 cutoffHours = mins / 60,
                                 cutoffMinutes = mins,
+                                reminderLeadMinutes = reminderMins,
                                 whatsappWebMode = whatsappWeb,
                                 siteBaseUrl = siteBaseUrl.trim().ifBlank { "https://newshape.vercel.app" },
                                 ptWhatsappPhone = ptWhatsappPhone,

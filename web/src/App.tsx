@@ -473,6 +473,7 @@ export function App() {
         clientsCanEdit: true,
         cutoffHours: 0,
         cutoffMinutes: 15,
+        reminderLeadMinutes: 60,
         whatsappWebMode: false,
         siteBaseUrl: window.location.origin || DEFAULT_WEB_BASE_URL,
         studentPortalCode: pathInfo.portalCode || '',

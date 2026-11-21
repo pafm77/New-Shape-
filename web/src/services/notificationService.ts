@@ -67,18 +67,40 @@ export async function dispatchLocalPushNotification(
   }
 }
 
-export function getReminderPreferences(): { enabled: boolean; leadMinutes: number } {
-  if (typeof window === 'undefined') return { enabled: false, leadMinutes: 60 };
+export function getReminderPreferences(defaultLeadMinutes = 60): {
+  enabled: boolean;
+  leadMinutes: number;
+  hasCustomLead: boolean;
+} {
+  const fallback = Math.max(5, Math.min(1440, Math.round(defaultLeadMinutes || 60)));
+  if (typeof window === 'undefined') {
+    return { enabled: false, leadMinutes: fallback, hasCustomLead: false };
+  }
   const enabled = localStorage.getItem(LS_REMINDER_ENABLED) === 'true';
-  const rawLead = Number(localStorage.getItem(LS_REMINDER_LEAD_MIN) || '60');
-  const leadMinutes = Number.isFinite(rawLead) && rawLead >= 5 ? rawLead : 60;
-  return { enabled, leadMinutes };
+  const storedRaw = localStorage.getItem(LS_REMINDER_LEAD_MIN);
+  if (storedRaw === null) {
+    return { enabled, leadMinutes: fallback, hasCustomLead: false };
+  }
+  const rawLead = Number(storedRaw);
+  const leadMinutes =
+    Number.isFinite(rawLead) && rawLead >= 5 && rawLead <= 1440
+      ? Math.round(rawLead)
+      : fallback;
+  return { enabled, leadMinutes, hasCustomLead: true };
 }
 
-export function saveReminderPreferences(enabled: boolean, leadMinutes: number): void {
+export function saveReminderPreferences(
+  enabled: boolean,
+  leadMinutes?: number | null
+): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(LS_REMINDER_ENABLED, enabled ? 'true' : 'false');
-  localStorage.setItem(LS_REMINDER_LEAD_MIN, String(leadMinutes));
+  if (leadMinutes === null) {
+    localStorage.removeItem(LS_REMINDER_LEAD_MIN);
+  } else if (typeof leadMinutes === 'number' && Number.isFinite(leadMinutes)) {
+    const safe = Math.max(5, Math.min(1440, Math.round(leadMinutes)));
+    localStorage.setItem(LS_REMINDER_LEAD_MIN, String(safe));
+  }
 }
 
 export function getPtAlertsPreference(): boolean {
@@ -114,11 +136,17 @@ function markReminderFired(key: string): void {
 }
 
 export function formatLeadMinutesLabel(mins: number): string {
-  if (mins >= 60 && mins % 60 === 0) {
-    const h = mins / 60;
-    return h === 1 ? '1 hora' : `${h} horas`;
+  const m = Math.max(5, Math.min(1440, Math.round(mins)));
+  if (m >= 60 && m % 60 === 0) {
+    const h = m / 60;
+    return h === 1 ? '1h' : `${h}h`;
   }
-  return `${mins} min`;
+  if (m > 60) {
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return `${h}h ${rem} min`;
+  }
+  return `${m} min`;
 }
 
 export function scheduleConfirmedWorkoutReminders(

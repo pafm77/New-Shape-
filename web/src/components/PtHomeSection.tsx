@@ -44,10 +44,12 @@ import {
   formatPhoneDisplay,
   formatTimeAgo,
   getEffectiveCutoffMinutes,
+  getEffectiveReminderLeadMinutes,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
 import {
   dispatchLocalPushNotification,
+  formatLeadMinutesLabel,
   getNotificationPermission,
   getPtAlertsPreference,
   requestNotificationPermission,
@@ -1473,6 +1475,9 @@ const MensagensSettingsView: React.FC<{
   const [cutoffMinutes, setCutoffMinutes] = useState(
     String(getEffectiveCutoffMinutes(settings))
   );
+  const [reminderLeadMinutes, setReminderLeadMinutes] = useState(
+    String(getEffectiveReminderLeadMinutes(settings))
+  );
   const [whatsappWebMode, setWhatsappWebMode] = useState(settings.whatsappWebMode);
   const [siteBaseUrl, setSiteBaseUrl] = useState(settings.siteBaseUrl);
   const [ptWhatsappPhone, setPtWhatsappPhone] = useState(settings.ptWhatsappPhone || '');
@@ -1482,6 +1487,7 @@ const MensagensSettingsView: React.FC<{
   useEffect(() => {
     setClientsCanEdit(settings.clientsCanEdit);
     setCutoffMinutes(String(getEffectiveCutoffMinutes(settings)));
+    setReminderLeadMinutes(String(getEffectiveReminderLeadMinutes(settings)));
     setWhatsappWebMode(settings.whatsappWebMode);
     setSiteBaseUrl(settings.siteBaseUrl);
     setPtWhatsappPhone(settings.ptWhatsappPhone || '');
@@ -1491,6 +1497,11 @@ const MensagensSettingsView: React.FC<{
     cutoffMinutes.trim() === '' || Number.isNaN(Number(cutoffMinutes))
       ? 15
       : Math.max(0, Math.min(4320, Math.round(Number(cutoffMinutes))));
+
+  const parsedReminderMinutes =
+    reminderLeadMinutes.trim() === '' || Number.isNaN(Number(reminderLeadMinutes))
+      ? 60
+      : Math.max(5, Math.min(1440, Math.round(Number(reminderLeadMinutes))));
 
   return (
     <div className="space-y-4">
@@ -1578,6 +1589,47 @@ const MensagensSettingsView: React.FC<{
                   onClick={() => setCutoffMinutes(String(preset.mins))}
                   className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
                     parsedMinutes === preset.mins
+                      ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                      : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:border-[#EAB308] hover:text-white'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <FieldLabel>Antecedência dos lembretes push de treino (minutos)</FieldLabel>
+            <Input
+              type="number"
+              min={5}
+              max={1440}
+              value={reminderLeadMinutes}
+              onChange={(e) => setReminderLeadMinutes(e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-[#A1A1AA]">
+              Atual:{' '}
+              <strong className="text-[#FACC15]">
+                {formatLeadMinutesLabel(parsedReminderMinutes)}
+              </strong>{' '}
+              antes do treino (entre 5 min e 24h)
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[
+                { mins: 15, label: '15 min' },
+                { mins: 30, label: '30 min' },
+                { mins: 45, label: '45 min' },
+                { mins: 60, label: '1h' },
+                { mins: 120, label: '2h' },
+                { mins: 1440, label: '24h' },
+              ].map((preset) => (
+                <button
+                  key={preset.mins}
+                  type="button"
+                  onClick={() => setReminderLeadMinutes(String(preset.mins))}
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                    parsedReminderMinutes === preset.mins
                       ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
                       : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:border-[#EAB308] hover:text-white'
                   }`}
@@ -1691,6 +1743,7 @@ const MensagensSettingsView: React.FC<{
                 clientsCanEdit,
                 cutoffHours: Math.floor(parsedMinutes / 60),
                 cutoffMinutes: parsedMinutes,
+                reminderLeadMinutes: parsedReminderMinutes,
                 whatsappWebMode,
                 siteBaseUrl: siteBaseUrl.trim() || window.location.origin || DEFAULT_WEB_BASE_URL,
                 ptWhatsappPhone,

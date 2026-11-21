@@ -246,6 +246,7 @@ data class StudioSettingsRecord(
     val clientsCanEdit: Boolean = true,
     val cutoffHours: Int = 0,
     val cutoffMinutes: Int? = null,
+    val reminderLeadMinutes: Int? = null,
     val whatsappWebMode: Boolean = false,
     val siteBaseUrl: String = "https://newshape.vercel.app",
     val studentPortalCode: String = "",
@@ -301,6 +302,18 @@ fun StudioSettingsRecord.formatCutoffLabel(): String {
     return when {
         m <= 0 -> "sem limite"
         m >= 60 && m % 60 == 0 -> "${m / 60}h"
+        else -> "$m min"
+    }
+}
+
+fun StudioSettingsRecord.effectiveReminderLeadMinutes(): Int =
+    (reminderLeadMinutes ?: 60).coerceIn(5, 1440)
+
+fun formatReminderLeadLabel(minutes: Int): String {
+    val m = minutes.coerceIn(5, 1440)
+    return when {
+        m >= 60 && m % 60 == 0 -> "${m / 60}h"
+        m > 60 -> "${m / 60}h ${m % 60} min"
         else -> "$m min"
     }
 }

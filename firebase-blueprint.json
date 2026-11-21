@@ -251,6 +251,7 @@
         "clientsCanEdit": { "type": "boolean" },
         "cutoffHours": { "type": "integer" },
         "cutoffMinutes": { "type": "integer" },
+        "reminderLeadMinutes": { "type": "integer" },
         "whatsappWebMode": { "type": "boolean" },
         "siteBaseUrl": { "type": "string" },
         "studentPortalCode": { "type": "string" },

@@ -202,14 +202,6 @@ private fun FinancesSection(
     val methodGroups = groupedByMethod.first
     val otherMethodPayments = groupedByMethod.second
 
-    val monthlyTotals = remember(paidPayments) {
-        paidPayments
-            .groupBy { it.monthYear to it.monthLabel }
-            .map { (key, list) -> Triple(key.first, key.second, list.sumOf { it.amountEur }) }
-            .sortedBy { it.first }
-            .takeLast(12)
-    }
-
     val visibleMethods = remember(methodFilter) {
         if (methodFilter == "ALL") SeedCatalog.PAYMENT_METHODS else listOf(methodFilter)
     }
@@ -384,43 +376,14 @@ private fun FinancesSection(
             }
         }
 
-        // Native Compose Canvas Bar Chart
-        if (monthlyTotals.isNotEmpty()) {
-            item {
-                BrandCard {
-                    Text("Evolução Mensal (€ / mês)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
-                    Spacer(Modifier.height(12.dp))
-                    val maxVal = (monthlyTotals.maxOfOrNull { it.third } ?: 1.0).coerceAtLeast(1.0)
-                    Canvas(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
-                    ) {
-                        val barCount = monthlyTotals.size
-                        val slotWidth = size.width / barCount
-                        val barWidth = (slotWidth * 0.52f).coerceAtMost(44.dp.toPx())
-                        monthlyTotals.forEachIndexed { idx, (_, _, amount) ->
-                            val ratio = (amount / maxVal).toFloat().coerceIn(0.05f, 1f)
-                            val barHeight = size.height * ratio
-                            val left = idx * slotWidth + (slotWidth - barWidth) / 2f
-                            drawRoundRect(
-                                color = NewShapeGold,
-                                topLeft = Offset(left, size.height - barHeight),
-                                size = Size(barWidth, barHeight),
-                                cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                        monthlyTotals.forEach { (_, label, amount) ->
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("€${amount.toInt()}", style = MaterialTheme.typography.labelSmall, color = NewShapeGoldBright)
-                                Text(label.take(3), style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
-                            }
-                        }
-                    }
-                }
+        // Admin-Only 6-Month Personalizado vs Grupo Finance Chart
+        if (state.isSuperAdmin) {
+            item(key = "finance_chart_6m") {
+                FinanceChart(
+                    payments = state.payments,
+                    clients = state.clients,
+                    isSuperAdmin = state.isSuperAdmin
+                )
             }
         }
 

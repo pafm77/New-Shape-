@@ -45,6 +45,7 @@ import {
   formatCutoffLabel,
   formatShortDate,
   getEffectiveCutoffMinutes,
+  getEffectiveReminderLeadMinutes,
   MEAL_TYPES,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
@@ -58,6 +59,10 @@ import {
   scheduleConfirmedWorkoutReminders,
 } from '../services/notificationService';
 import { NewShapeLogo } from './NewShapeLogo';
+import {
+  ExerciseLastLoadBadge,
+  resolveLastExerciseLoad,
+} from './ExerciseLastLoadBadge';
 import {
   BrandCard,
   EmptyState,
@@ -126,11 +131,23 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const firstName = client.name.trim().split(/\s+/)[0] || client.name;
 
   // Push / local training reminders
+  const studioDefaultLeadMins = getEffectiveReminderLeadMinutes(settings);
   const [notifPerm, setNotifPerm] = useState(() => getNotificationPermission());
-  const [reminderEnabled, setReminderEnabled] = useState(() => getReminderPreferences().enabled);
-  const [reminderLeadMins, setReminderLeadMins] = useState(
-    () => getReminderPreferences().leadMinutes
+  const [reminderEnabled, setReminderEnabled] = useState(
+    () => getReminderPreferences(studioDefaultLeadMins).enabled
   );
+  const [hasCustomLead, setHasCustomLead] = useState(
+    () => getReminderPreferences(studioDefaultLeadMins).hasCustomLead
+  );
+  const [reminderLeadMins, setReminderLeadMins] = useState(
+    () => getReminderPreferences(studioDefaultLeadMins).leadMinutes
+  );
+
+  useEffect(() => {
+    if (!hasCustomLead) {
+      setReminderLeadMins(studioDefaultLeadMins);
+    }
+  }, [studioDefaultLeadMins, hasCustomLead]);
 
   // WhatsApp prompt modal after cancelling or modifying schedule
   const [whatsAppAlertModal, setWhatsAppAlertModal] = useState<{
@@ -530,7 +547,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             setNotifPerm(res);
                             if (res === 'granted') {
                               setReminderEnabled(true);
-                              saveReminderPreferences(true, reminderLeadMins);
+                              saveReminderPreferences(
+                                true,
+                                hasCustomLead ? reminderLeadMins : null
+                              );
                               onBanner('Lembretes de treino ativados!');
                             } else {
                               onBanner('Autoriza as notificações nas definições do browser.');
@@ -549,7 +569,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             onClick={() => {
                               const next = !reminderEnabled;
                               setReminderEnabled(next);
-                              saveReminderPreferences(next, reminderLeadMins);
+                              saveReminderPreferences(
+                                next,
+                                hasCustomLead ? reminderLeadMins : null
+                              );
                               onBanner(
                                 next
                                   ? 'Lembretes de treino ativados!'
@@ -565,34 +588,46 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             {reminderEnabled ? 'Lembretes ligados ✓' : 'Ligar lembretes'}
                           </button>
 
-                          {[15, 30, 60, 120].map((mins) => (
-                            <button
-                              key={mins}
-                              type="button"
-                              onClick={() => {
-                                setReminderLeadMins(mins);
-                                setReminderEnabled(true);
-                                saveReminderPreferences(true, mins);
-                                onBanner(
-                                  `Lembrete definido para ${formatLeadMinutesLabel(mins)} antes do treino.`
-                                );
-                              }}
-                              className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
-                                reminderLeadMins === mins && reminderEnabled
-                                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
-                                  : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
-                              }`}
-                            >
-                              {formatLeadMinutesLabel(mins)}
-                            </button>
-                          ))}
+                          {Array.from(new Set([studioDefaultLeadMins, 15, 30, 60, 120]))
+                            .sort((a, b) => a - b)
+                            .map((mins) => {
+                              const isStudioDefault = mins === studioDefaultLeadMins;
+                              return (
+                                <button
+                                  key={mins}
+                                  type="button"
+                                  onClick={() => {
+                                    setReminderLeadMins(mins);
+                                    setReminderEnabled(true);
+                                    if (isStudioDefault) {
+                                      setHasCustomLead(false);
+                                      saveReminderPreferences(true, null);
+                                    } else {
+                                      setHasCustomLead(true);
+                                      saveReminderPreferences(true, mins);
+                                    }
+                                    onBanner(
+                                      `Lembrete definido para ${formatLeadMinutesLabel(mins)} antes do treino.`
+                                    );
+                                  }}
+                                  className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                                    reminderLeadMins === mins && reminderEnabled
+                                      ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                                      : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                                  }`}
+                                >
+                                  {formatLeadMinutesLabel(mins)}
+                                  {isStudioDefault ? ' (PT)' : ''}
+                                </button>
+                              );
+                            })}
 
                           <button
                             type="button"
                             onClick={async () => {
                               await dispatchLocalPushNotification(
                                 'Lembrete de Treino · New Shape',
-                                `Olá ${firstName}! Os teus lembretes push estão a funcionar 💪`
+                                `Olá ${firstName}! Os teus lembretes push estão ativos (${formatLeadMinutesLabel(reminderLeadMins)} antes do treino) 💪`
                               );
                               onBanner('Notificação de teste enviada!');
                             }}
@@ -950,17 +985,20 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
                       <div className="mt-3 space-y-2.5 border-t border-[#323238] pt-3">
                         {items.map((item, idx) => {
-                          const prevLoadReference = isExecuting
-                            ? baselineLoads[item.id] ?? item.lastLoadKg ?? item.loadKg
-                            : item.lastLoadKg || item.loadKg;
+                          const baselineOverride = isExecuting
+                            ? baselineLoads[item.id]
+                            : undefined;
                           return (
                             <StudentExerciseLoadCard
                               key={item.id}
                               index={idx}
                               item={item}
+                              clientId={client.id}
+                              workoutPlans={workoutPlans}
+                              workoutPlanItems={workoutPlanItems}
                               isExecuting={isExecuting}
                               isDone={completedItemIds.has(item.id)}
-                              lastWorkoutLoad={prevLoadReference}
+                              baselineLoadOverride={baselineOverride}
                               onToggleDone={() => {
                                 setCompletedItemIds((prev) => {
                                   const next = new Set(prev);
@@ -1300,18 +1338,24 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 const StudentExerciseLoadCard: React.FC<{
   index: number;
   item: WorkoutPlanItemRecord;
+  clientId: string;
+  workoutPlans: WorkoutPlanRecord[];
+  workoutPlanItems: WorkoutPlanItemRecord[];
   isExecuting: boolean;
   isDone: boolean;
-  lastWorkoutLoad: string;
+  baselineLoadOverride?: string;
   onToggleDone: () => void;
   onStartRest: () => void;
   onSaveLoad: (newLoad: string) => Promise<void>;
 }> = ({
   index,
   item,
+  clientId,
+  workoutPlans,
+  workoutPlanItems,
   isExecuting,
   isDone,
-  lastWorkoutLoad,
+  baselineLoadOverride,
   onToggleDone,
   onStartRest,
   onSaveLoad,
@@ -1350,8 +1394,19 @@ const StudentExerciseLoadCard: React.FC<{
     }
   };
 
-  const lastRef = (lastWorkoutLoad || '').trim();
-  const baseNum = parseNumericLoad(lastRef || item.loadKg);
+  const resolvedHistory = useMemo(
+    () =>
+      resolveLastExerciseLoad({
+        item,
+        clientId,
+        workoutPlans,
+        workoutPlanItems,
+        baselineLoadOverride,
+      }),
+    [item, clientId, workoutPlans, workoutPlanItems, baselineLoadOverride]
+  );
+
+  const baseNum = parseNumericLoad(resolvedHistory.load || item.loadKg);
 
   return (
     <div
@@ -1390,16 +1445,20 @@ const StudentExerciseLoadCard: React.FC<{
         )}
       </div>
 
-      {/* Carga do Último Treino */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#EAB308]/35 bg-[#3D3314]/45 px-2.5 py-1.5 text-xs">
-        <span className="inline-flex items-center gap-1.5 font-semibold text-[#FACC15]">
-          <History className="h-3.5 w-3.5" />
-          Último treino:{' '}
-          <strong className="text-white">{lastRef || 'Sem registo anterior'}</strong>
-        </span>
-        {item.lastLoggedAtMillis ? (
-          <span className="text-[11px] text-[#A1A1AA]">
-            {formatShortDate(item.lastLoggedAtMillis)}
+      {/* Carga do Último Treino (Badge + Tooltip histórico do aluno) */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ExerciseLastLoadBadge
+          item={item}
+          clientId={clientId}
+          workoutPlans={workoutPlans}
+          workoutPlanItems={workoutPlanItems}
+          baselineLoadOverride={baselineLoadOverride}
+          emphasize={isExecuting}
+        />
+        {resolvedHistory.loggedAtMillis > 0 ? (
+          <span className="inline-flex items-center gap-1 text-[11px] text-[#A1A1AA]">
+            <History className="h-3 w-3 text-[#EAB308]/75" />
+            {formatShortDate(resolvedHistory.loggedAtMillis)}
           </span>
         ) : null}
       </div>

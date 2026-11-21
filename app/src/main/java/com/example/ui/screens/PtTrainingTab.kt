@@ -180,6 +180,9 @@ private fun WorkoutPlansBuilderSection(
                             WorkoutPlanExerciseRow(
                                 index = idx + 1,
                                 item = exItem,
+                                clientId = plan.clientId,
+                                workoutPlans = state.workoutPlans,
+                                workoutPlanItems = state.workoutPlanItems,
                                 onRemove = { viewModel.removeExerciseFromPlan(exItem.id) }
                             )
                             if (idx < items.lastIndex) {
@@ -254,14 +257,20 @@ private fun WorkoutPlansBuilderSection(
 fun WorkoutPlanExerciseRow(
     index: Int,
     item: WorkoutPlanItemRecord,
+    clientId: String = "",
+    workoutPlans: List<WorkoutPlanRecord> = emptyList(),
+    workoutPlanItems: List<WorkoutPlanItemRecord> = emptyList(),
     onRemove: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             Text(
                 text = "$index. ${item.exerciseName}",
                 style = MaterialTheme.typography.titleSmall,
@@ -272,6 +281,12 @@ fun WorkoutPlanExerciseRow(
                 text = "${item.sets} séries × ${item.reps}$loadPart · Descanso ${item.restSeconds}s",
                 style = MaterialTheme.typography.bodySmall,
                 color = NewShapeGold
+            )
+            ExerciseLastLoadBadge(
+                item = item,
+                clientId = clientId,
+                workoutPlans = workoutPlans,
+                workoutPlanItems = workoutPlanItems
             )
             if (item.notes.isNotBlank()) {
                 Text(item.notes, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)

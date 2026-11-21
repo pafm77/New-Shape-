@@ -18,6 +18,7 @@ import {
   StatusPill,
   Textarea,
 } from './UiPrimitives';
+import { ExerciseLastLoadBadge } from './ExerciseLastLoadBadge';
 
 interface PtTrainingSectionProps {
   uid: string;
@@ -160,7 +161,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                             key={item.id}
                             className="flex items-center justify-between gap-3 py-2.5"
                           >
-                            <div>
+                            <div className="min-w-0 flex-1 space-y-1.5">
                               <p className="text-sm font-bold text-[#F4F4F5]">
                                 {idx + 1}. {item.exerciseName}
                               </p>
@@ -169,6 +170,12 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                                 {item.loadKg ? ` · ${item.loadKg}` : ''} · Descanso{' '}
                                 {item.restSeconds}s
                               </p>
+                              <ExerciseLastLoadBadge
+                                item={item}
+                                clientId={plan.clientId}
+                                workoutPlans={workoutPlans}
+                                workoutPlanItems={workoutPlanItems}
+                              />
                               {item.notes && (
                                 <p className="text-xs text-[#A1A1AA]">{item.notes}</p>
                               )}
