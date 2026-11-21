@@ -1,0 +1,362 @@
+﻿id,nome,categoria,calorias_kcal,proteina_g,hidratos_g,acucares_g,fibra_g,gordura_g,saturada_g,sodio_mg,origem
+1,Bebida de amêndoa sem açúcar,Alternativas vegetais,15.0,0.6,0.3,0.0,0.2,1.2,0.1,70.0,tabela
+2,Bebida de arroz,Alternativas vegetais,47.0,0.3,9.4,4.0,0.0,1.0,0.1,40.0,tabela
+3,Bebida de aveia,Alternativas vegetais,43.0,1.0,6.7,4.0,0.8,1.5,0.2,40.0,tabela
+4,Bebida de soja sem açúcar,Alternativas vegetais,33.0,2.8,1.7,1.0,0.4,1.8,0.2,51.0,tabela
+5,Leite de coco (lata),Alternativas vegetais,197.0,2.0,2.8,2.8,0.0,21.0,19.0,13.0,tabela
+6,Seitan,Alternativas vegetais,370.0,75.0,14.0,0.0,0.6,1.9,0.3,29.0,tabela
+7,Tempeh,Alternativas vegetais,192.0,20.0,7.6,0.0,0.0,10.8,2.2,9.0,tabela
+8,Tofu,Alternativas vegetais,76.0,8.0,1.9,0.6,0.3,4.8,0.7,7.0,tabela
+9,Bebida energética,Bebidas,45.0,0.0,11.0,11.0,0.0,0.0,0.0,40.0,tabela
+10,Café sem açúcar,Bebidas,1.0,0.1,0.0,0.0,0.0,0.0,0.0,2.0,tabela
+11,Cerveja,Bebidas,43.0,0.5,3.6,0.0,0.0,0.0,0.0,4.0,tabela
+12,Chá sem açúcar,Bebidas,1.0,0.0,0.3,0.0,0.0,0.0,0.0,3.0,tabela
+13,Refrigerante de cola,Bebidas,42.0,0.0,10.6,10.6,0.0,0.0,0.0,4.0,tabela
+14,Refrigerante de cola zero,Bebidas,0.0,0.0,0.0,0.0,0.0,0.0,0.0,11.0,tabela
+15,Sumo de laranja,Bebidas,45.0,0.7,10.4,8.4,0.2,0.2,0.0,1.0,tabela
+16,Sumo de maçã,Bebidas,46.0,0.1,11.4,9.6,0.2,0.1,0.0,4.0,tabela
+17,Vinho branco,Bebidas,82.0,0.1,2.6,1.0,0.0,0.0,0.0,5.0,tabela
+18,Vinho tinto,Bebidas,85.0,0.1,2.6,0.6,0.0,0.0,0.0,4.0,tabela
+19,Vodka,Bebidas,231.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,tabela
+20,Água de coco,Bebidas,19.0,0.7,3.7,2.6,1.1,0.2,0.2,105.0,tabela
+21,Bacon frito,Carne e charcutaria,541.0,37.0,1.4,0.0,0.0,42.0,14.0,1700.0,tabela
+22,Bife de vaca grelhado,Carne e charcutaria,210.0,27.0,0.0,0.0,0.0,11.0,4.5,60.0,tabela
+23,Borrego assado,Carne e charcutaria,258.0,25.0,0.0,0.0,0.0,17.0,7.3,72.0,tabela
+24,Cabrito assado,Carne e charcutaria,143.0,27.0,0.0,0.0,0.0,3.0,0.9,86.0,tabela
+25,Carne de vaca magra crua,Carne e charcutaria,143.0,21.0,0.0,0.0,0.0,6.0,2.5,60.0,tabela
+26,Carne picada de vaca (15% gordura) cozinhada,Carne e charcutaria,250.0,26.0,0.0,0.0,0.0,15.5,6.0,75.0,tabela
+27,Carne picada de vaca magra (5%) cozinhada,Carne e charcutaria,176.0,27.0,0.0,0.0,0.0,7.0,3.0,72.0,tabela
+28,Chouriço,Carne e charcutaria,455.0,24.0,2.0,1.0,0.0,38.0,14.0,1700.0,tabela
+29,Coelho cozinhado,Carne e charcutaria,197.0,30.0,0.0,0.0,0.0,8.0,2.4,47.0,tabela
+30,Costeleta de porco grelhada,Carne e charcutaria,231.0,26.0,0.0,0.0,0.0,14.0,5.0,62.0,tabela
+31,Coxa de frango sem pele cozinhada,Carne e charcutaria,172.0,24.2,0.0,0.0,0.0,7.6,2.0,90.0,tabela
+32,Fiambre de peru,Carne e charcutaria,105.0,17.0,2.0,1.0,0.0,2.5,0.8,1000.0,tabela
+33,Fiambre de porco,Carne e charcutaria,120.0,18.0,1.0,0.5,0.0,5.0,1.7,1100.0,tabela
+34,Frango assado com pele,Carne e charcutaria,239.0,27.0,0.0,0.0,0.0,14.0,3.8,82.0,tabela
+35,Fígado de frango cozinhado,Carne e charcutaria,167.0,24.0,0.9,0.0,0.0,6.5,2.2,71.0,tabela
+36,Fígado de vaca cozinhado,Carne e charcutaria,175.0,27.0,5.0,0.0,0.0,5.0,1.8,77.0,tabela
+37,Lombo de porco assado,Carne e charcutaria,192.0,29.0,0.0,0.0,0.0,8.0,3.0,60.0,tabela
+38,Pato assado sem pele,Carne e charcutaria,201.0,24.0,0.0,0.0,0.0,11.0,4.0,83.0,tabela
+39,Peito de frango cozinhado sem pele,Carne e charcutaria,165.0,31.0,0.0,0.0,0.0,3.6,1.0,74.0,tabela
+40,Peito de frango cru,Carne e charcutaria,120.0,22.5,0.0,0.0,0.0,2.6,0.6,45.0,tabela
+41,Peito de peru cozinhado,Carne e charcutaria,135.0,30.0,0.0,0.0,0.0,1.0,0.3,50.0,tabela
+42,Presunto,Carne e charcutaria,145.0,21.0,0.3,0.0,0.0,6.5,2.2,1900.0,tabela
+43,Salsicha tipo Frankfurt,Carne e charcutaria,290.0,11.0,3.0,1.0,0.0,26.0,9.0,1000.0,tabela
+44,Vitela crua,Carne e charcutaria,109.0,21.0,0.0,0.0,0.0,2.5,1.0,80.0,tabela
+45,Arroz basmati cozido,Cereais e derivados,121.0,3.5,25.0,0.0,0.4,0.4,0.1,1.0,tabela
+46,Arroz branco cozido,Cereais e derivados,130.0,2.7,28.0,0.1,0.4,0.3,0.1,1.0,tabela
+47,Arroz branco cru,Cereais e derivados,360.0,6.7,79.0,0.1,1.3,0.6,0.2,5.0,tabela
+48,Arroz integral cozido,Cereais e derivados,123.0,2.7,25.6,0.2,1.6,1.0,0.2,4.0,tabela
+49,Aveia em flocos,Cereais e derivados,379.0,13.2,67.7,1.0,10.1,6.5,1.1,6.0,tabela
+50,Batata assada,Cereais e derivados,93.0,2.5,21.0,1.2,2.2,0.1,0.0,10.0,tabela
+51,Batata cozida,Cereais e derivados,87.0,1.9,20.0,0.9,1.8,0.1,0.0,6.0,tabela
+52,Batata crua,Cereais e derivados,77.0,2.0,17.0,0.8,2.2,0.1,0.0,6.0,tabela
+53,Batata-doce cozida,Cereais e derivados,90.0,2.0,21.0,6.5,3.3,0.2,0.0,36.0,tabela
+54,Batata-doce crua,Cereais e derivados,86.0,1.6,20.0,4.2,3.0,0.1,0.0,55.0,tabela
+55,Batatas fritas (fast food),Cereais e derivados,312.0,3.4,41.0,0.3,3.8,15.0,2.3,210.0,tabela
+56,Bolacha Maria,Cereais e derivados,440.0,7.0,76.0,20.0,2.5,11.0,5.0,300.0,tabela
+57,Bolacha de arroz,Cereais e derivados,387.0,8.0,82.0,0.5,3.0,2.8,0.6,29.0,tabela
+58,Bolacha de água e sal,Cereais e derivados,430.0,10.0,72.0,3.0,3.0,11.0,5.0,1000.0,tabela
+59,Cornflakes,Cereais e derivados,357.0,7.5,84.0,8.0,3.0,0.4,0.1,729.0,tabela
+60,Cuscuz cozido,Cereais e derivados,112.0,3.8,23.0,0.1,1.4,0.2,0.0,5.0,tabela
+61,Farinha de milho,Cereais e derivados,361.0,6.9,77.0,0.6,7.3,3.9,0.5,5.0,tabela
+62,Farinha de trigo,Cereais e derivados,364.0,10.0,76.0,0.3,2.7,1.0,0.2,2.0,tabela
+63,Granola,Cereais e derivados,471.0,10.0,64.0,20.0,7.0,20.0,4.0,26.0,tabela
+64,Inhame cozido,Cereais e derivados,118.0,1.5,28.0,0.5,4.1,0.2,0.0,9.0,tabela
+65,Mandioca cozida,Cereais e derivados,160.0,1.4,38.0,1.7,1.8,0.3,0.1,14.0,tabela
+66,Massa cozida,Cereais e derivados,158.0,5.8,31.0,0.6,1.8,0.9,0.2,1.0,tabela
+67,Massa crua,Cereais e derivados,358.0,12.5,72.0,2.7,3.2,1.5,0.3,6.0,tabela
+68,Massa integral cozida,Cereais e derivados,124.0,5.3,25.0,0.8,3.9,0.5,0.1,3.0,tabela
+69,Milho cozido,Cereais e derivados,96.0,3.4,21.0,4.5,2.4,1.5,0.2,15.0,tabela
+70,Muesli,Cereais e derivados,340.0,10.0,66.0,15.0,8.0,5.5,1.0,26.0,tabela
+71,Papas de aveia cozidas em água,Cereais e derivados,71.0,2.5,12.0,0.3,1.7,1.5,0.3,4.0,tabela
+72,Pipocas (sem manteiga),Cereais e derivados,387.0,13.0,78.0,0.9,15.0,4.5,0.6,8.0,tabela
+73,Pão de centeio,Cereais e derivados,259.0,8.5,48.0,3.9,5.8,3.3,0.6,603.0,tabela
+74,Pão de forma branco,Cereais e derivados,265.0,9.0,49.0,5.0,2.7,3.2,0.7,491.0,tabela
+75,Pão de forma integral,Cereais e derivados,247.0,13.0,41.0,6.0,7.0,4.2,0.9,450.0,tabela
+76,Pão de milho,Cereais e derivados,230.0,5.0,48.0,2.0,3.0,2.0,0.4,500.0,tabela
+77,Pão de trigo (carcaça),Cereais e derivados,275.0,9.0,57.0,2.0,2.5,1.0,0.2,550.0,tabela
+78,Pão ralado,Cereais e derivados,395.0,13.0,72.0,6.0,4.5,5.0,1.0,732.0,tabela
+79,Quinoa cozida,Cereais e derivados,120.0,4.4,21.3,0.9,2.8,1.9,0.2,7.0,tabela
+80,Tortilha de trigo,Cereais e derivados,312.0,8.2,52.0,3.6,3.0,8.0,2.2,640.0,tabela
+81,Tostas,Cereais e derivados,390.0,11.0,72.0,3.0,4.0,6.0,1.0,500.0,tabela
+82,Açúcar branco,Doces e snacks,387.0,0.0,100.0,100.0,0.0,0.0,0.0,1.0,estimativa
+83,Batatas fritas de pacote,Doces e snacks,536.0,7.0,53.0,0.5,4.4,34.0,3.5,525.0,estimativa
+84,Bolacha recheada,Doces e snacks,480.0,5.0,70.0,36.0,2.0,20.0,10.0,300.0,estimativa
+85,Bolo de chocolate,Doces e snacks,370.0,5.0,50.0,35.0,2.0,17.0,5.0,300.0,estimativa
+86,Chocolate branco,Doces e snacks,539.0,5.9,59.0,59.0,0.2,32.0,19.0,90.0,estimativa
+87,Chocolate de leite,Doces e snacks,535.0,7.7,59.0,56.0,3.4,30.0,18.0,79.0,estimativa
+88,Chocolate negro 70%,Doces e snacks,598.0,7.8,46.0,24.0,11.0,43.0,25.0,20.0,estimativa
+89,Creme de avelã e cacau,Doces e snacks,539.0,6.3,57.5,56.3,3.4,30.9,10.6,43.0,estimativa
+90,Croissant,Doces e snacks,406.0,8.2,45.8,11.3,2.6,21.0,12.0,400.0,estimativa
+91,Doce/geleia de fruta,Doces e snacks,250.0,0.4,65.0,60.0,0.5,0.1,0.0,10.0,estimativa
+92,Donut,Doces e snacks,452.0,4.9,51.0,22.0,1.7,25.0,10.0,326.0,estimativa
+93,Mel,Doces e snacks,304.0,0.3,82.4,82.1,0.2,0.0,0.0,4.0,estimativa
+94,Pastel de nata,Doces e snacks,298.0,5.5,35.0,16.0,1.0,15.0,8.0,150.0,estimativa
+95,Abacate,Fruta,160.0,2.0,8.5,0.7,6.7,14.7,2.1,7.0,tabela
+96,Alperce,Fruta,48.0,1.4,11.1,9.2,2.0,0.4,0.0,1.0,tabela
+97,Alperce seco,Fruta,241.0,3.4,62.6,53.4,7.3,0.5,0.0,10.0,tabela
+98,Ameixa,Fruta,46.0,0.7,11.4,9.9,1.4,0.3,0.0,0.0,tabela
+99,Ameixa seca,Fruta,240.0,2.2,63.9,38.1,7.1,0.4,0.0,2.0,tabela
+100,Amora,Fruta,43.0,1.4,9.6,4.9,5.3,0.5,0.0,1.0,tabela
+101,Ananás,Fruta,50.0,0.5,13.1,9.9,1.4,0.1,0.0,1.0,tabela
+102,Banana,Fruta,89.0,1.1,22.8,12.2,2.6,0.3,0.1,1.0,tabela
+103,Cereja,Fruta,63.0,1.1,16.0,12.8,2.1,0.2,0.0,0.0,tabela
+104,Coco fresco,Fruta,354.0,3.3,15.2,6.2,9.0,33.5,29.7,20.0,tabela
+105,Cranberries secas,Fruta,308.0,0.1,82.8,72.6,5.3,1.4,0.1,5.0,tabela
+106,Dióspiro,Fruta,70.0,0.6,18.6,12.5,3.6,0.2,0.0,1.0,tabela
+107,Figo,Fruta,74.0,0.8,19.2,16.3,2.9,0.3,0.1,1.0,tabela
+108,Figo seco,Fruta,249.0,3.3,63.9,47.9,9.8,0.9,0.2,10.0,tabela
+109,Framboesa,Fruta,52.0,1.2,11.9,4.4,6.5,0.7,0.0,1.0,tabela
+110,Goiaba,Fruta,68.0,2.6,14.3,8.9,5.4,1.0,0.3,2.0,tabela
+111,Kiwi,Fruta,61.0,1.1,14.7,9.0,3.0,0.5,0.0,3.0,tabela
+112,Laranja,Fruta,47.0,0.9,11.8,9.4,2.4,0.1,0.0,0.0,tabela
+113,Lichia,Fruta,66.0,0.8,16.5,15.2,1.3,0.4,0.1,1.0,tabela
+114,Lima,Fruta,30.0,0.7,10.5,1.7,2.8,0.2,0.0,2.0,tabela
+115,Limão,Fruta,29.0,1.1,9.3,2.5,2.8,0.3,0.0,2.0,tabela
+116,Manga,Fruta,60.0,0.8,15.0,13.7,1.6,0.4,0.1,1.0,tabela
+117,Maracujá,Fruta,97.0,2.2,23.4,11.2,10.4,0.7,0.1,28.0,tabela
+118,Maçã,Fruta,52.0,0.3,13.8,10.4,2.4,0.2,0.0,1.0,tabela
+119,Melancia,Fruta,30.0,0.6,7.6,6.2,0.4,0.2,0.0,1.0,tabela
+120,Melão,Fruta,34.0,0.8,8.2,7.9,0.9,0.2,0.0,16.0,tabela
+121,Mirtilo,Fruta,57.0,0.7,14.5,10.0,2.4,0.3,0.0,1.0,tabela
+122,Morango,Fruta,32.0,0.7,7.7,4.9,2.0,0.3,0.0,1.0,tabela
+123,Nectarina,Fruta,44.0,1.1,10.6,7.9,1.7,0.3,0.0,0.0,tabela
+124,Papaia,Fruta,43.0,0.5,10.8,7.8,1.7,0.3,0.1,8.0,tabela
+125,Pera,Fruta,57.0,0.4,15.2,9.8,3.1,0.1,0.0,1.0,tabela
+126,Pêssego,Fruta,39.0,0.9,9.5,8.4,1.5,0.3,0.0,0.0,tabela
+127,Romã,Fruta,83.0,1.7,18.7,13.7,4.0,1.2,0.1,3.0,tabela
+128,Tangerina,Fruta,53.0,0.8,13.3,10.6,1.8,0.3,0.0,2.0,tabela
+129,Toranja,Fruta,42.0,0.8,10.7,6.9,1.6,0.1,0.0,0.0,tabela
+130,Tâmara,Fruta,282.0,2.5,75.0,63.0,8.0,0.4,0.0,2.0,tabela
+131,Uva,Fruta,69.0,0.7,18.1,15.5,0.9,0.2,0.1,2.0,tabela
+132,Uvas passas,Fruta,299.0,3.1,79.2,59.2,3.7,0.5,0.1,11.0,tabela
+133,Amendoim,Frutos secos e sementes,567.0,25.8,16.1,4.7,8.5,49.2,6.8,18.0,tabela
+134,Amêndoa,Frutos secos e sementes,579.0,21.2,21.6,4.4,12.5,49.9,3.8,1.0,tabela
+135,Avelã,Frutos secos e sementes,628.0,15.0,16.7,4.3,9.7,60.8,4.5,0.0,tabela
+136,Caju,Frutos secos e sementes,553.0,18.2,30.2,5.9,3.3,43.9,7.8,12.0,tabela
+137,Castanha assada,Frutos secos e sementes,245.0,3.2,53.0,11.0,5.0,2.2,0.4,27.0,tabela
+138,Coco ralado,Frutos secos e sementes,660.0,6.9,23.7,7.4,16.3,64.5,57.2,37.0,tabela
+139,Macadâmia,Frutos secos e sementes,718.0,7.9,13.8,4.6,8.6,75.8,12.0,5.0,tabela
+140,Noz,Frutos secos e sementes,654.0,15.2,13.7,2.6,6.7,65.2,6.1,2.0,tabela
+141,Noz-pecã,Frutos secos e sementes,691.0,9.2,13.9,4.0,9.6,72.0,6.2,0.0,tabela
+142,Pinhão,Frutos secos e sementes,673.0,13.7,13.1,3.6,3.7,68.4,4.9,2.0,tabela
+143,Pistáchio,Frutos secos e sementes,560.0,20.2,27.2,7.7,10.6,45.3,5.7,1.0,tabela
+144,Sementes de abóbora,Frutos secos e sementes,559.0,30.0,10.7,1.4,6.0,49.0,8.7,7.0,tabela
+145,Sementes de chia,Frutos secos e sementes,486.0,16.5,42.1,0.0,34.4,30.7,3.3,16.0,tabela
+146,Sementes de girassol,Frutos secos e sementes,584.0,20.8,20.0,2.6,8.6,51.5,4.5,9.0,tabela
+147,Sementes de linhaça,Frutos secos e sementes,534.0,18.3,28.9,1.6,27.3,42.2,3.7,30.0,tabela
+148,Sementes de sésamo,Frutos secos e sementes,573.0,17.7,23.5,0.3,11.8,49.7,7.0,11.0,tabela
+149,Tahini,Frutos secos e sementes,595.0,17.0,21.2,0.5,9.3,53.8,7.5,115.0,tabela
+150,Azeite,Gorduras e molhos,884.0,0.0,0.0,0.0,0.0,100.0,13.8,2.0,tabela
+151,Banha,Gorduras e molhos,902.0,0.0,0.0,0.0,0.0,100.0,39.0,0.0,tabela
+152,Ketchup,Gorduras e molhos,101.0,1.0,27.0,22.0,0.3,0.1,0.0,907.0,tabela
+153,Maionese,Gorduras e molhos,680.0,1.0,0.6,0.6,0.0,75.0,12.0,635.0,tabela
+154,Molho de soja,Gorduras e molhos,53.0,8.0,4.9,0.4,0.8,0.6,0.1,5493.0,tabela
+155,Mostarda,Gorduras e molhos,66.0,4.0,5.0,2.0,3.0,4.0,0.3,1135.0,tabela
+156,Sal,Gorduras e molhos,0.0,0.0,0.0,0.0,0.0,0.0,0.0,38758.0,tabela
+157,Vinagre,Gorduras e molhos,18.0,0.0,0.04,0.04,0.0,0.0,0.0,2.0,tabela
+158,Óleo de coco,Gorduras e molhos,862.0,0.0,0.0,0.0,0.0,100.0,82.0,0.0,tabela
+159,Óleo de girassol,Gorduras e molhos,884.0,0.0,0.0,0.0,0.0,100.0,10.0,0.0,tabela
+160,Abóbora,Legumes e hortícolas,26.0,1.0,6.5,2.8,0.5,0.1,0.1,1.0,tabela
+161,Acelga,Legumes e hortícolas,19.0,1.8,3.7,1.1,1.6,0.2,0.0,213.0,tabela
+162,Agrião,Legumes e hortícolas,11.0,2.3,1.3,0.2,0.5,0.1,0.0,41.0,tabela
+163,Aipo,Legumes e hortícolas,16.0,0.7,3.0,1.3,1.6,0.2,0.0,80.0,tabela
+164,Alcachofra cozida,Legumes e hortícolas,53.0,2.9,11.9,1.0,5.7,0.3,0.1,94.0,tabela
+165,Alface,Legumes e hortícolas,15.0,1.4,2.9,0.8,1.3,0.2,0.0,28.0,tabela
+166,Alho,Legumes e hortícolas,149.0,6.4,33.0,1.0,2.1,0.5,0.1,17.0,tabela
+167,Alho-francês,Legumes e hortícolas,61.0,1.5,14.2,3.9,1.8,0.3,0.0,20.0,tabela
+168,Azeitonas,Legumes e hortícolas,145.0,1.0,3.8,0.0,3.3,15.3,2.0,1556.0,tabela
+169,Beringela,Legumes e hortícolas,25.0,1.0,5.9,3.5,3.0,0.2,0.0,2.0,tabela
+170,Beterraba cozida,Legumes e hortícolas,44.0,1.7,10.0,8.0,2.0,0.2,0.0,77.0,tabela
+171,Brócolos cozidos,Legumes e hortícolas,35.0,2.4,7.2,1.4,3.3,0.4,0.1,41.0,tabela
+172,Brócolos crus,Legumes e hortícolas,34.0,2.8,6.6,1.7,2.6,0.4,0.1,33.0,tabela
+173,Cebola,Legumes e hortícolas,40.0,1.1,9.3,4.2,1.7,0.1,0.0,4.0,tabela
+174,Cenoura cozida,Legumes e hortícolas,35.0,0.8,8.2,3.4,3.0,0.2,0.0,58.0,tabela
+175,Cenoura crua,Legumes e hortícolas,41.0,0.9,9.6,4.7,2.8,0.2,0.0,69.0,tabela
+176,Coentros,Legumes e hortícolas,23.0,2.1,3.7,0.9,2.8,0.5,0.0,46.0,tabela
+177,Cogumelos,Legumes e hortícolas,22.0,3.1,3.3,2.0,1.0,0.3,0.0,5.0,tabela
+178,Concentrado de tomate,Legumes e hortícolas,82.0,4.3,19.0,12.0,4.1,0.5,0.1,59.0,tabela
+179,Couve galega,Legumes e hortícolas,35.0,2.9,4.4,0.8,4.1,1.5,0.2,53.0,tabela
+180,Couve-de-bruxelas,Legumes e hortícolas,43.0,3.4,9.0,2.2,3.8,0.3,0.1,25.0,tabela
+181,Couve-flor,Legumes e hortícolas,25.0,1.9,5.0,1.9,2.0,0.3,0.1,30.0,tabela
+182,Curgete,Legumes e hortícolas,17.0,1.2,3.1,2.5,1.0,0.3,0.1,8.0,tabela
+183,Espargos,Legumes e hortícolas,20.0,2.2,3.9,1.9,2.1,0.1,0.0,2.0,tabela
+184,Espinafres cozinhados,Legumes e hortícolas,23.0,3.0,3.8,0.4,2.4,0.3,0.1,70.0,tabela
+185,Espinafres crus,Legumes e hortícolas,23.0,2.9,3.6,0.4,2.2,0.4,0.1,79.0,tabela
+186,Feijão-verde cozido,Legumes e hortícolas,35.0,1.9,7.9,3.3,3.2,0.3,0.1,1.0,tabela
+187,Funcho,Legumes e hortícolas,31.0,1.2,7.3,3.9,3.1,0.2,0.0,52.0,tabela
+188,Gengibre,Legumes e hortícolas,80.0,1.8,17.8,1.7,2.0,0.8,0.2,13.0,tabela
+189,Nabo,Legumes e hortícolas,28.0,0.9,6.4,3.8,1.8,0.1,0.0,67.0,tabela
+190,Pepino,Legumes e hortícolas,15.0,0.7,3.6,1.7,0.5,0.1,0.0,2.0,tabela
+191,Pickles de pepino,Legumes e hortícolas,11.0,0.3,2.3,1.1,1.0,0.2,0.0,1208.0,tabela
+192,Pimento verde,Legumes e hortícolas,20.0,0.9,4.6,2.4,1.7,0.2,0.1,3.0,tabela
+193,Pimento vermelho,Legumes e hortícolas,31.0,1.0,6.0,4.2,2.1,0.3,0.1,4.0,tabela
+194,Rabanete,Legumes e hortícolas,16.0,0.7,3.4,1.9,1.6,0.1,0.0,39.0,tabela
+195,Repolho,Legumes e hortícolas,25.0,1.3,5.8,3.2,2.5,0.1,0.0,18.0,tabela
+196,Rúcula,Legumes e hortícolas,25.0,2.6,3.7,2.1,1.6,0.7,0.1,27.0,tabela
+197,Salsa,Legumes e hortícolas,36.0,3.0,6.3,0.9,3.3,0.8,0.1,56.0,tabela
+198,Tomate,Legumes e hortícolas,18.0,0.9,3.9,2.6,1.2,0.2,0.0,5.0,tabela
+199,Tomate pelado em lata,Legumes e hortícolas,21.0,1.1,4.3,2.8,1.4,0.2,0.0,132.0,tabela
+200,Edamame,Leguminosas,121.0,11.9,8.9,2.2,5.2,5.2,0.6,6.0,tabela
+201,Ervilhas cozidas,Leguminosas,84.0,5.4,15.0,5.9,5.5,0.2,0.0,3.0,tabela
+202,Favas cozidas,Leguminosas,110.0,7.6,19.7,1.8,5.4,0.4,0.1,5.0,tabela
+203,Feijão branco cozido,Leguminosas,139.0,9.7,25.0,0.3,6.3,0.4,0.1,6.0,tabela
+204,Feijão encarnado cozido,Leguminosas,127.0,8.7,22.8,0.3,7.4,0.5,0.1,2.0,tabela
+205,Feijão preto cozido,Leguminosas,132.0,8.9,23.7,0.3,8.7,0.5,0.1,1.0,tabela
+206,Grão-de-bico cozido,Leguminosas,164.0,8.9,27.4,4.8,7.6,2.6,0.3,7.0,tabela
+207,Grão-de-bico em lata escorrido,Leguminosas,139.0,7.0,22.0,4.0,6.0,2.8,0.3,250.0,tabela
+208,Húmus,Leguminosas,166.0,7.9,14.3,0.3,6.0,9.6,1.4,379.0,tabela
+209,Lentilhas cozidas,Leguminosas,116.0,9.0,20.0,1.8,7.9,0.4,0.1,2.0,tabela
+210,Manteiga de amendoim,Leguminosas,588.0,25.0,20.0,9.0,6.0,50.0,10.0,426.0,tabela
+211,Soja cozida,Leguminosas,173.0,16.6,9.9,3.0,6.0,9.0,1.3,1.0,tabela
+212,Tremoços cozidos,Leguminosas,119.0,15.6,9.9,0.0,2.8,2.9,0.4,4.0,tabela
+213,Clara de ovo,Ovos e lacticínios,52.0,10.9,0.7,0.7,0.0,0.2,0.0,166.0,tabela
+214,Gelado de baunilha,Ovos e lacticínios,207.0,3.5,24.0,21.0,0.7,11.0,6.8,80.0,tabela
+215,Gema de ovo,Ovos e lacticínios,322.0,15.9,3.6,0.6,0.0,26.5,9.6,48.0,tabela
+216,Iogurte aromatizado/de frutas,Ovos e lacticínios,90.0,3.5,15.0,14.0,0.0,1.8,1.2,50.0,tabela
+217,Iogurte grego 0% gordura,Ovos e lacticínios,59.0,10.2,3.6,3.2,0.0,0.4,0.1,36.0,tabela
+218,Iogurte grego natural,Ovos e lacticínios,97.0,9.0,4.0,4.0,0.0,5.0,3.2,35.0,tabela
+219,Iogurte natural,Ovos e lacticínios,61.0,3.5,4.7,4.7,0.0,3.3,2.1,46.0,tabela
+220,Iogurte natural magro,Ovos e lacticínios,40.0,4.0,5.5,5.5,0.0,0.2,0.1,50.0,tabela
+221,Leite com chocolate,Ovos e lacticínios,83.0,3.4,10.4,9.5,0.4,3.4,2.0,50.0,tabela
+222,Leite gordo,Ovos e lacticínios,61.0,3.2,4.8,4.8,0.0,3.3,1.9,43.0,tabela
+223,Leite magro,Ovos e lacticínios,34.0,3.4,5.0,5.0,0.0,0.1,0.1,42.0,tabela
+224,Leite meio-gordo,Ovos e lacticínios,46.0,3.3,4.8,4.8,0.0,1.6,1.0,44.0,tabela
+225,Manteiga,Ovos e lacticínios,717.0,0.9,0.1,0.1,0.0,81.0,51.0,576.0,tabela
+226,Margarina,Ovos e lacticínios,717.0,0.2,0.7,0.0,0.0,80.0,15.0,750.0,tabela
+227,Mozzarella fresca,Ovos e lacticínios,250.0,18.0,2.0,1.0,0.0,19.0,12.0,350.0,tabela
+228,Natas culinárias (20%),Ovos e lacticínios,195.0,2.5,3.5,3.5,0.0,19.0,12.0,35.0,tabela
+229,Natas para bater (35%),Ovos e lacticínios,340.0,2.1,2.8,2.8,0.0,36.0,23.0,27.0,tabela
+230,Ovo cozido,Ovos e lacticínios,155.0,12.6,1.1,1.1,0.0,10.6,3.3,124.0,tabela
+231,Ovo estrelado,Ovos e lacticínios,196.0,13.6,0.8,0.4,0.0,15.0,4.4,207.0,tabela
+232,Ovo inteiro cru,Ovos e lacticínios,143.0,12.6,0.7,0.4,0.0,9.5,3.1,142.0,tabela
+233,Proteína whey em pó,Ovos e lacticínios,400.0,80.0,8.0,5.0,0.0,6.0,3.5,200.0,tabela
+234,Queijo cheddar,Ovos e lacticínios,403.0,25.0,1.3,0.5,0.0,33.0,21.0,653.0,tabela
+235,Queijo creme,Ovos e lacticínios,342.0,6.0,4.0,3.5,0.0,34.0,19.0,321.0,tabela
+236,Queijo feta,Ovos e lacticínios,264.0,14.0,4.0,4.0,0.0,21.0,15.0,917.0,tabela
+237,Queijo flamengo,Ovos e lacticínios,357.0,25.0,1.4,1.4,0.0,28.0,18.0,965.0,tabela
+238,Queijo fresco,Ovos e lacticínios,98.0,11.0,3.0,3.0,0.0,4.5,2.9,300.0,tabela
+239,Queijo mozzarella,Ovos e lacticínios,280.0,28.0,3.1,1.0,0.0,17.0,11.0,627.0,tabela
+240,Queijo parmesão,Ovos e lacticínios,431.0,38.0,4.1,0.9,0.0,29.0,19.0,1529.0,tabela
+241,Requeijão,Ovos e lacticínios,174.0,11.3,3.0,0.3,0.0,13.0,8.0,84.0,tabela
+242,Skyr,Ovos e lacticínios,63.0,11.0,4.0,4.0,0.0,0.2,0.1,50.0,tabela
+243,Amêijoa cozida,Peixe e marisco,148.0,26.0,5.0,0.0,0.0,2.0,0.2,56.0,tabela
+244,Anchovas em conserva,Peixe e marisco,210.0,29.0,0.0,0.0,0.0,10.0,2.2,3700.0,tabela
+245,Atum em azeite (conserva),Peixe e marisco,190.0,27.0,0.0,0.0,0.0,8.5,1.3,350.0,tabela
+246,Atum em água (conserva),Peixe e marisco,116.0,26.0,0.0,0.0,0.0,0.8,0.2,247.0,tabela
+247,Atum fresco cru,Peixe e marisco,109.0,24.0,0.0,0.0,0.0,0.5,0.1,39.0,tabela
+248,Bacalhau cozido,Peixe e marisco,105.0,23.0,0.0,0.0,0.0,0.9,0.2,78.0,tabela
+249,Bacalhau salgado seco cru,Peixe e marisco,290.0,62.8,0.0,0.0,0.0,2.4,0.5,8100.0,tabela
+250,Camarão cozido,Peixe e marisco,99.0,24.0,0.2,0.0,0.0,0.3,0.1,111.0,tabela
+251,Caranguejo cozido,Peixe e marisco,97.0,19.0,0.0,0.0,0.0,1.5,0.2,293.0,tabela
+252,Carapau grelhado,Peixe e marisco,150.0,24.0,0.0,0.0,0.0,5.5,1.5,70.0,tabela
+253,Cavala grelhada,Peixe e marisco,262.0,24.0,0.0,0.0,0.0,18.0,4.2,83.0,tabela
+254,Dourada grelhada,Peixe e marisco,128.0,22.0,0.0,0.0,0.0,4.5,1.2,80.0,tabela
+255,Linguado cozinhado,Peixe e marisco,86.0,17.5,0.0,0.0,0.0,1.3,0.3,100.0,tabela
+256,Lulas cruas,Peixe e marisco,92.0,15.6,3.1,0.0,0.0,1.4,0.4,44.0,tabela
+257,Mexilhão cozido,Peixe e marisco,172.0,24.0,7.0,0.0,0.0,4.5,0.9,369.0,tabela
+258,Ostra crua,Peixe e marisco,68.0,7.0,4.0,0.0,0.0,2.5,0.5,211.0,tabela
+259,Pescada cozida,Peixe e marisco,90.0,19.0,0.0,0.0,0.0,1.0,0.2,80.0,tabela
+260,Polvo cozido,Peixe e marisco,164.0,30.0,4.4,0.0,0.0,2.1,0.5,230.0,tabela
+261,Robalo grelhado,Peixe e marisco,124.0,23.0,0.0,0.0,0.0,2.6,0.6,86.0,tabela
+262,Salmão cozinhado,Peixe e marisco,206.0,22.0,0.0,0.0,0.0,12.0,2.5,61.0,tabela
+263,Salmão cru,Peixe e marisco,208.0,20.0,0.0,0.0,0.0,13.0,3.0,59.0,tabela
+264,Salmão fumado,Peixe e marisco,117.0,18.3,0.0,0.0,0.0,4.3,0.9,784.0,tabela
+265,Sardinha crua,Peixe e marisco,135.0,19.0,0.0,0.0,0.0,6.0,1.5,100.0,tabela
+266,Sardinha em conserva (azeite),Peixe e marisco,208.0,25.0,0.0,0.0,0.0,11.5,1.5,505.0,tabela
+267,Sardinha grelhada,Peixe e marisco,208.0,25.0,0.0,0.0,0.0,11.5,1.5,120.0,tabela
+268,Surimi,Peixe e marisco,99.0,15.0,7.0,0.0,0.0,0.5,0.1,500.0,tabela
+269,Tilápia cozinhada,Peixe e marisco,128.0,26.0,0.0,0.0,0.0,2.7,0.9,56.0,tabela
+270,Truta cozinhada,Peixe e marisco,168.0,23.8,0.0,0.0,0.0,7.4,2.1,67.0,tabela
+271,Bacalhau à Brás,Pratos e refeições,170.0,12.0,10.0,1.0,1.0,9.0,2.0,400.0,estimativa
+272,Caldo verde,Pratos e refeições,40.0,1.5,5.0,1.0,1.5,1.5,0.4,300.0,estimativa
+273,Hambúrguer com pão (fast food),Pratos e refeições,250.0,12.0,31.0,6.0,1.5,9.6,3.5,480.0,estimativa
+274,Pizza margherita,Pratos e refeições,266.0,11.0,33.0,3.6,2.3,10.0,4.8,598.0,estimativa
+275,Sopa de legumes,Pratos e refeições,30.0,1.0,5.0,1.5,1.3,0.7,0.1,300.0,estimativa
+276,Alheira grelhada,Pratos portugueses,250.0,16.0,12.0,0.5,1.0,15.0,4.0,900.0,estimativa
+277,Arroz de feijão,Pratos portugueses,140.0,4.5,25.0,0.5,3.0,2.5,0.4,300.0,estimativa
+278,Arroz de marisco,Pratos portugueses,130.0,8.0,17.0,1.0,0.8,3.0,0.7,400.0,estimativa
+279,Arroz de pato,Pratos portugueses,190.0,10.0,24.0,1.0,0.8,6.0,1.8,450.0,estimativa
+280,Arroz de tomate,Pratos portugueses,150.0,3.0,29.0,1.5,1.0,2.5,0.4,300.0,estimativa
+281,Arroz doce,Pratos portugueses,150.0,3.2,26.0,15.0,0.2,4.0,2.2,50.0,estimativa
+282,Açorda alentejana,Pratos portugueses,120.0,5.0,15.0,1.0,1.0,4.0,0.8,400.0,estimativa
+283,Bacalhau assado com batatas,Pratos portugueses,120.0,10.0,8.0,0.5,1.0,5.5,0.8,300.0,estimativa
+284,Bacalhau com natas,Pratos portugueses,150.0,10.0,8.0,1.5,0.8,9.0,4.5,350.0,estimativa
+285,Bacalhau com todos,Pratos portugueses,130.0,9.0,9.0,1.0,1.5,6.0,1.0,300.0,estimativa
+286,Bacalhau à Gomes de Sá,Pratos portugueses,135.0,10.0,9.0,1.0,1.0,6.5,1.0,380.0,estimativa
+287,Bifana no pão,Pratos portugueses,250.0,14.0,24.0,1.5,1.2,11.0,3.5,600.0,estimativa
+288,Bola de Berlim com creme,Pratos portugueses,340.0,6.0,48.0,22.0,1.5,14.0,5.0,200.0,estimativa
+289,Bolinhos de bacalhau,Pratos portugueses,230.0,11.0,22.0,0.5,1.5,11.0,2.0,550.0,estimativa
+290,Bolo de bolacha,Pratos portugueses,340.0,4.0,38.0,25.0,0.5,19.0,10.0,150.0,estimativa
+291,Caldeirada de peixe,Pratos portugueses,90.0,10.0,6.0,1.5,1.0,3.0,0.6,300.0,estimativa
+292,Cozido à portuguesa,Pratos portugueses,150.0,12.0,8.0,1.0,2.0,8.0,3.0,450.0,estimativa
+293,Creme de abóbora,Pratos portugueses,40.0,0.8,6.0,3.0,1.0,1.3,0.5,250.0,estimativa
+294,Croquete de carne,Pratos portugueses,260.0,9.0,24.0,1.0,1.0,14.0,4.0,500.0,estimativa
+295,Empada de galinha,Pratos portugueses,330.0,8.0,33.0,1.0,1.0,19.0,8.0,450.0,estimativa
+296,Farturas,Pratos portugueses,330.0,4.5,40.0,6.0,1.0,17.0,3.0,300.0,estimativa
+297,Feijoada à portuguesa,Pratos portugueses,160.0,9.0,12.0,1.0,4.0,8.0,3.0,500.0,estimativa
+298,Filhós,Pratos portugueses,400.0,6.0,50.0,18.0,1.5,20.0,4.0,150.0,estimativa
+299,Francesinha,Pratos portugueses,280.0,15.0,16.0,2.0,1.0,17.0,7.0,700.0,estimativa
+300,Frango de churrasco (piri-piri),Pratos portugueses,200.0,25.0,1.0,0.5,0.0,11.0,3.0,350.0,estimativa
+301,Leite-creme,Pratos portugueses,160.0,4.5,22.0,20.0,0.0,6.0,3.0,50.0,estimativa
+302,Leitão assado,Pratos portugueses,300.0,27.0,0.0,0.0,0.0,21.0,7.0,90.0,estimativa
+303,Migas alentejanas,Pratos portugueses,190.0,6.0,20.0,0.5,1.5,9.0,2.0,400.0,estimativa
+304,Mousse de chocolate,Pratos portugueses,230.0,4.5,24.0,22.0,1.5,13.0,7.0,60.0,estimativa
+305,Pastel de massa tenra,Pratos portugueses,300.0,9.0,28.0,1.0,1.0,17.0,6.0,400.0,estimativa
+306,Pataniscas de bacalhau,Pratos portugueses,250.0,9.0,24.0,1.0,1.0,13.0,2.0,500.0,estimativa
+307,Pica-pau,Pratos portugueses,190.0,20.0,3.0,1.0,0.5,11.0,4.0,400.0,estimativa
+308,Polvo à lagareiro com batatas,Pratos portugueses,130.0,14.0,8.0,0.5,1.0,5.0,0.8,200.0,estimativa
+309,Prego no pão,Pratos portugueses,250.0,15.0,22.0,2.0,1.0,11.0,4.0,500.0,estimativa
+310,Pudim flan,Pratos portugueses,150.0,4.5,22.0,20.0,0.0,5.0,2.0,90.0,estimativa
+311,Pão com chouriço,Pratos portugueses,330.0,13.0,36.0,2.0,2.0,15.0,5.0,800.0,estimativa
+312,Pão-de-ló,Pratos portugueses,330.0,7.0,55.0,35.0,0.5,9.0,2.5,150.0,estimativa
+313,Queijada de Sintra,Pratos portugueses,330.0,8.0,50.0,35.0,0.5,11.0,6.0,120.0,estimativa
+314,Rissol de camarão,Pratos portugueses,270.0,8.0,28.0,1.0,1.0,14.0,4.0,450.0,estimativa
+315,Rojões,Pratos portugueses,230.0,22.0,2.0,0.5,0.3,15.0,5.0,400.0,estimativa
+316,Salada de feijão-frade com atum e ovo,Pratos portugueses,140.0,8.0,14.0,1.0,4.0,6.0,1.0,250.0,estimativa
+317,Salada mista (com azeite),Pratos portugueses,35.0,1.0,4.0,2.5,1.5,1.5,0.2,150.0,estimativa
+318,Sopa de feijão,Pratos portugueses,55.0,3.0,8.0,1.0,2.0,1.0,0.2,300.0,estimativa
+319,Sopa de peixe,Pratos portugueses,45.0,4.0,4.0,1.0,0.8,1.5,0.3,300.0,estimativa
+320,Tosta mista,Pratos portugueses,270.0,13.0,26.0,2.0,1.5,12.0,6.0,700.0,estimativa
+321,Toucinho do céu,Pratos portugueses,420.0,8.0,50.0,45.0,1.0,21.0,5.0,40.0,estimativa
+322,Travesseiro de Sintra,Pratos portugueses,400.0,7.0,45.0,25.0,1.0,22.0,10.0,150.0,estimativa
+323,Atum com feijão e milho (lata),Produtos de supermercado e marcas,120.0,9.0,10.0,1.0,3.0,5.0,0.9,300.0,estimativa
+324,Barra de cereais com chocolate,Produtos de supermercado e marcas,400.0,6.0,70.0,28.0,5.0,10.0,3.0,150.0,estimativa
+325,Cereais de chocolate (tipo Chocapic),Produtos de supermercado e marcas,390.0,8.0,73.0,22.0,7.0,4.0,1.0,150.0,estimativa
+326,Digestive (tipo McVitie's),Produtos de supermercado e marcas,480.0,6.5,63.0,20.0,3.0,22.0,10.0,400.0,estimativa
+327,Douradinhos de pescada,Produtos de supermercado e marcas,240.0,11.0,20.0,1.0,1.0,13.0,1.5,500.0,estimativa
+328,Fanta laranja,Produtos de supermercado e marcas,39.0,0.0,9.2,9.2,0.0,0.0,0.0,5.0,estimativa
+329,Gelado de chocolate com amendoim,Produtos de supermercado e marcas,300.0,4.0,28.0,24.0,1.0,19.0,10.0,80.0,estimativa
+330,Hambúrguer de vaca cru,Produtos de supermercado e marcas,250.0,17.0,1.0,0.0,0.0,20.0,8.0,80.0,estimativa
+331,Ice tea de pêssego,Produtos de supermercado e marcas,25.0,0.0,6.0,6.0,0.0,0.0,0.0,5.0,estimativa
+332,Iogurte proteico (tipo YoPRO),Produtos de supermercado e marcas,55.0,10.0,3.5,3.0,0.0,0.2,0.1,40.0,estimativa
+333,Kinder Bueno,Produtos de supermercado e marcas,572.0,8.6,49.5,41.0,2.0,37.0,17.0,100.0,estimativa
+334,KitKat,Produtos de supermercado e marcas,518.0,6.5,61.0,48.0,1.5,26.0,15.0,80.0,estimativa
+335,Mars,Produtos de supermercado e marcas,449.0,4.0,69.0,59.0,1.0,17.0,7.6,200.0,estimativa
+336,Monster Energy,Produtos de supermercado e marcas,47.0,0.0,11.5,11.0,0.0,0.0,0.0,70.0,estimativa
+337,Nuggets de frango,Produtos de supermercado e marcas,250.0,14.0,17.0,1.0,1.0,14.0,2.5,500.0,estimativa
+338,Oreo,Produtos de supermercado e marcas,480.0,4.8,69.0,37.0,2.5,20.0,4.8,440.0,estimativa
+339,Pasta de atum,Produtos de supermercado e marcas,250.0,12.0,3.0,1.0,0.0,22.0,3.0,500.0,estimativa
+340,Pizza congelada,Produtos de supermercado e marcas,250.0,10.0,32.0,4.0,2.0,9.0,4.0,550.0,estimativa
+341,Pringles original,Produtos de supermercado e marcas,530.0,4.0,50.0,1.0,3.0,34.0,3.5,600.0,estimativa
+342,Pão de hambúrguer,Produtos de supermercado e marcas,265.0,9.0,48.0,6.0,2.5,4.0,1.0,500.0,estimativa
+343,Red Bull,Produtos de supermercado e marcas,45.0,0.0,11.0,11.0,0.0,0.0,0.0,40.0,estimativa
+344,Salsichas de frango,Produtos de supermercado e marcas,220.0,13.0,4.0,1.0,0.5,17.0,5.0,900.0,estimativa
+345,Snickers,Produtos de supermercado e marcas,488.0,9.0,60.0,51.0,2.0,24.0,8.4,190.0,estimativa
+346,Sprite,Produtos de supermercado e marcas,37.0,0.0,9.0,9.0,0.0,0.0,0.0,10.0,estimativa
+347,Toblerone,Produtos de supermercado e marcas,534.0,5.5,59.0,58.0,2.0,30.0,17.0,50.0,estimativa
+348,BCAA em pó,Suplementos,400.0,100.0,0.0,0.0,0.0,0.0,0.0,0.0,estimativa
+349,Barra proteica,Suplementos,370.0,33.0,35.0,6.0,6.0,12.0,5.0,200.0,estimativa
+350,Barra proteica baixa em açúcar,Suplementos,350.0,35.0,28.0,2.0,10.0,10.0,4.0,250.0,estimativa
+351,Caseína em pó,Suplementos,360.0,80.0,5.0,2.0,0.0,2.0,1.0,200.0,estimativa
+352,Colagénio hidrolisado em pó,Suplementos,360.0,90.0,0.0,0.0,0.0,0.0,0.0,300.0,estimativa
+353,Creatina monohidratada,Suplementos,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,estimativa
+354,Espirulina em pó,Suplementos,290.0,57.0,24.0,3.0,3.6,8.0,2.7,1048.0,estimativa
+355,Farinha de amêndoa,Suplementos,590.0,21.0,19.0,4.0,10.0,53.0,4.0,1.0,estimativa
+356,Maltodextrina,Suplementos,380.0,0.0,95.0,1.0,0.0,0.0,0.0,10.0,estimativa
+357,Mass gainer em pó,Suplementos,380.0,25.0,60.0,10.0,2.0,4.0,2.0,300.0,estimativa
+358,Proteína vegetal (ervilha) em pó,Suplementos,380.0,80.0,5.0,1.0,3.0,6.0,1.2,900.0,estimativa
+359,Pó de cacau sem açúcar,Suplementos,228.0,19.6,57.9,1.8,33.2,13.7,8.1,21.0,estimativa
+360,Whey isolado em pó,Suplementos,370.0,90.0,2.0,1.0,0.0,1.0,0.5,250.0,estimativa
+361,Ómega 3 (óleo de peixe),Suplementos,902.0,0.0,0.0,0.0,0.0,100.0,30.0,0.0,estimativa

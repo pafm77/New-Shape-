@@ -6,6 +6,7 @@ import {
   TrainingSessionRecord,
   TrainingWeekRecord,
 } from '../types/studio';
+import { CSV_TABLE_FOODS } from './foodTableCatalog';
 
 export const MEAL_TYPES: { key: MealTypeKey; label: string }[] = [
   { key: 'PEQUENO_ALMOCO', label: 'Pequeno-almoço' },
@@ -431,6 +432,7 @@ export const DEFAULT_FOODS: Omit<FoodItemRecord, 'userId'>[] = [
   { id: 'fd_72', name: 'Caju / Castanha do Pará', category: 'Gordura', kcalPer100g: 553, proteinPer100g: 18.2, carbsPer100g: 30.2, fatPer100g: 43.8, custom: false },
   { id: 'fd_73', name: 'Sementes de Linhaça Moídas', category: 'Gordura', kcalPer100g: 534, proteinPer100g: 18.3, carbsPer100g: 28.9, fatPer100g: 42.2, custom: false },
   { id: 'fd_74', name: 'Chocolate Negro >85% Cacau', category: 'Gordura', kcalPer100g: 598, proteinPer100g: 10, carbsPer100g: 24, fatPer100g: 48, custom: false },
+  ...CSV_TABLE_FOODS,
 ];
 
 export const DEFAULT_TEMPLATES: Omit<MessageTemplateRecord, 'userId'>[] = [

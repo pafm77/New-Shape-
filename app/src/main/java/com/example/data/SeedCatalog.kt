@@ -68,7 +68,7 @@ object SeedCatalog {
         ExerciseRecord(id = "ex_47", name = "Farmer's Walk (Caminhada do Fazendeiro)", muscleGroup = "Cardio", equipment = "Halteres", instructions = "Postura ereta, ombros para baixo, passos curtos e firmes.")
     )
 
-    val defaultFoods: List<FoodItemRecord> = listOf(
+    private val coreFoods: List<FoodItemRecord> = listOf(
         // Proteína Animal & Vegetal
         FoodItemRecord(id = "fd_1", name = "Peito de Frango Grelhado", category = "Proteína", kcalPer100g = 165.0, proteinPer100g = 31.0, carbsPer100g = 0.0, fatPer100g = 3.6),
         FoodItemRecord(id = "fd_2", name = "Peito de Peru", category = "Proteína", kcalPer100g = 135.0, proteinPer100g = 29.0, carbsPer100g = 0.0, fatPer100g = 1.5),
@@ -157,6 +157,8 @@ object SeedCatalog {
         FoodItemRecord(id = "fd_73", name = "Sementes de Linhaça Moídas", category = "Gordura", kcalPer100g = 534.0, proteinPer100g = 18.3, carbsPer100g = 28.9, fatPer100g = 42.2),
         FoodItemRecord(id = "fd_74", name = "Chocolate Negro >85% Cacau", category = "Gordura", kcalPer100g = 598.0, proteinPer100g = 10.0, carbsPer100g = 24.0, fatPer100g = 48.0)
     )
+
+    val defaultFoods: List<FoodItemRecord> = coreFoods + FoodTableCatalog.csvTableFoods
 
     val defaultTemplates: List<MessageTemplateRecord> = listOf(
         MessageTemplateRecord(

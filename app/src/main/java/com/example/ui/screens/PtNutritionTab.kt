@@ -265,7 +265,9 @@ private fun FoodCatalogSection(
         state.foodItems.filter { fd ->
             (!onlyCustom || fd.custom) &&
                 (selectedCategory == "Todos" || fd.category == selectedCategory) &&
-                (search.isBlank() || fd.name.contains(search, ignoreCase = true))
+                (search.isBlank() ||
+                    fd.name.contains(search, ignoreCase = true) ||
+                    fd.category.contains(search, ignoreCase = true))
         }
     }
 
@@ -281,7 +283,7 @@ private fun FoodCatalogSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Alimentos (por 100g)", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                    Text("Alimentos (${filtered.size}) · 100g", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
                     GoldPrimaryButton(
                         text = "+ Novo Alimento",
                         onClick = { showAddFoodDialog = true },
@@ -445,7 +447,11 @@ fun AddFoodToMealDialog(
 ) {
     var search by remember { mutableStateOf("") }
     val filtered = remember(foods, search) {
-        foods.filter { search.isBlank() || it.name.contains(search, ignoreCase = true) }
+        foods.filter {
+            search.isBlank() ||
+                it.name.contains(search, ignoreCase = true) ||
+                it.category.contains(search, ignoreCase = true)
+        }
     }
     var selectedFood by remember { mutableStateOf(foods.firstOrNull()) }
     var gramsText by remember { mutableStateOf("100") }

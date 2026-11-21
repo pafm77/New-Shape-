@@ -217,13 +217,17 @@ const FoodCatalogView: React.FC<{
     (f) =>
       (!onlyCustom || f.custom) &&
       (cat === 'Todos' || f.category === cat) &&
-      (!search.trim() || f.name.toLowerCase().includes(search.toLowerCase()))
+      (!search.trim() ||
+        f.name.toLowerCase().includes(search.toLowerCase()) ||
+        f.category.toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-[#F4F4F5]">Alimentos (por 100g)</h2>
+        <h2 className="text-lg font-bold text-[#F4F4F5]">
+          Alimentos ({filtered.length}) · por 100g
+        </h2>
         <div className="flex flex-wrap items-center gap-2">
           {customFoods.length > 0 && (
             <button
@@ -387,7 +391,10 @@ export const AddFoodToMealModal: React.FC<{
 }> = ({ mealLabel, foods, onClose, onAdd }) => {
   const [search, setSearch] = useState('');
   const filtered = foods.filter(
-    (f) => !search.trim() || f.name.toLowerCase().includes(search.toLowerCase())
+    (f) =>
+      !search.trim() ||
+      f.name.toLowerCase().includes(search.toLowerCase()) ||
+      f.category.toLowerCase().includes(search.toLowerCase())
   );
   const [selectedId, setSelectedId] = useState(foods[0]?.id || '');
   const [grams, setGrams] = useState('100');
