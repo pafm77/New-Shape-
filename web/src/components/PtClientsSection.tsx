@@ -106,6 +106,15 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
 
   const selectedClient = selectedClientId ? clients.find((c) => c.id === selectedClientId) || null : null;
 
+  const clientFidMonthsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    clients.forEach((c) => {
+      const eff = getEffectiveClientFidelizacaoMonths(c, fidelizacoes);
+      map.set(c.id, eff === 6 || eff === 12 ? eff : 0);
+    });
+    return map;
+  }, [clients, fidelizacoes]);
+
   if (selectedClient) {
     return (
       <ClientProfileView
@@ -135,15 +144,6 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   const baseVisibleClients = showInactive ? clients : activeClientsList;
   const persCount = baseVisibleClients.filter((c) => c.trainingType === 'PERSONALIZADO').length;
   const grupoCount = baseVisibleClients.filter((c) => c.trainingType !== 'PERSONALIZADO').length;
-
-  const clientFidMonthsMap = useMemo(() => {
-    const map = new Map<string, number>();
-    clients.forEach((c) => {
-      const eff = getEffectiveClientFidelizacaoMonths(c, fidelizacoes);
-      map.set(c.id, eff === 6 || eff === 12 ? eff : 0);
-    });
-    return map;
-  }, [clients, fidelizacoes]);
 
   const fid6Count = baseVisibleClients.filter((c) => clientFidMonthsMap.get(c.id) === 6).length;
   const fid12Count = baseVisibleClients.filter((c) => clientFidMonthsMap.get(c.id) === 12).length;
