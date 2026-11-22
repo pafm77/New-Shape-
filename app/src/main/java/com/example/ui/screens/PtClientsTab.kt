@@ -32,6 +32,7 @@ import com.example.data.SeedCatalog
 import com.example.data.model.BookingStatus
 import com.example.data.model.ClientRecord
 import com.example.data.model.FidelizacaoRecord
+import com.example.data.model.PaymentRecord
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
@@ -317,7 +318,7 @@ fun PtClientsTab(
                 defaultMonthYear = state.currentMonthYear,
                 defaultMonthLabel = state.currentMonthLabel,
                 defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
-                defaultDurationMonths = client.fidelizacaoMonths,
+                defaultDurationMonths = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, state.fidelizacoes),
                 onDismiss = { paymentTargetClient = null },
                 onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
                     viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
@@ -366,6 +367,7 @@ fun PtClientProfileScreen(
     }
     var profileTab by remember(client.id) { mutableIntStateOf(0) }
     var showPayDialog by remember { mutableStateOf(false) }
+    var splitTargetPayment by remember { mutableStateOf<PaymentRecord?>(null) }
     var editingFid by remember { mutableStateOf<FidelizacaoRecord?>(null) }
     var showNewFidDialog by remember { mutableStateOf(false) }
 
@@ -704,21 +706,50 @@ fun PtClientProfileScreen(
                                 Text("Histórico de pagamentos", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                                 Spacer(Modifier.height(6.dp))
                                 clientPayments.forEach { p ->
+                                    val isFuture = p.monthYear > state.currentMonthYear
+                                    val isAlreadyFid = p.note.contains("fideliza", ignoreCase = true)
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column {
-                                            Text("${p.monthLabel} · €${String.format("%.2f", p.amountEur)}", style = MaterialTheme.typography.bodyMedium, color = TextPrimaryDark)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    "${p.monthLabel} · €${String.format("%.2f", p.amountEur)}",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = TextPrimaryDark
+                                                )
+                                                if (isFuture) {
+                                                    StatusPill("Futuro", PendingAmber, PendingAmberContainer)
+                                                }
+                                            }
                                             Text(
                                                 text = "${formatShortDate(p.paidAtMillis)}${if (p.note.isNotBlank()) " · ${p.note}" else ""}",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = TextSecondaryDark
                                             )
                                         }
-                                        IconButton(onClick = { viewModel.deletePayment(p.id) }) {
-                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (!isAlreadyFid && p.amountEur > 0.0) {
+                                                TextButton(
+                                                    onClick = { splitTargetPayment = p },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                                ) {
+                                                    Text(
+                                                        "Dividir 6/12m",
+                                                        color = NewShapeGoldBright,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                            IconButton(onClick = { viewModel.deletePayment(p.id) }) {
+                                                Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                                            }
                                         }
                                     }
                                 }
@@ -954,7 +985,7 @@ fun PtClientProfileScreen(
             defaultMonthYear = state.currentMonthYear,
             defaultMonthLabel = state.currentMonthLabel,
             defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
-            defaultDurationMonths = client.fidelizacaoMonths,
+            defaultDurationMonths = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, clientFids),
             onDismiss = { showPayDialog = false },
             onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
                 viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
@@ -963,16 +994,42 @@ fun PtClientProfileScreen(
         )
     }
 
+    if (state.isSuperAdmin && splitTargetPayment != null) {
+        val target = splitTargetPayment!!
+        SplitPaymentFidelizacaoDialog(
+            clientName = client.name,
+            payment = target,
+            defaultMonths = if (SeedCatalog.getEffectiveClientFidelizacaoMonths(client, clientFids) == 12) 12 else 6,
+            onDismiss = { splitTargetPayment = null },
+            onConfirm = { months ->
+                viewModel.splitPaymentIntoFidelizacao(target, months)
+                splitTargetPayment = null
+            }
+        )
+    }
+
     if (showNewFidDialog || editingFid != null) {
         FidelizacaoDialog(
             clientName = client.name,
             existing = editingFid,
+            isSuperAdmin = state.isSuperAdmin,
+            defaultMonthlyFeeEur = client.monthlyFeeEur,
             onDismiss = {
                 showNewFidDialog = false
                 editingFid = null
             },
             onSave = { months, startMillis, fidNotes ->
                 viewModel.saveFidelizacao(client.id, months, startMillis, fidNotes, editingFid?.id.orEmpty())
+                showNewFidDialog = false
+                editingFid = null
+            },
+            onSaveWithPayment = { months, startMillis, fidNotes, totalPaidEur, method ->
+                viewModel.saveFidelizacao(client.id, months, startMillis, fidNotes, "")
+                val startCal = Calendar.getInstance().apply { timeInMillis = startMillis }
+                val monthsPt = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+                val my = String.format("%04d-%02d", startCal.get(Calendar.YEAR), startCal.get(Calendar.MONTH) + 1)
+                val ml = "${monthsPt[startCal.get(Calendar.MONTH)]} ${startCal.get(Calendar.YEAR)}"
+                viewModel.recordPayment(client.id, my, ml, totalPaidEur, method, months)
                 showNewFidDialog = false
                 editingFid = null
             }
@@ -1297,7 +1354,7 @@ fun RegisterPaymentDialog(
                                 color = NewShapeGoldBright
                             )
                             Text(
-                                text = "Conta 1 mensalidade/mês (${coveredMonths.firstOrNull()?.second.orEmpty()} → ${coveredMonths.lastOrNull()?.second.orEmpty()})",
+                                text = "No mês do pagamento conta apenas 1 mensalidade (€${String.format("%.2f", perMonthAmount)}). Os restantes meses (${coveredMonths.firstOrNull()?.second.orEmpty()} → ${coveredMonths.lastOrNull()?.second.orEmpty()}) entram automaticamente 1 por mês.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimaryDark
                             )
@@ -1337,15 +1394,105 @@ fun RegisterPaymentDialog(
 }
 
 @Composable
+fun SplitPaymentFidelizacaoDialog(
+    clientName: String,
+    payment: PaymentRecord,
+    defaultMonths: Int = 6,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var months by remember(defaultMonths) { mutableIntStateOf(if (defaultMonths == 12) 12 else 6) }
+    val splitValues = remember(payment.amountEur, months) {
+        SeedCatalog.splitAmountAcrossMonths(payment.amountEur, months)
+    }
+    val covered = remember(payment.monthYear, months) {
+        SeedCatalog.buildConsecutiveMonths(payment.monthYear, months)
+    }
+    val perMonth = splitValues.firstOrNull() ?: 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        title = { Text("Dividir Pagamento por Fidelização", color = TextPrimaryDark) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "$clientName · €${String.format("%.2f", payment.amountEur)} (${payment.monthLabel})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = NewShapeGoldBright
+                )
+                Text(
+                    text = "Divide este valor pelos meses da fidelização para contabilizar apenas 1 mensalidade por mês.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(6, 12).forEach { m ->
+                        FilterChip(
+                            selected = months == m,
+                            onClick = { months = m },
+                            label = { Text("$m Meses") },
+                            modifier = Modifier.weight(1f),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
+                Surface(
+                    color = NewShapeGoldMuted,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "€${String.format("%.2f", payment.amountEur)} ÷ $months meses = €${String.format("%.2f", perMonth)}/mês",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = NewShapeGoldBright
+                        )
+                        Text(
+                            text = "Período: ${covered.firstOrNull()?.second.orEmpty()} → ${covered.lastOrNull()?.second.orEmpty()} (1 mensalidade/mês)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextPrimaryDark
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            GoldPrimaryButton(
+                text = "Dividir por $months meses",
+                onClick = { onConfirm(months) },
+                testTag = "confirm_split_fidelizacao_btn"
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar", color = TextSecondaryDark) }
+        }
+    )
+}
+
+@Composable
 fun FidelizacaoDialog(
     clientName: String,
     existing: FidelizacaoRecord?,
+    isSuperAdmin: Boolean = false,
+    defaultMonthlyFeeEur: Double = 0.0,
     onDismiss: () -> Unit,
-    onSave: (Int, Long, String) -> Unit
+    onSave: (Int, Long, String) -> Unit,
+    onSaveWithPayment: ((Int, Long, String, Double, String) -> Unit)? = null
 ) {
     var durationMonths by remember { mutableIntStateOf(existing?.durationMonths ?: 6) }
     var startOffsetMonths by remember { mutableIntStateOf(0) }
     var notes by remember { mutableStateOf(existing?.notes ?: "Plano $durationMonths meses") }
+    var recordPaymentNow by remember { mutableStateOf(false) }
+    val baseMonthly = if (defaultMonthlyFeeEur > 0.0) defaultMonthlyFeeEur else 100.0
+    fun fmt(v: Double) = if (v % 1.0 == 0.0) v.toInt().toString() else String.format("%.2f", v)
+    var totalPaidText by remember(defaultMonthlyFeeEur) { mutableStateOf(fmt(baseMonthly * (existing?.durationMonths ?: 6))) }
+    var payMethod by remember { mutableStateOf("MbWay") }
 
     val startMillis = remember(startOffsetMonths, existing) {
         if (existing != null && startOffsetMonths == 0) existing.startDateMillis
@@ -1357,19 +1504,30 @@ fun FidelizacaoDialog(
             add(Calendar.MONTH, durationMonths)
         }.timeInMillis
     }
+    val numericTotalPaid = totalPaidText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+    val previewPerMonth = numericTotalPaid / durationMonths
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = CharcoalSurface,
         title = { Text("Fidelização · $clientName", color = TextPrimaryDark) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text("Período de fidelização", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(6, 12).forEach { m ->
                         FilterChip(
                             selected = durationMonths == m,
-                            onClick = { durationMonths = m },
+                            onClick = {
+                                val prevAuto = baseMonthly * durationMonths
+                                if (kotlin.math.abs(numericTotalPaid - prevAuto) < 0.01) {
+                                    totalPaidText = fmt(baseMonthly * m)
+                                }
+                                durationMonths = m
+                            },
                             label = { Text("$m Meses") },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = NewShapeGold,
@@ -1403,12 +1561,81 @@ fun FidelizacaoDialog(
                     label = { Text("Notas do contrato") },
                     colors = darkFieldColors()
                 )
+                if (existing == null && isSuperAdmin && onSaveWithPayment != null) {
+                    Surface(
+                        color = ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, HairlineBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { recordPaymentNow = !recordPaymentNow }
+                            ) {
+                                Checkbox(
+                                    checked = recordPaymentNow,
+                                    onCheckedChange = { recordPaymentNow = it },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = NewShapeGold,
+                                        checkmarkColor = TextOnGold,
+                                        uncheckedColor = TextSecondaryDark
+                                    )
+                                )
+                                Text(
+                                    text = "Registar pagamento da fidelização (dividido pelos $durationMonths meses)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextPrimaryDark
+                                )
+                            }
+                            if (recordPaymentNow) {
+                                OutlinedTextField(
+                                    value = totalPaidText,
+                                    onValueChange = { totalPaidText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                                    label = { Text("Valor total pago ($durationMonths meses) (€)") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = darkFieldColors()
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                    SeedCatalog.PAYMENT_METHODS.forEach { method ->
+                                        FilterChip(
+                                            selected = payMethod == method,
+                                            onClick = { payMethod = method },
+                                            label = { Text(method) },
+                                            modifier = Modifier.weight(1f),
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = NewShapeGold,
+                                                selectedLabelColor = TextOnGold
+                                            )
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "€${String.format("%.2f", numericTotalPaid)} ÷ $durationMonths = €${String.format("%.2f", previewPerMonth)}/mês (conta 1 mensalidade/mês)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NewShapeGoldBright
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             GoldPrimaryButton(
                 text = "Guardar Fidelização",
-                onClick = { onSave(durationMonths, startMillis, notes) }
+                onClick = {
+                    if (existing == null && isSuperAdmin && recordPaymentNow && numericTotalPaid > 0.0 && onSaveWithPayment != null) {
+                        onSaveWithPayment(durationMonths, startMillis, notes, numericTotalPaid, payMethod)
+                    } else {
+                        onSave(durationMonths, startMillis, notes)
+                    }
+                }
             )
         },
         dismissButton = {

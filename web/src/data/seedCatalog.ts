@@ -1,5 +1,7 @@
 import {
+  ClientRecord,
   ExerciseRecord,
+  FidelizacaoRecord,
   FoodItemRecord,
   MealTypeKey,
   MessageTemplateRecord,
@@ -7,6 +9,9 @@ import {
   TrainingWeekRecord,
 } from '../types/studio';
 import { CSV_TABLE_FOODS } from './foodTableCatalog';
+import { CSV_TABLE_EXERCISES, DEFAULT_MUSCLE_GROUPS } from './exerciseTableCatalog';
+
+export { DEFAULT_MUSCLE_GROUPS };
 
 export const MEAL_TYPES: { key: MealTypeKey; label: string }[] = [
   { key: 'PEQUENO_ALMOCO', label: 'Pequeno-almoço' },
@@ -132,10 +137,39 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export function normalizePaymentMethod(raw: string): PaymentMethod | null {
   const clean = raw.trim().toLowerCase();
-  if (clean === 'mbway' || clean === 'mb way') return 'MbWay';
-  if (clean === 'dinheiro') return 'Dinheiro';
-  if (clean === 'joão' || clean === 'joao') return 'João';
+  if (clean === 'mbway' || clean === 'mb way' || clean.includes('mbway') || clean.includes('mb way')) return 'MbWay';
+  if (clean === 'dinheiro' || clean.includes('dinheiro')) return 'Dinheiro';
+  if (clean === 'joão' || clean === 'joao' || clean.includes('joão') || clean.includes('joao')) return 'João';
   return null;
+}
+
+export function splitAmountAcrossMonths(totalAmount: number, months: number): number[] {
+  const count = Math.max(1, Math.round(months));
+  const clamped = Math.max(0, Math.min(100000, Number.isFinite(totalAmount) ? totalAmount : 0));
+  const totalCents = Math.round(clamped * 100);
+  const baseCents = Math.floor(totalCents / count);
+  const remainder = totalCents - baseCents * count;
+  return Array.from({ length: count }, (_, idx) => {
+    const cents = idx < remainder ? baseCents + 1 : baseCents;
+    return Number((cents / 100).toFixed(2));
+  });
+}
+
+export function getEffectiveClientFidelizacaoMonths(
+  client: Pick<ClientRecord, 'id' | 'fidelizacaoMonths'> | null | undefined,
+  fidelizacoes: FidelizacaoRecord[]
+): 1 | 6 | 12 {
+  if (!client) return 1;
+  const now = Date.now();
+  const activeContracts = fidelizacoes
+    .filter((f) => f.clientId === client.id && f.endDateMillis >= now)
+    .sort((a, b) => b.endDateMillis - a.endDateMillis);
+  const contractMonths = activeContracts[0]?.durationMonths;
+  if (contractMonths === 6 || contractMonths === 12) return contractMonths;
+  if (client.fidelizacaoMonths === 6 || client.fidelizacaoMonths === 12) {
+    return client.fidelizacaoMonths;
+  }
+  return 1;
 }
 
 export function formatRgpdConsentStamp(ts: number = Date.now()): string {
@@ -319,55 +353,7 @@ export function buildMessageFromTemplate(
     .replaceAll('{semana}', weekLabel);
 }
 
-export const DEFAULT_EXERCISES: Omit<ExerciseRecord, 'userId'>[] = [
-  { id: 'ex_1', name: 'Supino Plano com Barra', muscleGroup: 'Peito', equipment: 'Barra', instructions: 'Descer a barra controlada até ao meio do peito e empurrar com escápulas retraídas.', custom: false },
-  { id: 'ex_2', name: 'Supino Inclinado com Halteres', muscleGroup: 'Peito', equipment: 'Halteres', instructions: 'Banco a 30°, cotovelos ligeiramente a 45° do tronco.', custom: false },
-  { id: 'ex_3', name: 'Aberturas com Halteres (Crucifixo)', muscleGroup: 'Peito', equipment: 'Halteres', instructions: 'Ligeira flexão nos cotovelos, abrir até sentir alongamento peitoral.', custom: false },
-  { id: 'ex_4', name: 'Crossover na Polia Alta', muscleGroup: 'Peito', equipment: 'Polia / Cabo', instructions: 'Inclinar ligeiramente o tronco à frente e juntar as mãos à frente da linha umbilical.', custom: false },
-  { id: 'ex_5', name: 'Chest Press na Máquina', muscleGroup: 'Peito', equipment: 'Máquina', instructions: 'Ajustar o banco ao nível do peito médio e manter controlo na fase excêntrica.', custom: false },
-  { id: 'ex_6', name: 'Flexões de Braços (Push-ups)', muscleGroup: 'Peito', equipment: 'Peso Corporal', instructions: 'Corpo alinhado da cabeça aos calcanhares, core ativo.', custom: false },
-  { id: 'ex_7', name: 'Fundos em Paralelas (Foco Peito)', muscleGroup: 'Peito', equipment: 'Paralelas', instructions: 'Inclinar o tronco ligeiramente à frente ao descer.', custom: false },
-  { id: 'ex_8', name: 'Puxada à Frente (Lat Pulldown)', muscleGroup: 'Costas', equipment: 'Polia / Cabo', instructions: 'Puxar a barra até à parte superior do peito mantendo peito aberto.', custom: false },
-  { id: 'ex_9', name: 'Remada Curvada com Barra', muscleGroup: 'Costas', equipment: 'Barra', instructions: 'Coluna neutra, puxar a barra em direção ao umbigo.', custom: false },
-  { id: 'ex_10', name: 'Remada Baixa Sentada (Triângulo)', muscleGroup: 'Costas', equipment: 'Polia / Cabo', instructions: 'Puxar com os cotovelos junto ao tronco sem balançar a lombar.', custom: false },
-  { id: 'ex_11', name: 'Remada Unilateral com Haltere (Serrote)', muscleGroup: 'Costas', equipment: 'Halteres', instructions: 'Apoiar mão e joelho no banco, puxar haltere em arco até à anca.', custom: false },
-  { id: 'ex_12', name: 'Elevações na Barra Fixa (Pull-ups)', muscleGroup: 'Costas', equipment: 'Peso Corporal', instructions: 'Pega pronada ligeiramente mais larga que os ombros.', custom: false },
-  { id: 'ex_13', name: 'Pullover na Polia Alta (Corda)', muscleGroup: 'Costas', equipment: 'Polia / Cabo', instructions: 'Braços quase estendidos, focar na contração do grande dorsal.', custom: false },
-  { id: 'ex_14', name: 'Face Pull na Polia', muscleGroup: 'Costas', equipment: 'Polia / Cabo', instructions: 'Puxar a corda em direção à testa rodando externamente os ombros.', custom: false },
-  { id: 'ex_15', name: 'Agachamento Livre com Barra', muscleGroup: 'Pernas', equipment: 'Barra', instructions: 'Pés à largura dos ombros, descer controlando joelhos alinhados com os pés.', custom: false },
-  { id: 'ex_16', name: 'Prensa de Pernas 45° (Leg Press)', muscleGroup: 'Pernas', equipment: 'Máquina', instructions: 'Não bloquear totalmente os joelhos no topo; lombar sempre apoiada.', custom: false },
-  { id: 'ex_17', name: 'Peso Morto Romeno (RDL)', muscleGroup: 'Pernas', equipment: 'Barra / Halteres', instructions: 'Anca para trás, joelhos semi-fletidos, sentir alongar os isquiotibiais.', custom: false },
-  { id: 'ex_18', name: 'Afundos Búlgaros (Bulgarian Split Squat)', muscleGroup: 'Pernas', equipment: 'Halteres', instructions: 'Pé traseiro apoiado no banco, descer verticalmente.', custom: false },
-  { id: 'ex_19', name: 'Cadeira Extensora (Leg Extension)', muscleGroup: 'Pernas', equipment: 'Máquina', instructions: 'Pausa de 1 segundo no topo para máxima contração do quadricípite.', custom: false },
-  { id: 'ex_20', name: 'Mesa Flexora (Leg Curl)', muscleGroup: 'Pernas', equipment: 'Máquina', instructions: 'Manter ancas coladas ao banco durante toda a flexão.', custom: false },
-  { id: 'ex_21', name: 'Elevação Pélvica com Barra (Hip Thrust)', muscleGroup: 'Pernas', equipment: 'Barra', instructions: 'Queixo recolhido, contrair glúteos no topo mantendo a tíbia vertical.', custom: false },
-  { id: 'ex_22', name: 'Passadas / Walking Lunges', muscleGroup: 'Pernas', equipment: 'Halteres', instructions: 'Passos largos e controlados mantendo o tronco estável.', custom: false },
-  { id: 'ex_23', name: 'Gémeos em Pé na Máquina', muscleGroup: 'Pernas', equipment: 'Máquina', instructions: 'Amplitude completa: alongar bem em baixo e segurar 1s no topo.', custom: false },
-  { id: 'ex_24', name: 'Desenvolvimento Militar com Halteres', muscleGroup: 'Ombros', equipment: 'Halteres', instructions: 'Empurrar acima da cabeça sem hiperextender a lombar.', custom: false },
-  { id: 'ex_25', name: 'Press de Ombros com Barra', muscleGroup: 'Ombros', equipment: 'Barra', instructions: 'Core contraído, barra sobe em linha reta junto ao rosto.', custom: false },
-  { id: 'ex_26', name: 'Elevações Laterais com Halteres', muscleGroup: 'Ombros', equipment: 'Halteres', instructions: 'Subir até à altura dos ombros com cotovelos ligeiramente fletidos.', custom: false },
-  { id: 'ex_27', name: 'Elevações Laterais na Polia', muscleGroup: 'Ombros', equipment: 'Polia / Cabo', instructions: 'Tensão contínua desde o início do movimento.', custom: false },
-  { id: 'ex_28', name: 'Elevações Frontais com Disco/Halteres', muscleGroup: 'Ombros', equipment: 'Halteres', instructions: 'Evitar impulso do tronco na subida.', custom: false },
-  { id: 'ex_29', name: 'Crucifixo Inverso na Máquina (Posterior)', muscleGroup: 'Ombros', equipment: 'Máquina', instructions: 'Focar no deltoide posterior evitando juntar demasiado as escápulas.', custom: false },
-  { id: 'ex_30', name: 'Curl Direto com Barra W', muscleGroup: 'Braços', equipment: 'Barra', instructions: 'Cotovelos fixos junto ao tronco.', custom: false },
-  { id: 'ex_31', name: 'Curl Alternado com Halteres', muscleGroup: 'Braços', equipment: 'Halteres', instructions: 'Rodar o punho em supinação durante a subida.', custom: false },
-  { id: 'ex_32', name: 'Curl Martelo com Halteres', muscleGroup: 'Braços', equipment: 'Halteres', instructions: 'Pega neutra, ótimo para braquial e antebraço.', custom: false },
-  { id: 'ex_33', name: 'Curl na Polia Baixa', muscleGroup: 'Braços', equipment: 'Polia / Cabo', instructions: 'Tensão constante no bíceps.', custom: false },
-  { id: 'ex_34', name: 'Extensão de Tríceps na Polia (Corda)', muscleGroup: 'Braços', equipment: 'Polia / Cabo', instructions: 'Abrir a corda no final da extensão mantendo cotovelos imóveis.', custom: false },
-  { id: 'ex_35', name: 'Tríceps Testa com Barra W (Skullcrusher)', muscleGroup: 'Braços', equipment: 'Barra', instructions: 'Descer a barra em direção à testa/atrás da cabeça com controlo.', custom: false },
-  { id: 'ex_36', name: 'Tríceps Francês com Haltere', muscleGroup: 'Braços', equipment: 'Halteres', instructions: 'Alongamento máximo da cabeça longa do tríceps.', custom: false },
-  { id: 'ex_37', name: 'Prancha Abdominal (Plank)', muscleGroup: 'Core', equipment: 'Peso Corporal', instructions: 'Manter bacia neutra e glúteos/abdominais contraídos.', custom: false },
-  { id: 'ex_38', name: 'Crunch na Polia Alta', muscleGroup: 'Core', equipment: 'Polia / Cabo', instructions: 'Fletir a coluna enrolando o tronco em direção às ancas.', custom: false },
-  { id: 'ex_39', name: 'Elevação de Pernas Suspenso', muscleGroup: 'Core', equipment: 'Peso Corporal', instructions: 'Subir os joelhos ou pernas evitando balanço.', custom: false },
-  { id: 'ex_40', name: 'Russian Twist com Disco', muscleGroup: 'Core', equipment: 'Peso Livre', instructions: 'Rodar o tronco de forma controlada.', custom: false },
-  { id: 'ex_41', name: 'Dead Bug', muscleGroup: 'Core', equipment: 'Peso Corporal', instructions: 'Lombar sempre em contacto com o solo enquanto estende braço e perna opostos.', custom: false },
-  { id: 'ex_42', name: 'Passadeira (Inclinação / Corrida)', muscleGroup: 'Cardio', equipment: 'Cardio', instructions: 'Manter passada fluida e ritmo cardíaco alvo.', custom: false },
-  { id: 'ex_43', name: 'Remo Ergómetro (Concept2)', muscleGroup: 'Cardio', equipment: 'Cardio', instructions: 'Sequência: Pernas -> Tronco -> Braços.', custom: false },
-  { id: 'ex_44', name: 'Bicicleta Estática / Air Bike', muscleGroup: 'Cardio', equipment: 'Cardio', instructions: 'Ideal para HIIT ou zona 2.', custom: false },
-  { id: 'ex_45', name: 'Kettlebell Swing', muscleGroup: 'Cardio', equipment: 'Kettlebell', instructions: 'Movimento explosivo de extensão da anca, não dos braços.', custom: false },
-  { id: 'ex_46', name: 'Burpees', muscleGroup: 'Cardio', equipment: 'Peso Corporal', instructions: 'Ritmo constante mantendo qualidade técnica.', custom: false },
-  { id: 'ex_47', name: "Farmer's Walk (Caminhada do Fazendeiro)", muscleGroup: 'Cardio', equipment: 'Halteres', instructions: 'Postura ereta, ombros para baixo, passos curtos e firmes.', custom: false },
-];
+export const DEFAULT_EXERCISES: Omit<ExerciseRecord, 'userId'>[] = CSV_TABLE_EXERCISES;
 
 export const DEFAULT_FOODS: Omit<FoodItemRecord, 'userId'>[] = [
   { id: 'fd_1', name: 'Peito de Frango Grelhado', category: 'Proteína', kcalPer100g: 165, proteinPer100g: 31, carbsPer100g: 0, fatPer100g: 3.6, custom: false },

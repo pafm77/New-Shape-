@@ -62,6 +62,7 @@ import {
   isValidPortuguesePhone,
   normalizePaymentMethod,
   normalizePortuguesePhone,
+  splitAmountAcrossMonths,
 } from '../data/seedCatalog';
 
 function userDoc(uid: string) {
@@ -656,6 +657,14 @@ async function commitWrites(writes: Array<[DocumentReference, Record<string, unk
   }
 }
 
+async function commitDeletes(refs: DocumentReference[]) {
+  for (let i = 0; i < refs.length; i += 400) {
+    const batch = writeBatch(db);
+    refs.slice(i, i + 400).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+}
+
 export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<void> {
   const settingsRef = doc(subcol(uid, 'settings'), 'studio');
   const settingsSnap = await getDoc(settingsRef);
@@ -663,12 +672,37 @@ export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<v
   const dayMs = 86_400_000;
 
   if (settingsSnap.exists() && settingsSnap.data()?.seeded === true) {
-    // Ensure any missing default foods or initial assessment backfill
+    // 1. Replace old non-custom exercises with the new 385-exercise CSV library (preserving PT custom exercises)
+    const existingExercisesSnap = await getDocs(subcol(uid, 'exercises'));
+    const expectedExerciseIds = new Set(DEFAULT_EXERCISES.map((ex) => ex.id));
+    const existingExerciseIds = new Set(existingExercisesSnap.docs.map((d) => d.id));
+    const obsoleteExerciseRefs = existingExercisesSnap.docs
+      .filter((d) => d.data()?.custom !== true && !expectedExerciseIds.has(d.id))
+      .map((d) => d.ref);
+    const missingExercises = DEFAULT_EXERCISES.filter((ex) => !existingExerciseIds.has(ex.id));
+
+    // 2. Ensure any missing default foods or initial assessment backfill
     const existingFoodsSnap = await getDocs(subcol(uid, 'foods'));
     const existingFoodIds = new Set(existingFoodsSnap.docs.map((d) => d.id));
     const missingFoods = DEFAULT_FOODS.filter((f) => !existingFoodIds.has(f.id));
     const existingAssess = await getDocs(query(subcol(uid, 'physical_assessments'), limit(1)));
     const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
+
+    missingExercises.forEach((ex) => {
+      writes.push([
+        doc(subcol(uid, 'exercises'), ex.id),
+        {
+          userId: uid,
+          name: ex.name,
+          muscleGroup: ex.muscleGroup,
+          equipment: ex.equipment,
+          instructions: ex.instructions,
+          custom: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+      ]);
+    });
 
     missingFoods.forEach((fd) => {
       writes.push([
@@ -717,6 +751,7 @@ export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<v
       });
     }
 
+    if (obsoleteExerciseRefs.length > 0) await commitDeletes(obsoleteExerciseRefs);
     if (writes.length > 0) await commitWrites(writes);
     const settingsData = settingsSnap.data();
     const currentCode = settingsData?.studentPortalCode;
@@ -988,11 +1023,11 @@ export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<v
   ]);
 
   [
-    ['wpi_1', 'ex_15', 'Agachamento Livre com Barra', 'Pernas', 4, '8-10', '50 kg', 120, 'Controlar descida 3s', 0],
-    ['wpi_2', 'ex_2', 'Supino Inclinado com Halteres', 'Peito', 3, '10-12', '14 kg', 90, '', 1],
-    ['wpi_3', 'ex_8', 'Puxada à Frente (Lat Pulldown)', 'Costas', 3, '10-12', '45 kg', 90, '', 2],
-    ['wpi_4', 'ex_26', 'Elevações Laterais com Halteres', 'Ombros', 3, '12-15', '6 kg', 60, '', 3],
-    ['wpi_5', 'ex_37', 'Prancha Abdominal (Plank)', 'Core', 3, '45s', 'Corporal', 45, '', 4],
+    ['wpi_1', 'ex_csv_336', 'Agachamento búlgaro', 'Quadríceps', 4, '8-10', '20 kg', 120, 'Controlar descida 3s', 0],
+    ['wpi_2', 'ex_csv_309', 'Supino inclinado com halteres', 'Peito', 3, '10-12', '14 kg', 90, '', 1],
+    ['wpi_3', 'ex_csv_209', 'Puxada à frente', 'Costas', 3, '10-12', '45 kg', 90, '', 2],
+    ['wpi_4', 'ex_csv_267', 'Elevações laterais com halteres', 'Ombros', 3, '12-15', '6 kg', 60, '', 3],
+    ['wpi_5', 'ex_csv_68', 'Prancha', 'Core', 3, '45s', 'Corporal', 45, '', 4],
   ].forEach(([id, exId, exName, grp, sets, reps, load, rest, notes, idx]) => {
     writes.push([
       doc(subcol(uid, 'workout_plan_items'), String(id)),
@@ -1593,7 +1628,7 @@ export async function recordPayment(
   const validMethod = normalizePaymentMethod(note) || 'MbWay';
   const monthsCount: 1 | 6 | 12 = durationMonths === 6 || durationMonths === 12 ? durationMonths : 1;
   const totalClamped = Math.max(0, Math.min(100000, amountEur));
-  const perMonthAmount = Number((totalClamped / monthsCount).toFixed(2));
+  const perMonthAmounts = splitAmountAcrossMonths(totalClamped, monthsCount);
   const targetMonths =
     monthsCount === 1
       ? [{ monthYear, monthLabel }]
@@ -1601,16 +1636,53 @@ export async function recordPayment(
   const now = Date.now();
   const batch = writeBatch(db);
 
-  targetMonths.forEach((m) => {
+  targetMonths.forEach((m, idx) => {
+    const installmentNote =
+      monthsCount > 1
+        ? `${validMethod} · Fidelização ${monthsCount}m (${idx + 1}/${monthsCount} · total €${totalClamped.toFixed(2)})`.slice(0, 200)
+        : validMethod;
     batch.set(doc(subcol(uid, 'payments')), {
       userId: uid,
       clientId,
       monthYear: m.monthYear,
       monthLabel: m.monthLabel,
-      amountEur: perMonthAmount,
+      amountEur: perMonthAmounts[idx] ?? Number((totalClamped / monthsCount).toFixed(2)),
       paid: true,
       paidAtMillis: now,
-      note: validMethod,
+      note: installmentNote,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  await batch.commit();
+}
+
+export async function splitPaymentIntoFidelizacao(
+  uid: string,
+  payment: PaymentRecord,
+  durationMonths: 6 | 12
+): Promise<void> {
+  const validMethod = normalizePaymentMethod(payment.note) || 'MbWay';
+  const totalClamped = Math.max(0, Math.min(100000, payment.amountEur));
+  const perMonthAmounts = splitAmountAcrossMonths(totalClamped, durationMonths);
+  const targetMonths = buildConsecutiveMonths(payment.monthYear, durationMonths);
+  const paidAt = payment.paidAtMillis > 0 ? Math.round(payment.paidAtMillis) : Date.now();
+  const batch = writeBatch(db);
+
+  batch.delete(doc(subcol(uid, 'payments'), payment.id));
+  targetMonths.forEach((m, idx) => {
+    const installmentNote =
+      `${validMethod} · Fidelização ${durationMonths}m (${idx + 1}/${durationMonths} · total €${totalClamped.toFixed(2)})`.slice(0, 200);
+    batch.set(doc(subcol(uid, 'payments')), {
+      userId: uid,
+      clientId: payment.clientId,
+      monthYear: m.monthYear,
+      monthLabel: m.monthLabel,
+      amountEur: perMonthAmounts[idx] ?? Number((totalClamped / durationMonths).toFixed(2)),
+      paid: true,
+      paidAtMillis: paidAt,
+      note: installmentNote,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -1655,6 +1727,17 @@ export async function saveFidelizacao(
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+  }
+
+  // Keep client profile fidelizacaoMonths in sync so RegisterPaymentModal auto-selects 6/12 months
+  try {
+    await updateDoc(doc(subcol(uid, 'clients'), clientId), {
+      fidelizacaoMonths: durationMonths,
+      fidelizacaoStartMillis: Math.round(startDateMillis),
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Ignore if client document is missing
   }
 }
 

@@ -3,9 +3,11 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -147,26 +149,42 @@ private fun FinancesSection(
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
     var showAddPaymentChooser by remember { mutableStateOf(false) }
     var chosenClient by remember { mutableStateOf<ClientRecord?>(null) }
+    var splitTargetPayment by remember { mutableStateOf<PaymentRecord?>(null) }
     var methodFilter by remember { mutableStateOf("ALL") }
     var trainingFilter by remember { mutableStateOf("ALL") }
+    var periodScope by remember { mutableStateOf("REALIZED") }
 
     val allPaidPayments = remember(state.payments) { state.payments.filter { it.paid } }
+    val futurePrepaidPayments = remember(allPaidPayments, state.currentMonthYear) {
+        allPaidPayments.filter { it.monthYear > state.currentMonthYear }
+    }
+    val futurePrepaidTotal = remember(futurePrepaidPayments) {
+        futurePrepaidPayments.sumOf { it.amountEur }
+    }
+    val scopedAllPaidPayments = remember(allPaidPayments, periodScope, state.currentMonthYear) {
+        when (periodScope) {
+            "CURRENT_MONTH" -> allPaidPayments.filter { it.monthYear == state.currentMonthYear }
+            "REALIZED" -> allPaidPayments.filter { it.monthYear <= state.currentMonthYear }
+            else -> allPaidPayments
+        }
+    }
+
     val isPersonalizadoPayment: (PaymentRecord) -> Boolean = { p ->
         clientMap[p.clientId]?.trainingType == "PERSONALIZADO"
     }
 
-    val personalizadoPayments = remember(allPaidPayments, clientMap) {
-        allPaidPayments.filter(isPersonalizadoPayment)
+    val personalizadoPayments = remember(scopedAllPaidPayments, clientMap) {
+        scopedAllPaidPayments.filter(isPersonalizadoPayment)
     }
-    val grupoPayments = remember(allPaidPayments, clientMap) {
-        allPaidPayments.filter { !isPersonalizadoPayment(it) }
+    val grupoPayments = remember(scopedAllPaidPayments, clientMap) {
+        scopedAllPaidPayments.filter { !isPersonalizadoPayment(it) }
     }
 
-    val paidPayments = remember(allPaidPayments, trainingFilter, clientMap) {
+    val paidPayments = remember(scopedAllPaidPayments, trainingFilter, clientMap) {
         when (trainingFilter) {
-            "PERSONALIZADO" -> allPaidPayments.filter(isPersonalizadoPayment)
-            "GRUPO" -> allPaidPayments.filter { !isPersonalizadoPayment(it) }
-            else -> allPaidPayments
+            "PERSONALIZADO" -> scopedAllPaidPayments.filter(isPersonalizadoPayment)
+            "GRUPO" -> scopedAllPaidPayments.filter { !isPersonalizadoPayment(it) }
+            else -> scopedAllPaidPayments
         }
     }
 
@@ -247,11 +265,59 @@ private fun FinancesSection(
             }
         }
 
+        // Period Scope Chips (Realized vs Current Month vs Include Future Prepaid)
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
+                    val futureLabel = if (futurePrepaidPayments.isNotEmpty()) {
+                        "Incluir futuros (+${futurePrepaidPayments.size})"
+                    } else {
+                        "Incluir futuros"
+                    }
+                    listOf(
+                        "REALIZED" to "Até este mês",
+                        "CURRENT_MONTH" to "Só ${state.currentMonthLabel}",
+                        "ALL_FUTURE" to futureLabel
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = periodScope == key,
+                            onClick = { periodScope = key },
+                            label = { Text(label, maxLines = 1) },
+                            modifier = Modifier.testTag("finance_period_scope_$key"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
+
+                if (futurePrepaidPayments.isNotEmpty()) {
+                    Surface(
+                        color = NewShapeGoldMuted,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Fidelizações pré-pagas (meses futuros): ${futurePrepaidPayments.size} mensalidade(s) · €${String.format("%.2f", futurePrepaidTotal)} — contabilizadas automaticamente 1 por mês.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NewShapeGoldBright,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         // Training Type Filter Chips
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 listOf(
-                    "ALL" to "Todos (${allPaidPayments.size})",
+                    "ALL" to "Todos (${scopedAllPaidPayments.size})",
                     "PERSONALIZADO" to "Personalizado (${personalizadoPayments.size})",
                     "GRUPO" to "Grupo (${grupoPayments.size})"
                 ).forEach { (key, label) ->
@@ -380,9 +446,17 @@ private fun FinancesSection(
                         modifier = Modifier.weight(1f)
                     )
                     FinanceMetricCard(
-                        title = "Total Faturação",
+                        title = when (periodScope) {
+                            "CURRENT_MONTH" -> "Total (${state.currentMonthLabel})"
+                            "ALL_FUTURE" -> "Total (c/ futuros)"
+                            else -> "Total Realizado"
+                        },
                         value = "€${String.format("%.2f", totalRevenue)}",
-                        subtitle = "soma de todos os meses",
+                        subtitle = when (periodScope) {
+                            "CURRENT_MONTH" -> "apenas mês atual"
+                            "ALL_FUTURE" -> "inclui pré-pagos"
+                            else -> "até este mês (1/mês)"
+                        },
                         accent = NewShapeGold,
                         modifier = Modifier.weight(1f)
                     )
@@ -535,12 +609,18 @@ private fun FinancesSection(
                 } else {
                     items(methodList, key = { "${methodName}_${it.id}" }) { payment ->
                         val clientObj = clientMap[payment.clientId]
+                        val isFuture = payment.monthYear > state.currentMonthYear
+                        val isFid = payment.note.contains("fideliza", ignoreCase = true)
+                        val fidDetail = if (isFid) payment.note.split("·").drop(1).joinToString("·").trim().ifBlank { null } else null
                         PaymentRowCard(
                             clientName = clientObj?.name ?: "Aluno",
                             trainingType = clientObj?.trainingType ?: "GRUPO",
                             monthLabel = payment.monthLabel,
                             paidAtMillis = payment.paidAtMillis,
                             amountEur = payment.amountEur,
+                            isFuture = isFuture,
+                            fidelizacaoDetail = fidDetail,
+                            onSplit = if (!isFid && payment.amountEur > 0.0) { { splitTargetPayment = payment } } else null,
                             onDelete = { viewModel.deletePayment(payment.id) }
                         )
                     }
@@ -558,12 +638,17 @@ private fun FinancesSection(
                 }
                 items(otherMethodPayments, key = { "other_${it.id}" }) { payment ->
                     val clientObj = clientMap[payment.clientId]
+                    val isFuture = payment.monthYear > state.currentMonthYear
+                    val isFid = payment.note.contains("fideliza", ignoreCase = true)
                     PaymentRowCard(
                         clientName = clientObj?.name ?: "Aluno",
                         trainingType = clientObj?.trainingType ?: "GRUPO",
                         monthLabel = "${payment.monthLabel}${if (payment.note.isNotBlank()) " · ${payment.note}" else ""}",
                         paidAtMillis = payment.paidAtMillis,
                         amountEur = payment.amountEur,
+                        isFuture = isFuture,
+                        fidelizacaoDetail = null,
+                        onSplit = if (!isFid && payment.amountEur > 0.0) { { splitTargetPayment = payment } } else null,
                         onDelete = { viewModel.deletePayment(payment.id) }
                     )
                 }
@@ -625,11 +710,25 @@ private fun FinancesSection(
             defaultMonthYear = state.currentMonthYear,
             defaultMonthLabel = state.currentMonthLabel,
             defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
-            defaultDurationMonths = client.fidelizacaoMonths,
+            defaultDurationMonths = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, state.fidelizacoes),
             onDismiss = { chosenClient = null },
             onConfirm = { my, ml, amt, method, durationMonths ->
                 viewModel.recordPayment(client.id, my, ml, amt, method, durationMonths)
                 chosenClient = null
+            }
+        )
+    }
+
+    splitTargetPayment?.let { payment ->
+        val clientObj = clientMap[payment.clientId]
+        SplitPaymentFidelizacaoDialog(
+            clientName = clientObj?.name ?: "Aluno",
+            payment = payment,
+            defaultMonths = if (SeedCatalog.getEffectiveClientFidelizacaoMonths(clientObj, state.fidelizacoes) == 12) 12 else 6,
+            onDismiss = { splitTargetPayment = null },
+            onConfirm = { months ->
+                viewModel.splitPaymentIntoFidelizacao(payment, months)
+                splitTargetPayment = null
             }
         )
     }
@@ -642,6 +741,9 @@ private fun PaymentRowCard(
     monthLabel: String,
     paidAtMillis: Long,
     amountEur: Double,
+    isFuture: Boolean = false,
+    fidelizacaoDetail: String? = null,
+    onSplit: (() -> Unit)? = null,
     onDelete: () -> Unit
 ) {
     val isPersonal = trainingType == "PERSONALIZADO"
@@ -651,37 +753,67 @@ private fun PaymentRowCard(
         border = BorderStroke(1.dp, HairlineBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(clientName, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
-                    StatusPill(
-                        text = if (isPersonal) "Personalizado" else "Grupo",
-                        textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
-                        containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(clientName, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                        StatusPill(
+                            text = if (isPersonal) "Personalizado" else "Grupo",
+                            textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
+                            containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
+                        )
+                        if (isFuture) {
+                            StatusPill("Futuro", PendingAmber, PendingAmberContainer)
+                        }
+                    }
+                    Text(
+                        text = "$monthLabel · ${formatShortDate(paidAtMillis)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark
                     )
+                    if (!fidelizacaoDetail.isNullOrBlank()) {
+                        Text(
+                            text = fidelizacaoDetail,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NewShapeGoldBright
+                        )
+                    }
                 }
-                Text(
-                    text = "$monthLabel · ${formatShortDate(paidAtMillis)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondaryDark
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusPill(
+                        text = "€${String.format("%.2f", amountEur)}",
+                        textColor = ConfirmedGreen,
+                        containerColor = ConfirmedGreenContainer
+                    )
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+                    }
+                }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusPill(
-                    text = "€${String.format("%.2f", amountEur)}",
-                    textColor = ConfirmedGreen,
-                    containerColor = ConfirmedGreenContainer
-                )
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar pagamento", tint = DangerRed)
+            if (onSplit != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        onClick = onSplit,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            text = "Dividir por 6 / 12 meses (Fidelização)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = NewShapeGoldBright
+                        )
+                    }
                 }
             }
         }
@@ -864,12 +996,24 @@ private fun FidelizacoesSection(
         FidelizacaoDialog(
             clientName = dialogClient.name,
             existing = editingFid,
+            isSuperAdmin = state.isSuperAdmin,
+            defaultMonthlyFeeEur = dialogClient.monthlyFeeEur,
             onDismiss = {
                 targetClientForCreate = null
                 editingFid = null
             },
             onSave = { months, startMillis, notes ->
                 viewModel.saveFidelizacao(dialogClient.id, months, startMillis, notes, editingFid?.id.orEmpty())
+                targetClientForCreate = null
+                editingFid = null
+            },
+            onSaveWithPayment = { months, startMillis, notes, totalPaidEur, method ->
+                viewModel.saveFidelizacao(dialogClient.id, months, startMillis, notes, "")
+                val startCal = java.util.Calendar.getInstance().apply { timeInMillis = startMillis }
+                val monthsPt = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+                val my = String.format("%04d-%02d", startCal.get(java.util.Calendar.YEAR), startCal.get(java.util.Calendar.MONTH) + 1)
+                val ml = "${monthsPt[startCal.get(java.util.Calendar.MONTH)]} ${startCal.get(java.util.Calendar.YEAR)}"
+                viewModel.recordPayment(dialogClient.id, my, ml, totalPaidEur, method, months)
                 targetClientForCreate = null
                 editingFid = null
             }

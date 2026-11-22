@@ -37,6 +37,8 @@ import {
   formatPhoneDisplay,
   formatRgpdConsentStamp,
   formatShortDate,
+  getEffectiveClientFidelizacaoMonths,
+  splitAmountAcrossMonths,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
 import {
@@ -306,7 +308,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         <RegisterPaymentModal
           clientName={payTarget.name}
           defaultAmount={payTarget.monthlyFeeEur > 0 ? payTarget.monthlyFeeEur : 120}
-          defaultDurationMonths={payTarget.fidelizacaoMonths}
+          defaultDurationMonths={getEffectiveClientFidelizacaoMonths(payTarget, fidelizacoes)}
           onClose={() => setPayTarget(null)}
           onConfirm={async (my, ml, amount, method, durationMonths) => {
             await repo.recordPayment(
@@ -390,6 +392,7 @@ const ClientProfileView: React.FC<{
     client.fidelizacaoStartMillis > 0 ? client.fidelizacaoStartMillis : Date.now()
   );
   const [showPay, setShowPay] = useState(false);
+  const [splitTargetPayment, setSplitTargetPayment] = useState<PaymentRecord | null>(null);
 
   const monthPayment = payments.find((p) => p.monthYear === currentMonthYear && p.paid);
 
@@ -817,29 +820,47 @@ const ClientProfileView: React.FC<{
         {payments.length > 0 && (
           <div className="mt-4 space-y-2 border-t border-[#323238] pt-3">
             <FieldLabel>Histórico de pagamentos</FieldLabel>
-            {payments.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between rounded-xl bg-[#242429] px-3 py-2 text-xs"
-              >
-                <div>
-                  <p className="font-bold text-[#F4F4F5]">
-                    {p.monthLabel} · €{p.amountEur.toFixed(2)}
-                  </p>
-                  <p className="text-[#A1A1AA]">
-                    {formatShortDate(p.paidAtMillis)}
-                    {p.note ? ` · ${p.note}` : ''}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => repo.deletePayment(uid, p.id)}
-                  className="text-[#EF4444] hover:opacity-80"
+            {payments.map((p) => {
+              const isFuture = Boolean(currentMonthYear && p.monthYear > currentMonthYear);
+              const isAlreadyFid = p.note.toLowerCase().includes('fideliza');
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between gap-2 rounded-xl bg-[#242429] px-3 py-2 text-xs"
                 >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="font-bold text-[#F4F4F5]">
+                        {p.monthLabel} · €{p.amountEur.toFixed(2)}
+                      </p>
+                      {isFuture && <StatusPill tone="amber">Futuro</StatusPill>}
+                    </div>
+                    <p className="text-[#A1A1AA]">
+                      {formatShortDate(p.paidAtMillis)}
+                      {p.note ? ` · ${p.note}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {!isAlreadyFid && p.amountEur > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSplitTargetPayment(p)}
+                        className="rounded-lg border border-[#EAB308]/50 bg-[#3D3314]/60 px-2 py-1 text-[11px] font-bold text-[#FACC15] hover:bg-[#3D3314]"
+                      >
+                        Dividir 6/12m
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => repo.deletePayment(uid, p.id)}
+                      className="text-[#EF4444] hover:opacity-80"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </BrandCard>
@@ -878,7 +899,7 @@ const ClientProfileView: React.FC<{
         <RegisterPaymentModal
           clientName={client.name}
           defaultAmount={client.monthlyFeeEur > 0 ? client.monthlyFeeEur : 120}
-          defaultDurationMonths={client.fidelizacaoMonths}
+          defaultDurationMonths={getEffectiveClientFidelizacaoMonths(client, fidelizacoes)}
           onClose={() => setShowPay(false)}
           onConfirm={async (my, ml, amt, method, durationMonths) => {
             await repo.recordPayment(uid, client.id, my, ml, amt, method, durationMonths);
@@ -887,8 +908,26 @@ const ClientProfileView: React.FC<{
               durationMonths > 1
                 ? `Pagamento de ${durationMonths} meses registado (€${(
                     amt / durationMonths
-                  ).toFixed(2)}/mês)!`
+                  ).toFixed(2)}/mês · 1 mensalidade/mês)!`
                 : 'Pagamento registado!'
+            );
+          }}
+        />
+      )}
+
+      {isSuperAdmin && splitTargetPayment && (
+        <SplitPaymentFidelizacaoModal
+          clientName={client.name}
+          payment={splitTargetPayment}
+          defaultMonths={getEffectiveClientFidelizacaoMonths(client, fidelizacoes) === 12 ? 12 : 6}
+          onClose={() => setSplitTargetPayment(null)}
+          onConfirm={async (months) => {
+            await repo.splitPaymentIntoFidelizacao(uid, splitTargetPayment, months);
+            setSplitTargetPayment(null);
+            onBanner(
+              `Pagamento dividido por ${months} meses (€${(
+                splitTargetPayment.amountEur / months
+              ).toFixed(2)}/mês · 1 mensalidade por mês)!`
             );
           }}
         />
@@ -1156,9 +1195,11 @@ export const RegisterPaymentModal: React.FC<{
                 €{numericAmount.toFixed(2)} ÷ {durationMonths} meses = €
                 {perMonthValue.toFixed(2)}/mês
               </p>
-              <p className="mt-0.5 text-[11px] text-[#F4F4F5]/80">
-                Conta 1 mensalidade por mês em todo o período ({coveredMonths[0]?.monthLabel} →{' '}
-                {coveredMonths[coveredMonths.length - 1]?.monthLabel}).
+              <p className="mt-0.5 text-[11px] text-[#F4F4F5]/85">
+                No mês do pagamento é contabilizada apenas 1 mensalidade (€
+                {perMonthValue.toFixed(2)}). Os restantes meses ({coveredMonths[0]?.monthLabel} →{' '}
+                {coveredMonths[coveredMonths.length - 1]?.monthLabel}) entram automaticamente 1 por
+                mês.
               </p>
             </div>
           )}
@@ -1204,3 +1245,89 @@ export const RegisterPaymentModal: React.FC<{
     </Modal>
   );
 };
+
+export const SplitPaymentFidelizacaoModal: React.FC<{
+  clientName: string;
+  payment: PaymentRecord;
+  defaultMonths?: 6 | 12;
+  onClose: () => void;
+  onConfirm: (months: 6 | 12) => Promise<void>;
+}> = ({ clientName, payment, defaultMonths = 6, onClose, onConfirm }) => {
+  const [months, setMonths] = useState<6 | 12>(defaultMonths);
+  const [busy, setBusy] = useState(false);
+
+  const splitValues = useMemo(
+    () => splitAmountAcrossMonths(payment.amountEur, months),
+    [payment.amountEur, months]
+  );
+  const coveredMonths = useMemo(
+    () => buildConsecutiveMonths(payment.monthYear, months),
+    [payment.monthYear, months]
+  );
+  const perMonth = splitValues[0] ?? 0;
+
+  return (
+    <Modal
+      open
+      title="Dividir Pagamento por Fidelização"
+      subtitle={`${clientName} · €${payment.amountEur.toFixed(2)} (${payment.monthLabel})`}
+      onClose={onClose}
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-[#A1A1AA]">
+          Divide este valor pelos meses da fidelização para que cada mês contabilize apenas{' '}
+          <strong className="text-[#F4F4F5]">1 mensalidade</strong> (em vez do valor total num único
+          mês).
+        </p>
+
+        <div>
+          <FieldLabel>Duração da fidelização</FieldLabel>
+          <div className="grid grid-cols-2 gap-2">
+            {([6, 12] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMonths(m)}
+                className={`rounded-xl border py-2 text-xs font-bold transition ${
+                  months === m
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {m} Meses
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#EAB308]/40 bg-[#3D3314]/60 p-3 text-xs text-[#FACC15]">
+          <p className="font-bold">
+            €{payment.amountEur.toFixed(2)} ÷ {months} meses = €{perMonth.toFixed(2)}/mês
+          </p>
+          <p className="mt-1 text-[11px] text-[#F4F4F5]/85">
+            Período: {coveredMonths[0]?.monthLabel} →{' '}
+            {coveredMonths[coveredMonths.length - 1]?.monthLabel} · Conta 1 mensalidade/mês.
+          </p>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <GoldButton
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm(months);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Dividir por {months} meses
+          </GoldButton>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+

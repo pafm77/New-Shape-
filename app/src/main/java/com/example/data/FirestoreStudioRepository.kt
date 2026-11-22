@@ -352,13 +352,36 @@ class FirestoreStudioRepository(
         val settingsRef = userDoc(uid).collection("settings").document("studio")
         val settingsSnap = settingsRef.get().await()
         if (settingsSnap.exists() && settingsSnap.getBoolean("seeded") == true) {
-            // Backfill expanded food catalog & sample assessments for already-seeded accounts
+            // 1. Replace old non-custom exercises with the new 385-exercise CSV library (preserving PT custom exercises)
+            val existingExercisesSnap = userDoc(uid).collection("exercises").get().await()
+            val expectedExerciseIds = SeedCatalog.defaultExercises.map { it.id }.toSet()
+            val existingExerciseIds = existingExercisesSnap.documents.map { it.id }.toSet()
+            val obsoleteExerciseRefs = existingExercisesSnap.documents
+                .filter { it.getBoolean("custom") != true && it.id !in expectedExerciseIds }
+                .map { it.reference }
+            val missingExercises = SeedCatalog.defaultExercises.filter { it.id !in existingExerciseIds }
+
+            // 2. Backfill expanded food catalog & sample assessments for already-seeded accounts
             val existingFoodsSnap = userDoc(uid).collection("foods").get().await()
             val existingFoodIds = existingFoodsSnap.documents.map { it.id }.toSet()
             val missingFoods = SeedCatalog.defaultFoods.filter { it.id !in existingFoodIds }
 
             val existingAssessmentsSnap = userDoc(uid).collection("physical_assessments").limit(1).get().await()
             val backfillWrites = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
+
+            missingExercises.forEach { ex ->
+                val ref = userDoc(uid).collection("exercises").document(ex.id)
+                backfillWrites += ref to mapOf(
+                    "userId" to uid,
+                    "name" to ex.name,
+                    "muscleGroup" to ex.muscleGroup,
+                    "equipment" to ex.equipment,
+                    "instructions" to ex.instructions,
+                    "custom" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            }
 
             missingFoods.forEach { fd ->
                 val ref = userDoc(uid).collection("foods").document(fd.id)
@@ -408,6 +431,11 @@ class FirestoreStudioRepository(
                 }
             }
 
+            obsoleteExerciseRefs.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { ref -> batch.delete(ref) }
+                batch.commit().await()
+            }
             backfillWrites.chunked(400).forEach { chunk ->
                 val batch = db.batch()
                 chunk.forEach { (ref, payload) -> batch.set(ref, payload) }
@@ -674,11 +702,11 @@ class FirestoreStudioRepository(
                 "updatedAt" to FieldValue.serverTimestamp()
             )
             val wpItems = listOf(
-                listOf("wpi_1", "ex_15", "Agachamento Livre com Barra", "Pernas", 4, "8-10", "50 kg", 120, "Controlar descida 3s", 0),
-                listOf("wpi_2", "ex_2", "Supino Inclinado com Halteres", "Peito", 3, "10-12", "14 kg", 90, "", 1),
-                listOf("wpi_3", "ex_8", "Puxada à Frente (Lat Pulldown)", "Costas", 3, "10-12", "45 kg", 90, "", 2),
-                listOf("wpi_4", "ex_26", "Elevações Laterais com Halteres", "Ombros", 3, "12-15", "6 kg", 60, "", 3),
-                listOf("wpi_5", "ex_37", "Prancha Abdominal (Plank)", "Core", 3, "45s", "Corporal", 45, "", 4)
+                listOf("wpi_1", "ex_csv_336", "Agachamento búlgaro", "Quadríceps", 4, "8-10", "20 kg", 120, "Controlar descida 3s", 0),
+                listOf("wpi_2", "ex_csv_309", "Supino inclinado com halteres", "Peito", 3, "10-12", "14 kg", 90, "", 1),
+                listOf("wpi_3", "ex_csv_209", "Puxada à frente", "Costas", 3, "10-12", "45 kg", 90, "", 2),
+                listOf("wpi_4", "ex_csv_267", "Elevações laterais com halteres", "Ombros", 3, "12-15", "6 kg", 60, "", 3),
+                listOf("wpi_5", "ex_csv_68", "Prancha", "Core", 3, "45s", "Corporal", 45, "", 4)
             )
             wpItems.forEach { wpi ->
                 writes += userDoc(uid).collection("workout_plan_items").document(wpi[0] as String) to mapOf(
@@ -1434,7 +1462,7 @@ class FirestoreStudioRepository(
         val validMethod = SeedCatalog.normalizePaymentMethod(note) ?: "MbWay"
         val monthsCount = if (durationMonths == 6 || durationMonths == 12) durationMonths else 1
         val totalClamped = amountEur.coerceIn(0.0, 100000.0)
-        val perMonthAmount = kotlin.math.round((totalClamped / monthsCount) * 100.0) / 100.0
+        val perMonthAmounts = SeedCatalog.splitAmountAcrossMonths(totalClamped, monthsCount)
         val targetMonths = if (monthsCount == 1) {
             listOf(monthYear to monthLabel)
         } else {
@@ -1442,7 +1470,12 @@ class FirestoreStudioRepository(
         }
         val now = System.currentTimeMillis()
         val batch = db.batch()
-        targetMonths.forEach { (mYear, mLabel) ->
+        targetMonths.forEachIndexed { idx, (mYear, mLabel) ->
+            val installmentNote = if (monthsCount > 1) {
+                "$validMethod · Fidelização ${monthsCount}m (${idx + 1}/$monthsCount · total €${String.format(java.util.Locale.US, "%.2f", totalClamped)})".take(200)
+            } else {
+                validMethod
+            }
             val ref = userDoc(uid).collection("payments").document()
             batch.set(
                 ref,
@@ -1451,10 +1484,10 @@ class FirestoreStudioRepository(
                     "clientId" to clientId,
                     "monthYear" to mYear,
                     "monthLabel" to mLabel,
-                    "amountEur" to perMonthAmount,
+                    "amountEur" to (perMonthAmounts.getOrNull(idx) ?: (kotlin.math.round((totalClamped / monthsCount) * 100.0) / 100.0)),
                     "paid" to true,
                     "paidAtMillis" to now,
-                    "note" to validMethod,
+                    "note" to installmentNote,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -1466,6 +1499,48 @@ class FirestoreStudioRepository(
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/payments")
+        Result.failure(e)
+    }
+
+    suspend fun splitPaymentIntoFidelizacao(
+        payment: PaymentRecord,
+        durationMonths: Int
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        val monthsCount = if (durationMonths == 12) 12 else 6
+        val validMethod = SeedCatalog.normalizePaymentMethod(payment.note) ?: "MbWay"
+        val totalClamped = payment.amountEur.coerceIn(0.0, 100000.0)
+        val perMonthAmounts = SeedCatalog.splitAmountAcrossMonths(totalClamped, monthsCount)
+        val targetMonths = SeedCatalog.buildConsecutiveMonths(payment.monthYear, monthsCount)
+        val paidAt = if (payment.paidAtMillis > 0L) payment.paidAtMillis else System.currentTimeMillis()
+        val batch = db.batch()
+        batch.delete(userDoc(uid).collection("payments").document(payment.id))
+        targetMonths.forEachIndexed { idx, (mYear, mLabel) ->
+            val installmentNote =
+                "$validMethod · Fidelização ${monthsCount}m (${idx + 1}/$monthsCount · total €${String.format(java.util.Locale.US, "%.2f", totalClamped)})".take(200)
+            val ref = userDoc(uid).collection("payments").document()
+            batch.set(
+                ref,
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to payment.clientId,
+                    "monthYear" to mYear,
+                    "monthLabel" to mLabel,
+                    "amountEur" to (perMonthAmounts.getOrNull(idx) ?: (kotlin.math.round((totalClamped / monthsCount) * 100.0) / 100.0)),
+                    "paid" to true,
+                    "paidAtMillis" to paidAt,
+                    "note" to installmentNote,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+        batch.commit().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/payments")
         Result.failure(e)
     }
 
@@ -1512,6 +1587,17 @@ class FirestoreStudioRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
+        }
+        try {
+            userDoc(uid).collection("clients").document(clientId).update(
+                mapOf(
+                    "fidelizacaoMonths" to months,
+                    "fidelizacaoStartMillis" to startDateMillis,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } catch (_: Exception) {
+            // Ignore if client document is missing
         }
         Result.success(Unit)
     } catch (e: CancellationException) {

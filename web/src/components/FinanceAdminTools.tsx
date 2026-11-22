@@ -27,7 +27,7 @@ interface FinanceAdminToolsProps {
   onBanner: (msg: string) => void;
 }
 
-type ExportPeriod = 'current_month' | 'last_6_months' | 'all';
+type ExportPeriod = 'current_month' | 'last_6_months' | 'all' | 'all_with_future';
 
 function csvEscape(val: string | number): string {
   const s = String(val ?? '');
@@ -109,6 +109,9 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
       const keys = buildLastNMonthKeys(6);
       return paid.filter((p) => keys.has(p.monthYear));
     }
+    if (exportPeriod === 'all' && currentMonthYear) {
+      return paid.filter((p) => p.monthYear <= currentMonthYear);
+    }
     return paid;
   }, [payments, exportPeriod, currentMonthYear]);
 
@@ -141,6 +144,12 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
       if (method in methodTotals) methodTotals[method] += p.amountEur;
       else methodTotals.Outro += p.amountEur;
 
+      const statusLabel = !p.paid
+        ? 'Pendente'
+        : currentMonthYear && p.monthYear > currentMonthYear
+        ? 'Pré-pago (Futuro)'
+        : 'Pago';
+
       lines.push(
         [
           csvEscape(p.monthLabel || p.monthYear),
@@ -149,7 +158,7 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
           csvEscape(modalidade),
           csvEscape(method),
           csvEscape(p.amountEur.toFixed(2).replace('.', ',')),
-          csvEscape(p.paid ? 'Pago' : 'Pendente'),
+          csvEscape(statusLabel),
         ].join(';')
       );
     });
@@ -176,7 +185,9 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
         ? currentMonthYear
         : exportPeriod === 'last_6_months'
         ? 'ultimos_6_meses'
-        : 'historico_completo';
+        : exportPeriod === 'all_with_future'
+        ? 'historico_com_futuros'
+        : 'historico_realizado';
     const a = document.createElement('a');
     a.href = url;
     a.download = `newshape_faturacao_${suffix}.csv`;
@@ -347,7 +358,8 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
               [
                 { id: 'current_month' as const, label: `Este mês (${currentMonthLabel})` },
                 { id: 'last_6_months' as const, label: 'Últimos 6 meses' },
-                { id: 'all' as const, label: 'Todo o histórico' },
+                { id: 'all' as const, label: 'Realizado (até hoje)' },
+                { id: 'all_with_future' as const, label: 'Tudo (+ futuros)' },
               ] as const
             ).map((opt) => (
               <button

@@ -820,6 +820,18 @@ class NewShapeViewModel(
         }
     }
 
+    fun splitPaymentIntoFidelizacao(payment: PaymentRecord, durationMonths: Int) {
+        val months = if (durationMonths == 12) 12 else 6
+        viewModelScope.launch {
+            repository.splitPaymentIntoFidelizacao(payment, months)
+                .onSuccess {
+                    val perMonth = payment.amountEur / months
+                    _statusBanner.value = "Pagamento dividido por $months meses (€${String.format("%.2f", perMonth)}/mês)!"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     // --- Fidelizações ---
     fun saveFidelizacao(clientId: String, durationMonths: Int, startDateMillis: Long, notes: String, existingId: String = "") {
         viewModelScope.launch {

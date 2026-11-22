@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Dumbbell, Plus, Search, Trash2, Users, X } from 'lucide-react';
+import { Dumbbell, ExternalLink, Plus, Search, Trash2, Users, X } from 'lucide-react';
 import {
   BookingRecord,
   ClientRecord,
@@ -13,6 +13,7 @@ import {
   WorkoutPlanRecord,
 } from '../types/studio';
 import * as repo from '../services/firestoreRepository';
+import { DEFAULT_MUSCLE_GROUPS } from '../data/seedCatalog';
 import {
   BrandCard,
   EmptyState,
@@ -402,18 +403,28 @@ const ExerciseLibraryView: React.FC<{
     [exercises]
   );
 
-  const filtered = exercises.filter(
-    (e) =>
-      (group === 'Todos' || e.muscleGroup === group) &&
-      (!search.trim() ||
-        e.name.toLowerCase().includes(search.toLowerCase()) ||
-        e.equipment.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return exercises.filter(
+      (e) =>
+        (group === 'Todos' || e.muscleGroup === group) &&
+        (!q ||
+          e.name.toLowerCase().includes(q) ||
+          e.equipment.toLowerCase().includes(q) ||
+          e.muscleGroup.toLowerCase().includes(q) ||
+          e.instructions.toLowerCase().includes(q))
+    );
+  }, [exercises, group, search]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-[#F4F4F5]">Biblioteca de Exercícios</h2>
+        <div>
+          <h2 className="text-lg font-bold text-[#F4F4F5]">Biblioteca de Exercícios</h2>
+          <p className="text-xs text-[#A1A1AA]">
+            {filtered.length} de {exercises.length} exercício(s)
+          </p>
+        </div>
         <GoldButton onClick={() => setShowAdd(true)}>
           <Plus className="h-4 w-4" />
           Acrescentar
@@ -425,7 +436,7 @@ const ExerciseLibraryView: React.FC<{
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Procurar exercício ou equipamento..."
+          placeholder="Procurar exercício, nome EN, músculo ou equipamento..."
           className="pl-9"
         />
       </div>
@@ -448,36 +459,55 @@ const ExerciseLibraryView: React.FC<{
       </div>
 
       <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
-        {filtered.map((ex) => (
-          <div
-            key={ex.id}
-            className="flex items-start justify-between gap-2 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-4"
-          >
-            <div>
-              <h3 className="text-sm font-bold text-[#F4F4F5]">{ex.name}</h3>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <StatusPill tone="gold">{ex.muscleGroup}</StatusPill>
-                <StatusPill>{ex.equipment}</StatusPill>
-                {ex.custom && <StatusPill tone="blue">Personalizado</StatusPill>}
+        {filtered.map((ex) => {
+          const videoMatch = ex.instructions.match(/https:\/\/\S+/);
+          const videoUrl = videoMatch ? videoMatch[0] : '';
+          const cleanInstr = ex.instructions
+            .replace(/\s*·?\s*Vídeo:\s*https:\/\/\S+/i, '')
+            .replace(/https:\/\/\S+/g, '')
+            .trim();
+          return (
+            <div
+              key={ex.id}
+              className="flex items-start justify-between gap-2 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-4"
+            >
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold text-[#F4F4F5]">{ex.name}</h3>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <StatusPill tone="gold">{ex.muscleGroup}</StatusPill>
+                  {ex.equipment && <StatusPill>{ex.equipment}</StatusPill>}
+                  {ex.custom && <StatusPill tone="blue">Personalizado</StatusPill>}
+                  {videoUrl && (
+                    <a
+                      href={videoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-full border border-[#EAB308]/40 bg-[#3D3314]/60 px-2 py-0.5 text-[11px] font-bold text-[#FACC15] hover:bg-[#52441A]"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Vídeo
+                    </a>
+                  )}
+                </div>
+                {cleanInstr && (
+                  <p className="mt-2 text-xs text-[#A1A1AA]">{cleanInstr}</p>
+                )}
               </div>
-              {ex.instructions && (
-                <p className="mt-2 text-xs text-[#A1A1AA]">{ex.instructions}</p>
+              {ex.custom && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await repo.deleteExercise(uid, ex.id);
+                    onBanner('Exercício apagado.');
+                  }}
+                  className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               )}
             </div>
-            {ex.custom && (
-              <button
-                type="button"
-                onClick={async () => {
-                  await repo.deleteExercise(uid, ex.id);
-                  onBanner('Exercício apagado.');
-                }}
-                className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {showAdd && (
@@ -689,12 +719,23 @@ const AddExerciseToPlanModal: React.FC<{
   ) => Promise<void>;
 }> = ({ planTitle, exercises, onClose, onAdd }) => {
   const [search, setSearch] = useState('');
-  const filtered = exercises.filter(
-    (e) =>
-      !search.trim() ||
-      e.name.toLowerCase().includes(search.toLowerCase()) ||
-      e.muscleGroup.toLowerCase().includes(search.toLowerCase())
+  const [groupFilter, setGroupFilter] = useState('Todos');
+  const groups = useMemo(
+    () => ['Todos', ...Array.from(new Set(exercises.map((e) => e.muscleGroup))).sort()],
+    [exercises]
   );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return exercises.filter(
+      (e) =>
+        (groupFilter === 'Todos' || e.muscleGroup === groupFilter) &&
+        (!q ||
+          e.name.toLowerCase().includes(q) ||
+          e.muscleGroup.toLowerCase().includes(q) ||
+          e.equipment.toLowerCase().includes(q) ||
+          e.instructions.toLowerCase().includes(q))
+    );
+  }, [exercises, groupFilter, search]);
   const [selectedId, setSelectedId] = useState(exercises[0]?.id || '');
   const [sets, setSets] = useState('3');
   const [reps, setReps] = useState('10-12');
@@ -702,7 +743,7 @@ const AddExerciseToPlanModal: React.FC<{
   const [rest, setRest] = useState('90');
   const [notes, setNotes] = useState('');
 
-  const selected = exercises.find((e) => e.id === selectedId) || filtered[0] || null;
+  const selected = filtered.find((e) => e.id === selectedId) || filtered[0] || null;
 
   return (
     <Modal open title={`Adicionar a ${planTitle}`} onClose={onClose}>
@@ -710,9 +751,25 @@ const AddExerciseToPlanModal: React.FC<{
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filtrar exercício..."
+          placeholder="Filtrar exercício, músculo ou equipamento..."
         />
-        <div className="max-h-44 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {groups.map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => setGroupFilter(g)}
+              className={`whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
+                groupFilter === g
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+              }`}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
+        <div className="max-h-48 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
           {filtered.map((ex) => (
             <label
               key={ex.id}
@@ -725,9 +782,12 @@ const AddExerciseToPlanModal: React.FC<{
                 onChange={() => setSelectedId(ex.id)}
                 className="accent-[#EAB308]"
               />
-              <div>
-                <p className="font-semibold text-[#F4F4F5]">{ex.name}</p>
-                <p className="text-[11px] text-[#EAB308]">{ex.muscleGroup}</p>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-[#F4F4F5]">{ex.name}</p>
+                <p className="text-[11px] text-[#EAB308]">
+                  {ex.muscleGroup}
+                  {ex.equipment ? ` · ${ex.equipment}` : ''}
+                </p>
               </div>
             </label>
           ))}
@@ -783,7 +843,7 @@ const AddCustomExerciseModal: React.FC<{
   onClose: () => void;
   onSave: (name: string, group: string, equip: string, instructions: string) => Promise<void>;
 }> = ({ onClose, onSave }) => {
-  const groups = ['Peito', 'Costas', 'Pernas', 'Ombros', 'Braços', 'Core', 'Cardio'];
+  const groups = DEFAULT_MUSCLE_GROUPS;
   const [name, setName] = useState('');
   const [group, setGroup] = useState('Peito');
   const [equip, setEquip] = useState('Halteres');

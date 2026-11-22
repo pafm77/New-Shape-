@@ -22,12 +22,15 @@ import {
   TrainingType,
 } from '../types/studio';
 import {
+  MONTHS_PT,
   PAYMENT_METHODS,
   PaymentMethod,
+  buildConsecutiveMonths,
   buildRecentMonthOptions,
   formatPhoneDisplay,
   formatShortDate,
   formatTimeAgo,
+  getEffectiveClientFidelizacaoMonths,
   normalizePaymentMethod,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
@@ -42,7 +45,7 @@ import {
   StatusPill,
   Textarea,
 } from './UiPrimitives';
-import { RegisterPaymentModal } from './PtClientsSection';
+import { RegisterPaymentModal, SplitPaymentFidelizacaoModal } from './PtClientsSection';
 import { FinanceChart } from './FinanceChart';
 import { FinanceAdminTools } from './FinanceAdminTools';
 import { AppInstallGuideSubTab } from './AppInstallGuideSubTab';
@@ -164,6 +167,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
       {subTab === 'fidelizacao' && (
         <FidelizacaoSubTab
           uid={uid}
+          isSuperAdmin={isSuperAdmin}
           clients={clients}
           fidelizacoes={fidelizacoes}
           onBanner={onBanner}
@@ -359,11 +363,42 @@ const FinanceSubTab: React.FC<{
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [pickClientModal, setPickClientModal] = useState(false);
   const [payClient, setPayClient] = useState<ClientRecord | null>(null);
+  const [splitTargetPayment, setSplitTargetPayment] = useState<PaymentRecord | null>(null);
   const [methodFilter, setMethodFilter] = useState<'ALL' | PaymentMethod>('ALL');
   const [trainingFilter, setTrainingFilter] = useState<'ALL' | TrainingType>('ALL');
+  const [periodScope, setPeriodScope] = useState<'realized' | 'current_month' | 'all_with_future'>(
+    'realized'
+  );
 
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const allPaidPayments = useMemo(() => payments.filter((p) => p.paid), [payments]);
+
+  const recentMonths = useMemo(() => buildRecentMonthOptions(), []);
+  const currentMonthYear = recentMonths[0]?.monthYear || '';
+  const currentMonthLabel = recentMonths[0]?.monthLabel || '';
+
+  const futurePrepaidPayments = useMemo(
+    () =>
+      currentMonthYear
+        ? allPaidPayments.filter((p) => p.monthYear > currentMonthYear)
+        : [],
+    [allPaidPayments, currentMonthYear]
+  );
+
+  const futurePrepaidTotal = useMemo(
+    () => futurePrepaidPayments.reduce((s, p) => s + p.amountEur, 0),
+    [futurePrepaidPayments]
+  );
+
+  const scopedAllPaidPayments = useMemo(() => {
+    if (periodScope === 'current_month') {
+      return allPaidPayments.filter((p) => p.monthYear === currentMonthYear);
+    }
+    if (periodScope === 'realized' && currentMonthYear) {
+      return allPaidPayments.filter((p) => p.monthYear <= currentMonthYear);
+    }
+    return allPaidPayments;
+  }, [allPaidPayments, periodScope, currentMonthYear]);
 
   const getPaymentType = (p: PaymentRecord): TrainingType =>
     clientMap.get(p.clientId)?.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
@@ -371,18 +406,14 @@ const FinanceSubTab: React.FC<{
   const paidPayments = useMemo(
     () =>
       trainingFilter === 'ALL'
-        ? allPaidPayments
-        : allPaidPayments.filter((p) => getPaymentType(p) === trainingFilter),
-    [allPaidPayments, trainingFilter, clientMap]
+        ? scopedAllPaidPayments
+        : scopedAllPaidPayments.filter((p) => getPaymentType(p) === trainingFilter),
+    [scopedAllPaidPayments, trainingFilter, clientMap]
   );
-
-  const recentMonths = useMemo(() => buildRecentMonthOptions(), []);
-  const currentMonthYear = recentMonths[0]?.monthYear || '';
-  const currentMonthLabel = recentMonths[0]?.monthLabel || '';
 
   const trainingBreakdown = useMemo(() => {
     const calc = (type: TrainingType) => {
-      const list = allPaidPayments.filter((p) => getPaymentType(p) === type);
+      const list = scopedAllPaidPayments.filter((p) => getPaymentType(p) === type);
       const total = list.reduce((s, p) => s + p.amountEur, 0);
       const monthList = list.filter((p) => p.monthYear === currentMonthYear);
       const monthTotal = monthList.reduce((s, p) => s + p.amountEur, 0);
@@ -400,7 +431,7 @@ const FinanceSubTab: React.FC<{
       PERSONALIZADO: calc('PERSONALIZADO'),
       GRUPO: calc('GRUPO'),
     };
-  }, [allPaidPayments, currentMonthYear, clientMap]);
+  }, [scopedAllPaidPayments, currentMonthYear, clientMap]);
 
   const currentMonthPayments = useMemo(
     () => paidPayments.filter((p) => p.monthYear === currentMonthYear),
@@ -482,35 +513,76 @@ const FinanceSubTab: React.FC<{
         </GoldButton>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-1.5">
-          {(
-            [
-              { id: 'ALL' as const, label: `Todos (${allPaidPayments.length})` },
-              {
-                id: 'PERSONALIZADO' as const,
-                label: `Treino Personalizado (${trainingBreakdown.PERSONALIZADO.count})`,
-              },
-              {
-                id: 'GRUPO' as const,
-                label: `Treino em Grupo (${trainingBreakdown.GRUPO.count})`,
-              },
-            ] as const
-          ).map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => setTrainingFilter(opt.id)}
-              className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
-                trainingFilter === opt.id
-                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
-                  : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: 'realized' as const, label: 'Até este mês (Realizado)' },
+                { id: 'current_month' as const, label: `Só ${currentMonthLabel}` },
+                {
+                  id: 'all_with_future' as const,
+                  label:
+                    futurePrepaidPayments.length > 0
+                      ? `Incluir futuros (+${futurePrepaidPayments.length})`
+                      : 'Incluir futuros',
+                },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setPeriodScope(opt.id)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                  periodScope === opt.id
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: 'ALL' as const, label: `Todos (${scopedAllPaidPayments.length})` },
+                {
+                  id: 'PERSONALIZADO' as const,
+                  label: `Treino Personalizado (${trainingBreakdown.PERSONALIZADO.count})`,
+                },
+                {
+                  id: 'GRUPO' as const,
+                  label: `Treino em Grupo (${trainingBreakdown.GRUPO.count})`,
+                },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setTrainingFilter(opt.id)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                  trainingFilter === opt.id
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {futurePrepaidPayments.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#EAB308]/35 bg-[#3D3314]/45 px-3.5 py-2 text-xs text-[#FACC15]">
+            <span>
+              <strong>Fidelizações pré-pagas (meses futuros):</strong>{' '}
+              {futurePrepaidPayments.length} mensalidade(s) · €{futurePrepaidTotal.toFixed(2)} —
+              contabilizadas automaticamente 1 por mês (sem inflacionar o mês do pagamento).
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Distinção Personalizado vs Grupo */}
@@ -601,11 +673,23 @@ const FinanceSubTab: React.FC<{
           <p className="mt-0.5 text-[11px] text-[#A1A1AA]">1 por mês de fidelização</p>
         </BrandCard>
         <BrandCard className="col-span-2 lg:col-span-1">
-          <p className="text-xs text-[#A1A1AA]">Total Faturação</p>
+          <p className="text-xs text-[#A1A1AA]">
+            {periodScope === 'current_month'
+              ? `Total (${currentMonthLabel})`
+              : periodScope === 'all_with_future'
+              ? 'Total (c/ futuros)'
+              : 'Total Realizado'}
+          </p>
           <p className="mt-1 text-2xl font-extrabold text-[#FACC15]">
             €{totalRevenue.toFixed(2)}
           </p>
-          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">Soma de todos os meses</p>
+          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+            {periodScope === 'realized'
+              ? 'Até este mês (1/mês fidel.)'
+              : periodScope === 'current_month'
+              ? 'Apenas mês atual'
+              : 'Inclui meses pré-pagos'}
+          </p>
         </BrandCard>
       </div>
 
@@ -728,6 +812,9 @@ const FinanceSubTab: React.FC<{
                   <div className="mt-3 space-y-2">
                     {list.map((p) => {
                       const client = clientMap.get(p.clientId);
+                      const isFuture = Boolean(currentMonthYear && p.monthYear > currentMonthYear);
+                      const isFid = p.note.toLowerCase().includes('fideliza');
+                      const fidDetail = isFid ? p.note.split('·').slice(1).join('·').trim() : '';
                       return (
                         <div
                           key={p.id}
@@ -748,22 +835,37 @@ const FinanceSubTab: React.FC<{
                                   ? 'Personalizado'
                                   : 'Grupo'}
                               </StatusPill>
+                              {isFuture && <StatusPill tone="amber">Futuro</StatusPill>}
                             </div>
                             <p className="text-xs text-[#A1A1AA]">
                               {p.monthLabel} · {formatShortDate(p.paidAtMillis)}
+                              {fidDetail ? (
+                                <span className="text-[#FACC15]/90"> · {fidDetail}</span>
+                              ) : null}
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              await repo.deletePayment(uid, p.id);
-                              onBanner('Pagamento removido.');
-                            }}
-                            aria-label="Apagar pagamento"
-                            className="rounded-lg p-2 text-[#EF4444] hover:bg-[#3B1518]"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {!isFid && p.amountEur > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setSplitTargetPayment(p)}
+                                className="rounded-lg border border-[#EAB308]/50 bg-[#3D3314]/60 px-2 py-1 text-[11px] font-bold text-[#FACC15] hover:bg-[#3D3314]"
+                              >
+                                Dividir 6/12m
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await repo.deletePayment(uid, p.id);
+                                onBanner('Pagamento removido.');
+                              }}
+                              aria-label="Apagar pagamento"
+                              className="rounded-lg p-2 text-[#EF4444] hover:bg-[#3B1518]"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -788,6 +890,8 @@ const FinanceSubTab: React.FC<{
               <div className="mt-3 space-y-2">
                 {groupedByMethod.other.map((p) => {
                   const client = clientMap.get(p.clientId);
+                  const isFuture = Boolean(currentMonthYear && p.monthYear > currentMonthYear);
+                  const isFid = p.note.toLowerCase().includes('fideliza');
                   return (
                     <div
                       key={p.id}
@@ -808,23 +912,35 @@ const FinanceSubTab: React.FC<{
                               ? 'Personalizado'
                               : 'Grupo'}
                           </StatusPill>
+                          {isFuture && <StatusPill tone="amber">Futuro</StatusPill>}
                         </div>
                         <p className="text-xs text-[#A1A1AA]">
                           {p.monthLabel} · {formatShortDate(p.paidAtMillis)}
                           {p.note ? ` · ${p.note}` : ''}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await repo.deletePayment(uid, p.id);
-                          onBanner('Pagamento removido.');
-                        }}
-                        aria-label="Apagar pagamento"
-                        className="rounded-lg p-2 text-[#EF4444] hover:bg-[#3B1518]"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {!isFid && p.amountEur > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSplitTargetPayment(p)}
+                            className="rounded-lg border border-[#EAB308]/50 bg-[#3D3314]/60 px-2 py-1 text-[11px] font-bold text-[#FACC15] hover:bg-[#3D3314]"
+                          >
+                            Dividir 6/12m
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await repo.deletePayment(uid, p.id);
+                            onBanner('Pagamento removido.');
+                          }}
+                          aria-label="Apagar pagamento"
+                          className="rounded-lg p-2 text-[#EF4444] hover:bg-[#3B1518]"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -868,7 +984,7 @@ const FinanceSubTab: React.FC<{
         <RegisterPaymentModal
           clientName={payClient.name}
           defaultAmount={payClient.monthlyFeeEur > 0 ? payClient.monthlyFeeEur : 120}
-          defaultDurationMonths={payClient.fidelizacaoMonths}
+          defaultDurationMonths={getEffectiveClientFidelizacaoMonths(payClient, fidelizacoes)}
           onClose={() => setPayClient(null)}
           onConfirm={async (my, ml, amt, method, durationMonths) => {
             await repo.recordPayment(uid, payClient.id, my, ml, amt, method, durationMonths);
@@ -877,8 +993,33 @@ const FinanceSubTab: React.FC<{
               durationMonths > 1
                 ? `Pagamento de ${durationMonths} meses registado (€${(
                     amt / durationMonths
-                  ).toFixed(2)}/mês)!`
+                  ).toFixed(2)}/mês · 1 mensalidade/mês)!`
                 : 'Mensalidade registada!'
+            );
+          }}
+        />
+      )}
+
+      {splitTargetPayment && (
+        <SplitPaymentFidelizacaoModal
+          clientName={clientMap.get(splitTargetPayment.clientId)?.name || 'Aluno'}
+          payment={splitTargetPayment}
+          defaultMonths={
+            getEffectiveClientFidelizacaoMonths(
+              clientMap.get(splitTargetPayment.clientId),
+              fidelizacoes
+            ) === 12
+              ? 12
+              : 6
+          }
+          onClose={() => setSplitTargetPayment(null)}
+          onConfirm={async (months) => {
+            await repo.splitPaymentIntoFidelizacao(uid, splitTargetPayment, months);
+            setSplitTargetPayment(null);
+            onBanner(
+              `Pagamento dividido por ${months} meses (€${(
+                splitTargetPayment.amountEur / months
+              ).toFixed(2)}/mês · 1 mensalidade por mês)!`
             );
           }}
         />
@@ -889,10 +1030,11 @@ const FinanceSubTab: React.FC<{
 
 const FidelizacaoSubTab: React.FC<{
   uid: string;
+  isSuperAdmin: boolean;
   clients: ClientRecord[];
   fidelizacoes: FidelizacaoRecord[];
   onBanner: (msg: string) => void;
-}> = ({ uid, clients, fidelizacoes, onBanner }) => {
+}> = ({ uid, isSuperAdmin, clients, fidelizacoes, onBanner }) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1003,11 +1145,12 @@ const FidelizacaoSubTab: React.FC<{
         <FidelizacaoModal
           clients={activeClients}
           existing={editing}
+          isSuperAdmin={isSuperAdmin}
           onClose={() => {
             setModalOpen(false);
             setEditing(null);
           }}
-          onSave={async (clientId, duration, startMillis, notes) => {
+          onSave={async (clientId, duration, startMillis, notes, payment) => {
             await repo.saveFidelizacao(
               uid,
               clientId,
@@ -1016,6 +1159,30 @@ const FidelizacaoSubTab: React.FC<{
               notes,
               editing?.id
             );
+            if (!editing && isSuperAdmin && payment && payment.totalAmountEur > 0) {
+              const startDate = new Date(startMillis);
+              const startMonthYear = `${startDate.getFullYear()}-${String(
+                startDate.getMonth() + 1
+              ).padStart(2, '0')}`;
+              const startMonthLabel = `${MONTHS_PT[startDate.getMonth()]} ${startDate.getFullYear()}`;
+              await repo.recordPayment(
+                uid,
+                clientId,
+                startMonthYear,
+                startMonthLabel,
+                payment.totalAmountEur,
+                payment.method,
+                duration
+              );
+              setModalOpen(false);
+              setEditing(null);
+              onBanner(
+                `Fidelização guardada e pagamento dividido por ${duration} meses (€${(
+                  payment.totalAmountEur / duration
+                ).toFixed(2)}/mês)!`
+              );
+              return;
+            }
             setModalOpen(false);
             setEditing(null);
             onBanner('Fidelização guardada!');
@@ -1029,14 +1196,16 @@ const FidelizacaoSubTab: React.FC<{
 export const FidelizacaoModal: React.FC<{
   clients: ClientRecord[];
   existing: FidelizacaoRecord | null;
+  isSuperAdmin?: boolean;
   onClose: () => void;
   onSave: (
     clientId: string,
     duration: 6 | 12,
     startMillis: number,
-    notes: string
+    notes: string,
+    payment?: { totalAmountEur: number; method: PaymentMethod }
   ) => Promise<void>;
-}> = ({ clients, existing, onClose, onSave }) => {
+}> = ({ clients, existing, isSuperAdmin = false, onClose, onSave }) => {
   const [clientId, setClientId] = useState(existing?.clientId || clients[0]?.id || '');
   const [duration, setDuration] = useState<6 | 12>(existing?.durationMonths || 6);
   const toIsoDate = (ms: number) => {
@@ -1049,6 +1218,34 @@ export const FidelizacaoModal: React.FC<{
     toIsoDate(existing?.startDateMillis || Date.now())
   );
   const [notes, setNotes] = useState(existing?.notes || '');
+  const [recordPaymentNow, setRecordPaymentNow] = useState(false);
+  const selectedClient = clients.find((c) => c.id === clientId);
+  const baseMonthly = selectedClient && selectedClient.monthlyFeeEur > 0 ? selectedClient.monthlyFeeEur : 100;
+  const [totalPaidStr, setTotalPaidStr] = useState(String(baseMonthly * (existing?.durationMonths || 6)));
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('MbWay');
+
+  const numericTotalPaid = Math.max(0, Number(totalPaidStr) || 0);
+  const previewPerMonth = numericTotalPaid / duration;
+  const startMonthKey = startDateStr ? startDateStr.slice(0, 7) : toIsoDate(Date.now()).slice(0, 7);
+  const previewMonths = useMemo(
+    () => buildConsecutiveMonths(startMonthKey, duration),
+    [startMonthKey, duration]
+  );
+
+  const handleClientChange = (nextId: string) => {
+    setClientId(nextId);
+    const nextClient = clients.find((c) => c.id === nextId);
+    const nextBase = nextClient && nextClient.monthlyFeeEur > 0 ? nextClient.monthlyFeeEur : 100;
+    setTotalPaidStr(String(nextBase * duration));
+  };
+
+  const handleDurationChange = (nextDuration: 6 | 12) => {
+    const prevAuto = baseMonthly * duration;
+    if (Math.abs(numericTotalPaid - prevAuto) < 0.01) {
+      setTotalPaidStr(String(baseMonthly * nextDuration));
+    }
+    setDuration(nextDuration);
+  };
 
   return (
     <Modal
@@ -1062,7 +1259,7 @@ export const FidelizacaoModal: React.FC<{
             <FieldLabel>Aluno</FieldLabel>
             <select
               value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
+              onChange={(e) => handleClientChange(e.target.value)}
               className="w-full rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5 text-sm text-[#F4F4F5] outline-none focus:border-[#EAB308]"
             >
               {clients.map((c) => (
@@ -1081,7 +1278,7 @@ export const FidelizacaoModal: React.FC<{
               <button
                 key={m}
                 type="button"
-                onClick={() => setDuration(m)}
+                onClick={() => handleDurationChange(m)}
                 className={`rounded-xl border py-2 text-xs font-bold ${
                   duration === m
                     ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
@@ -1108,13 +1305,80 @@ export const FidelizacaoModal: React.FC<{
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
 
+        {!existing && isSuperAdmin && (
+          <div className="space-y-2.5 rounded-xl border border-[#323238] bg-[#242429]/80 p-3">
+            <label className="flex cursor-pointer items-start gap-2.5 text-xs">
+              <input
+                type="checkbox"
+                checked={recordPaymentNow}
+                onChange={(e) => setRecordPaymentNow(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[#EAB308]"
+              />
+              <span className="text-[#F4F4F5]">
+                <strong>Registar pagamento da fidelização</strong> (dividido pelos {duration} meses)
+              </span>
+            </label>
+
+            {recordPaymentNow && (
+              <div className="space-y-2.5 pt-1">
+                <div>
+                  <FieldLabel>Valor total pago pelos {duration} meses (€)</FieldLabel>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={totalPaidStr}
+                    onChange={(e) => setTotalPaidStr(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>Método de pagamento</FieldLabel>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {PAYMENT_METHODS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setPayMethod(m)}
+                        className={`rounded-lg border py-1.5 text-xs font-bold ${
+                          payMethod === m
+                            ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                            : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA]'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[#EAB308]/40 bg-[#3D3314]/60 p-2 text-xs text-[#FACC15]">
+                  <p className="font-bold">
+                    €{numericTotalPaid.toFixed(2)} ÷ {duration} meses = €
+                    {previewPerMonth.toFixed(2)}/mês
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#F4F4F5]/85">
+                    Conta apenas 1 mensalidade/mês ({previewMonths[0]?.monthLabel} →{' '}
+                    {previewMonths[previewMonths.length - 1]?.monthLabel}).
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
           <GoldButton
             disabled={!clientId}
             onClick={() => {
               const parsed = startDateStr ? new Date(`${startDateStr}T09:00:00`).getTime() : Date.now();
-              return onSave(clientId, duration, Number.isNaN(parsed) ? Date.now() : parsed, notes);
+              return onSave(
+                clientId,
+                duration,
+                Number.isNaN(parsed) ? Date.now() : parsed,
+                notes,
+                !existing && isSuperAdmin && recordPaymentNow && numericTotalPaid > 0
+                  ? { totalAmountEur: numericTotalPaid, method: payMethod }
+                  : undefined
+              );
             }}
           >
             Guardar Fidelização

@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,10 +19,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.WorkoutLoadLogRecord
@@ -352,6 +356,7 @@ private fun ExerciseLibrarySection(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val context = LocalContext.current
     var search by remember { mutableStateOf("") }
     var selectedGroup by remember { mutableStateOf("Todos") }
     var showAddExerciseDialog by remember { mutableStateOf(false) }
@@ -361,9 +366,14 @@ private fun ExerciseLibrarySection(
     }
 
     val filtered = remember(state.exercises, search, selectedGroup) {
+        val q = search.trim()
         state.exercises.filter { ex ->
             (selectedGroup == "Todos" || ex.muscleGroup == selectedGroup) &&
-                (search.isBlank() || ex.name.contains(search, ignoreCase = true) || ex.equipment.contains(search, ignoreCase = true))
+                (q.isBlank() ||
+                    ex.name.contains(q, ignoreCase = true) ||
+                    ex.equipment.contains(q, ignoreCase = true) ||
+                    ex.muscleGroup.contains(q, ignoreCase = true) ||
+                    ex.instructions.contains(q, ignoreCase = true))
         }
     }
 
@@ -378,7 +388,14 @@ private fun ExerciseLibrarySection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Biblioteca de Exercícios", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Biblioteca de Exercícios", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                    Text(
+                        "${filtered.size} de ${state.exercises.size} exercício(s)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondaryDark
+                    )
+                }
                 GoldPrimaryButton(
                     text = "+ Acrescentar",
                     onClick = { showAddExerciseDialog = true },
@@ -391,7 +408,7 @@ private fun ExerciseLibrarySection(
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
-                placeholder = { Text("Procurar exercício ou equipamento...") },
+                placeholder = { Text("Procurar exercício, nome EN ou equipamento...") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondaryDark) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -416,6 +433,15 @@ private fun ExerciseLibrarySection(
         }
 
         items(filtered, key = { it.id }) { ex ->
+            val videoUrl = remember(ex.instructions) {
+                Regex("https://\\S+").find(ex.instructions)?.value.orEmpty()
+            }
+            val cleanInstructions = remember(ex.instructions) {
+                ex.instructions
+                    .replace(Regex("\\s*·?\\s*Vídeo:\\s*https://\\S+", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("https://\\S+"), "")
+                    .trim()
+            }
             Surface(
                 color = CharcoalSurface,
                 shape = MaterialTheme.shapes.medium,
@@ -428,23 +454,43 @@ private fun ExerciseLibrarySection(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(ex.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
-                        }
+                        Text(ex.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
                         Spacer(Modifier.height(4.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             StatusPill(ex.muscleGroup, NewShapeGoldBright, NewShapeGoldMuted)
-                            StatusPill(ex.equipment, TextSecondaryDark, ElevatedCharcoal)
+                            if (ex.equipment.isNotBlank()) {
+                                StatusPill(ex.equipment, TextSecondaryDark, ElevatedCharcoal)
+                            }
                             if (ex.custom) {
                                 StatusPill("Personalizado", InfoBlue, InfoBlueContainer)
                             }
                         }
-                        if (ex.instructions.isNotBlank()) {
+                        if (cleanInstructions.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
-                            Text(ex.instructions, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                            Text(cleanInstructions, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                        }
+                        if (videoUrl.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            TextButton(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(videoUrl)))
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayCircleOutline,
+                                    contentDescription = "Ver vídeo de execução",
+                                    tint = NewShapeGoldBright,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("Ver vídeo", color = NewShapeGoldBright, style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                     if (ex.custom) {
@@ -693,9 +739,19 @@ private fun AddExerciseToPlanDialog(
     onAdd: (ExerciseRecord, Int, String, String, Int, String) -> Unit
 ) {
     var search by remember { mutableStateOf("") }
-    val filtered = remember(exercises, search) {
+    var groupFilter by remember { mutableStateOf("Todos") }
+    val groups = remember(exercises) {
+        listOf("Todos") + exercises.map { it.muscleGroup }.distinct().sorted()
+    }
+    val filtered = remember(exercises, search, groupFilter) {
+        val q = search.trim()
         exercises.filter {
-            search.isBlank() || it.name.contains(search, ignoreCase = true) || it.muscleGroup.contains(search, ignoreCase = true)
+            (groupFilter == "Todos" || it.muscleGroup == groupFilter) &&
+                (q.isBlank() ||
+                    it.name.contains(q, ignoreCase = true) ||
+                    it.muscleGroup.contains(q, ignoreCase = true) ||
+                    it.equipment.contains(q, ignoreCase = true) ||
+                    it.instructions.contains(q, ignoreCase = true))
         }
     }
     var selectedExercise by remember { mutableStateOf(exercises.firstOrNull()) }
@@ -717,20 +773,36 @@ private fun AddExerciseToPlanDialog(
                 OutlinedTextField(
                     value = search,
                     onValueChange = { search = it },
-                    label = { Text("Filtrar exercício...") },
+                    label = { Text("Filtrar exercício, músculo ou equipamento...") },
                     singleLine = true,
                     colors = darkFieldColors()
                 )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(groups) { g ->
+                        FilterChip(
+                            selected = groupFilter == g,
+                            onClick = { groupFilter = g },
+                            label = { Text(g) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
                 Surface(
                     color = ElevatedCharcoal,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 170.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 175.dp)
                 ) {
                     LazyColumn {
                         items(filtered, key = { it.id }) { ex ->
                             val isSel = selectedExercise?.id == ex.id
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedExercise = ex }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 RadioButton(
@@ -740,7 +812,11 @@ private fun AddExerciseToPlanDialog(
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(ex.name, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
-                                    Text(ex.muscleGroup, style = MaterialTheme.typography.labelSmall, color = NewShapeGold)
+                                    Text(
+                                        "${ex.muscleGroup}${if (ex.equipment.isNotBlank()) " · ${ex.equipment}" else ""}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NewShapeGold
+                                    )
                                 }
                             }
                         }
@@ -827,7 +903,7 @@ private fun AddCustomExerciseDialog(
     var equipment by remember { mutableStateOf("Halteres") }
     var instructions by remember { mutableStateOf("") }
 
-    val groups = listOf("Peito", "Costas", "Pernas", "Ombros", "Braços", "Core", "Cardio")
+    val groups = SeedCatalog.defaultMuscleGroups
 
     AlertDialog(
         onDismissRequest = onDismiss,

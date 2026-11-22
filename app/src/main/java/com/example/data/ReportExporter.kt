@@ -142,7 +142,8 @@ private fun formatKgClean(v: Double): String =
 enum class AccountingExportPeriod(val label: String, val fileSlug: String) {
     CURRENT_MONTH("Este mês", "mes_atual"),
     LAST_6_MONTHS("Últimos 6 meses", "ultimos_6_meses"),
-    ALL("Todo o histórico", "historico_completo")
+    ALL("Realizado", "historico_realizado"),
+    ALL_WITH_FUTURE("Tudo (+ futuros)", "historico_com_futuros")
 }
 
 object ReportExporter {
@@ -480,11 +481,19 @@ object ReportExporter {
                 }
                 set
             }
-            AccountingExportPeriod.ALL -> null
+            AccountingExportPeriod.ALL, AccountingExportPeriod.ALL_WITH_FUTURE -> null
         }
 
         val filtered = payments
-            .filter { it.paid && (allowedMonths == null || it.monthYear in allowedMonths) }
+            .filter {
+                if (!it.paid) return@filter false
+                when (period) {
+                    AccountingExportPeriod.CURRENT_MONTH -> it.monthYear == currentMonthYear
+                    AccountingExportPeriod.LAST_6_MONTHS -> allowedMonths != null && it.monthYear in allowedMonths
+                    AccountingExportPeriod.ALL -> it.monthYear <= currentMonthYear
+                    AccountingExportPeriod.ALL_WITH_FUTURE -> true
+                }
+            }
             .sortedWith(compareByDescending<PaymentRecord> { it.monthYear }.thenByDescending { it.paidAtMillis })
 
         fun csvCell(value: String): String {
@@ -507,6 +516,7 @@ object ReportExporter {
             val isPersonal = client?.trainingType == "PERSONALIZADO"
             val modality = if (isPersonal) "Personalizado" else "Grupo"
             val method = SeedCatalog.normalizePaymentMethod(p.note) ?: p.note.ifBlank { "Outro" }
+            val statusLabel = if (p.monthYear > currentMonthYear) "Pré-pago (Futuro)" else "Pago"
 
             totalAll += p.amountEur
             if (isPersonal) totalPersonal += p.amountEur else totalGroup += p.amountEur
@@ -521,7 +531,7 @@ object ReportExporter {
                     csvCell(modality),
                     csvCell(method),
                     String.format(Locale.US, "%.2f", p.amountEur).replace('.', ','),
-                    "Pago"
+                    statusLabel
                 ).joinToString(";")
             )
         }

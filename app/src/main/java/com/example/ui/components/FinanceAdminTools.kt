@@ -1,7 +1,9 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -91,9 +93,17 @@ fun FinanceAdminTools(
                     String.format(Locale.US, "%04d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
                 }.toSet()
             }
-            AccountingExportPeriod.ALL -> null
+            AccountingExportPeriod.ALL, AccountingExportPeriod.ALL_WITH_FUTURE -> null
         }
-        val list = payments.filter { it.paid && (allowed == null || it.monthYear in allowed) }
+        val list = payments.filter {
+            if (!it.paid) return@filter false
+            when (selectedPeriod) {
+                AccountingExportPeriod.CURRENT_MONTH -> it.monthYear == currentMonthYear
+                AccountingExportPeriod.LAST_6_MONTHS -> allowed != null && it.monthYear in allowed
+                AccountingExportPeriod.ALL -> it.monthYear <= currentMonthYear
+                AccountingExportPeriod.ALL_WITH_FUTURE -> true
+            }
+        }
         list.size to list.sumOf { it.amountEur }
     }
 
@@ -346,7 +356,7 @@ fun FinanceAdminTools(
             Spacer(Modifier.height(10.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 AccountingExportPeriod.entries.forEach { period ->

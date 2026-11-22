@@ -5,68 +5,10 @@ import java.util.Calendar
 
 object SeedCatalog {
 
-    val defaultExercises: List<ExerciseRecord> = listOf(
-        // Peito
-        ExerciseRecord(id = "ex_1", name = "Supino Plano com Barra", muscleGroup = "Peito", equipment = "Barra", instructions = "Descer a barra controlada até ao meio do peito e empurrar com escápulas retraídas."),
-        ExerciseRecord(id = "ex_2", name = "Supino Inclinado com Halteres", muscleGroup = "Peito", equipment = "Halteres", instructions = "Banco a 30°, cotovelos ligeiramente a 45° do tronco."),
-        ExerciseRecord(id = "ex_3", name = "Aberturas com Halteres (Crucifixo)", muscleGroup = "Peito", equipment = "Halteres", instructions = "Ligeira flexão nos cotovelos, abrir até sentir alongamento peitoral."),
-        ExerciseRecord(id = "ex_4", name = "Crossover na Polia Alta", muscleGroup = "Peito", equipment = "Polia / Cabo", instructions = "Inclinar ligeiramente o tronco à frente e juntar as mãos à frente da linha umbilical."),
-        ExerciseRecord(id = "ex_5", name = "Chest Press na Máquina", muscleGroup = "Peito", equipment = "Máquina", instructions = "Ajustar o banco ao nível do peito médio e manter controlo na fase excêntrica."),
-        ExerciseRecord(id = "ex_6", name = "Flexões de Braços (Push-ups)", muscleGroup = "Peito", equipment = "Peso Corporal", instructions = "Corpo alinhado da cabeça aos calcanhares, core ativo."),
-        ExerciseRecord(id = "ex_7", name = "Fundos em Paralelas (Foco Peito)", muscleGroup = "Peito", equipment = "Paralelas", instructions = "Inclinar o tronco ligeiramente à frente ao descer."),
+    val defaultMuscleGroups: List<String> = ExerciseTableCatalog.defaultMuscleGroups
 
-        // Costas
-        ExerciseRecord(id = "ex_8", name = "Puxada à Frente (Lat Pulldown)", muscleGroup = "Costas", equipment = "Polia / Cabo", instructions = "Puxar a barra até à parte superior do peito mantendo peito aberto."),
-        ExerciseRecord(id = "ex_9", name = "Remada Curvada com Barra", muscleGroup = "Costas", equipment = "Barra", instructions = "Coluna neutra, puxar a barra em direção ao umbigo."),
-        ExerciseRecord(id = "ex_10", name = "Remada Baixa Sentada (Triângulo)", muscleGroup = "Costas", equipment = "Polia / Cabo", instructions = "Puxar com os cotovelos junto ao tronco sem balançar a lombar."),
-        ExerciseRecord(id = "ex_11", name = "Remada Unilateral com Haltere (Serrote)", muscleGroup = "Costas", equipment = "Halteres", instructions = "Apoiar mão e joelho no banco, puxar haltere em arco até à anca."),
-        ExerciseRecord(id = "ex_12", name = "Elevações na Barra Fixa (Pull-ups)", muscleGroup = "Costas", equipment = "Peso Corporal", instructions = "Pega pronada ligeiramente mais larga que os ombros."),
-        ExerciseRecord(id = "ex_13", name = "Pullover na Polia Alta (Corda)", muscleGroup = "Costas", equipment = "Polia / Cabo", instructions = "Braços quase estendidos, focar na contração do grande dorsal."),
-        ExerciseRecord(id = "ex_14", name = "Face Pull na Polia", muscleGroup = "Costas", equipment = "Polia / Cabo", instructions = "Puxar a corda em direção à testa rodando externamente os ombros."),
-
-        // Pernas
-        ExerciseRecord(id = "ex_15", name = "Agachamento Livre com Barra", muscleGroup = "Pernas", equipment = "Barra", instructions = "Pés à largura dos ombros, descer controlando joelhos alinhados com os pés."),
-        ExerciseRecord(id = "ex_16", name = "Prensa de Pernas 45° (Leg Press)", muscleGroup = "Pernas", equipment = "Máquina", instructions = "Não bloquear totalmente os joelhos no topo; lombar sempre apoiada."),
-        ExerciseRecord(id = "ex_17", name = "Peso Morto Romeno (RDL)", muscleGroup = "Pernas", equipment = "Barra / Halteres", instructions = "Anca para trás, joelhos semi-fletidos, sentir alongar os isquiotibiais."),
-        ExerciseRecord(id = "ex_18", name = "Afundos Búlgaros (Bulgarian Split Squat)", muscleGroup = "Pernas", equipment = "Halteres", instructions = "Pé traseiro apoiado no banco, descer verticalmente."),
-        ExerciseRecord(id = "ex_19", name = "Cadeira Extensora (Leg Extension)", muscleGroup = "Pernas", equipment = "Máquina", instructions = "Pausa de 1 segundo no topo para máxima contração do quadricípite."),
-        ExerciseRecord(id = "ex_20", name = "Mesa Flexora (Leg Curl)", muscleGroup = "Pernas", equipment = "Máquina", instructions = "Manter ancas coladas ao banco durante toda a flexão."),
-        ExerciseRecord(id = "ex_21", name = "Elevação Pélvica com Barra (Hip Thrust)", muscleGroup = "Pernas", equipment = "Barra", instructions = "Queixo recolhido, contrair glúteos no topo mantendo a tíbia vertical."),
-        ExerciseRecord(id = "ex_22", name = "Passadas / Walking Lunges", muscleGroup = "Pernas", equipment = "Halteres", instructions = "Passos largos e controlados mantendo o tronco estável."),
-        ExerciseRecord(id = "ex_23", name = "Gémeos em Pé na Máquina", muscleGroup = "Pernas", equipment = "Máquina", instructions = "Amplitude completa: alongar bem em baixo e segurar 1s no topo."),
-
-        // Ombros
-        ExerciseRecord(id = "ex_24", name = "Desenvolvimento Militar com Halteres", muscleGroup = "Ombros", equipment = "Halteres", instructions = "Empurrar acima da cabeça sem hiperextender a lombar."),
-        ExerciseRecord(id = "ex_25", name = "Press de Ombros com Barra", muscleGroup = "Ombros", equipment = "Barra", instructions = "Core contraído, barra sobe em linha reta junto ao rosto."),
-        ExerciseRecord(id = "ex_26", name = "Elevações Laterais com Halteres", muscleGroup = "Ombros", equipment = "Halteres", instructions = "Subir até à altura dos ombros com cotovelos ligeiramente fletidos."),
-        ExerciseRecord(id = "ex_27", name = "Elevações Laterais na Polia", muscleGroup = "Ombros", equipment = "Polia / Cabo", instructions = "Tensão contínua desde o início do movimento."),
-        ExerciseRecord(id = "ex_28", name = "Elevações Frontais com Disco/Halteres", muscleGroup = "Ombros", equipment = "Halteres", instructions = "Evitar impulso do tronco na subida."),
-        ExerciseRecord(id = "ex_29", name = "Crucifixo Inverso na Máquina (Posterior)", muscleGroup = "Ombros", equipment = "Máquina", instructions = "Focar no deltoide posterior evitando juntar demasiado as escápulas."),
-
-        // Braços
-        ExerciseRecord(id = "ex_30", name = "Curl Direto com Barra W", muscleGroup = "Braços", equipment = "Barra", instructions = "Cotovelos fixos junto ao tronco."),
-        ExerciseRecord(id = "ex_31", name = "Curl Alternado com Halteres", muscleGroup = "Braços", equipment = "Halteres", instructions = "Rodar o punho em supinação durante a subida."),
-        ExerciseRecord(id = "ex_32", name = "Curl Martelo com Halteres", muscleGroup = "Braços", equipment = "Halteres", instructions = "Pega neutra, ótimo para braquial e antebraço."),
-        ExerciseRecord(id = "ex_33", name = "Curl na Polia Baixa", muscleGroup = "Braços", equipment = "Polia / Cabo", instructions = "Tensão constante no bíceps."),
-        ExerciseRecord(id = "ex_34", name = "Extensão de Tríceps na Polia (Corda)", muscleGroup = "Braços", equipment = "Polia / Cabo", instructions = "Abrir a corda no final da extensão mantendo cotovelos imóveis."),
-        ExerciseRecord(id = "ex_35", name = "Tríceps Testa com Barra W (Skullcrusher)", muscleGroup = "Braços", equipment = "Barra", instructions = "Descer a barra em direção à testa/atrás da cabeça com controlo."),
-        ExerciseRecord(id = "ex_36", name = "Tríceps Francês com Haltere", muscleGroup = "Braços", equipment = "Halteres", instructions = "Alongamento máximo da cabeça longa do tríceps."),
-
-        // Core
-        ExerciseRecord(id = "ex_37", name = "Prancha Abdominal (Plank)", muscleGroup = "Core", equipment = "Peso Corporal", instructions = "Manter bacia neutra e glúteos/abdominais contraídos."),
-        ExerciseRecord(id = "ex_38", name = "Crunch na Polia Alta", muscleGroup = "Core", equipment = "Polia / Cabo", instructions = "Fletir a coluna enrolando o tronco em direção às ancas."),
-        ExerciseRecord(id = "ex_39", name = "Elevação de Pernas Suspenso", muscleGroup = "Core", equipment = "Peso Corporal", instructions = "Subir os joelhos ou pernas evitando balanço."),
-        ExerciseRecord(id = "ex_40", name = "Russian Twist com Disco", muscleGroup = "Core", equipment = "Peso Livre", instructions = "Rodar o tronco de forma controlada."),
-        ExerciseRecord(id = "ex_41", name = "Dead Bug", muscleGroup = "Core", equipment = "Peso Corporal", instructions = "Lombar sempre em contacto com o solo enquanto estende braço e perna opostos."),
-
-        // Cardio
-        ExerciseRecord(id = "ex_42", name = "Passadeira (Inclinação / Corrida)", muscleGroup = "Cardio", equipment = "Cardio", instructions = "Manter passada fluida e ritmo cardíaco alvo."),
-        ExerciseRecord(id = "ex_43", name = "Remo Ergómetro (Concept2)", muscleGroup = "Cardio", equipment = "Cardio", instructions = "Sequência: Pernas -> Tronco -> Braços."),
-        ExerciseRecord(id = "ex_44", name = "Bicicleta Estática / Air Bike", muscleGroup = "Cardio", equipment = "Cardio", instructions = "Ideal para HIIT ou zona 2."),
-        ExerciseRecord(id = "ex_45", name = "Kettlebell Swing", muscleGroup = "Cardio", equipment = "Kettlebell", instructions = "Movimento explosivo de extensão da anca, não dos braços."),
-        ExerciseRecord(id = "ex_46", name = "Burpees", muscleGroup = "Cardio", equipment = "Peso Corporal", instructions = "Ritmo constante mantendo qualidade técnica."),
-        ExerciseRecord(id = "ex_47", name = "Farmer's Walk (Caminhada do Fazendeiro)", muscleGroup = "Cardio", equipment = "Halteres", instructions = "Postura ereta, ombros para baixo, passos curtos e firmes.")
-    )
+    val defaultExercises: List<ExerciseRecord>
+        get() = ExerciseTableCatalog.csvTableExercises
 
     private val coreFoods: List<FoodItemRecord> = listOf(
         // Proteína Animal & Vegetal
@@ -317,5 +259,32 @@ object SeedCatalog {
             val lbl = "${months[cal.get(Calendar.MONTH)]} ${cal.get(Calendar.YEAR)}"
             key to lbl
         }
+    }
+
+    fun splitAmountAcrossMonths(totalAmount: Double, months: Int): List<Double> {
+        val count = months.coerceAtLeast(1)
+        val clamped = totalAmount.coerceIn(0.0, 100000.0)
+        val totalCents = kotlin.math.round(clamped * 100.0).toLong()
+        val baseCents = totalCents / count
+        val remainder = (totalCents - baseCents * count).toInt()
+        return (0 until count).map { idx ->
+            val cents = if (idx < remainder) baseCents + 1 else baseCents
+            cents / 100.0
+        }
+    }
+
+    fun getEffectiveClientFidelizacaoMonths(
+        client: ClientRecord?,
+        fidelizacoes: List<FidelizacaoRecord>
+    ): Int {
+        if (client == null) return 1
+        val now = System.currentTimeMillis()
+        val activeContract = fidelizacoes
+            .filter { it.clientId == client.id && it.endDateMillis >= now }
+            .maxByOrNull { it.endDateMillis }
+        val contractMonths = activeContract?.durationMonths
+        if (contractMonths == 6 || contractMonths == 12) return contractMonths
+        if (client.fidelizacaoMonths == 6 || client.fidelizacaoMonths == 12) return client.fidelizacaoMonths
+        return 1
     }
 }
