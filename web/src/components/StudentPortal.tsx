@@ -805,8 +805,25 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       dateMillis: Date.now(),
                       ...payload,
                     });
+                    const parts: string[] = [`${payload.weightKg.toFixed(1)} kg`];
+                    if (payload.bodyFatPct > 0) parts.push(`${payload.bodyFatPct.toFixed(1)}% MG`);
+                    if (payload.muscleMassKg > 0) parts.push(`${payload.muscleMassKg.toFixed(1)} kg músculo`);
+                    const bmiVal =
+                      payload.heightCm > 0
+                        ? payload.weightKg / Math.pow(payload.heightCm / 100, 2)
+                        : 0;
+                    if (bmiVal > 0) parts.push(`IMC ${bmiVal.toFixed(1)}`);
+                    repo
+                      .createPtNotification(uid, {
+                        clientId: client.id,
+                        clientName: client.name,
+                        type: 'ASSESSMENT',
+                        summary: `Registou uma nova avaliação física: ${parts.join(' · ')}`,
+                        weekKey: '',
+                      })
+                      .catch(() => {});
                     setShowNewAssessmentModal(false);
-                    onBanner('Avaliação física guardada!');
+                    onBanner('Avaliação física guardada e PT notificado!');
                   }}
                 />
               )}

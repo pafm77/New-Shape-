@@ -872,7 +872,32 @@ test("Workout load logs, waitlist entries, and weeklySessionLimit enforce bounds
   await assertSucceeds(
     aliceDb.collection(`users/${ALICE_UID}/waitlist_entries`).doc("wl_1").delete()
   );
+
+  // Student submits a physical assessment -> notifies PT with type ASSESSMENT
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/pt_notifications`).doc("notif_assess_1").set({
+      userId: ALICE_UID,
+      clientId: "c_lim",
+      clientName: "Diogo Mendes",
+      type: "ASSESSMENT",
+      summary: "Registou uma nova avaliação física: 74.5 kg · 16.0% MG (IMC 24.3)",
+      weekKey: "",
+      read: false,
+      timestampMillis: 1794965000000,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(aliceDb.collection(`users/${ALICE_UID}/pt_notifications`).get());
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/pt_notifications`).get());
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/pt_notifications`).doc("notif_assess_1").update({
+      read: true,
+      updatedAt: updated,
+    })
+  );
 });
+
 
 
 

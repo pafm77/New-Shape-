@@ -799,7 +799,8 @@ private fun StudentAssessmentScreen(
                     bodyFatPct = fat,
                     muscleMassKg = muscle,
                     visceralFat = visceral,
-                    notes = notes
+                    notes = notes,
+                    notifyPt = true
                 )
                 showNewDialog = false
             }

@@ -599,10 +599,28 @@ class NewShapeViewModel(
         }
     }
 
+    fun swapStudentBooking(
+        booking: BookingRecord,
+        newSession: TrainingSessionRecord,
+        clientName: String = ""
+    ) {
+        viewModelScope.launch {
+            repository.swapBookingToSession(booking, newSession)
+                .onSuccess {
+                    _statusBanner.value = if (clientName.isNotBlank()) {
+                        "Horário de $clientName trocado para ${newSession.dateLabel} às ${newSession.timeLabel}."
+                    } else {
+                        "Horário trocado para ${newSession.dateLabel} às ${newSession.timeLabel}."
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     fun addManualClientToSession(sessionId: String, weekKey: String, clientId: String) {
         viewModelScope.launch {
             repository.addManualBooking(sessionId, weekKey, clientId)
-                .onSuccess { _statusBanner.value = "Cliente adicionado como Confirmado." }
+                .onSuccess { _statusBanner.value = "Treino marcado como Confirmado ✓" }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -1008,9 +1026,11 @@ class NewShapeViewModel(
         bodyFatPct: Double,
         muscleMassKg: Double,
         visceralFat: Double,
-        notes: String
+        notes: String,
+        notifyPt: Boolean = false
     ) {
         if (clientId.isBlank() || weightKg <= 0.0 || heightCm <= 0.0) return
+        val clientName = currentData?.clients?.find { it.id == clientId }?.name.orEmpty().ifBlank { "Aluno" }
         viewModelScope.launch {
             repository.addPhysicalAssessment(
                 clientId = clientId,
@@ -1024,7 +1044,25 @@ class NewShapeViewModel(
                 visceralFat = visceralFat,
                 notes = notes
             )
-                .onSuccess { _statusBanner.value = "Avaliação física registada (IMC e TMB calculados)." }
+                .onSuccess {
+                    if (notifyPt) {
+                        val parts = mutableListOf(String.format(java.util.Locale.US, "%.1f kg", weightKg))
+                        if (bodyFatPct > 0.0) parts += String.format(java.util.Locale.US, "%.1f%% MG", bodyFatPct)
+                        if (muscleMassKg > 0.0) parts += String.format(java.util.Locale.US, "%.1f kg músculo", muscleMassKg)
+                        val bmiVal = if (heightCm > 0.0) weightKg / ((heightCm / 100.0) * (heightCm / 100.0)) else 0.0
+                        if (bmiVal > 0.0) parts += String.format(java.util.Locale.US, "IMC %.1f", bmiVal)
+                        repository.createPtNotification(
+                            clientId = clientId,
+                            clientName = clientName,
+                            type = "ASSESSMENT",
+                            summary = "Registou uma nova avaliação física: ${parts.joinToString(" · ")}",
+                            weekKey = ""
+                        )
+                        _statusBanner.value = "Avaliação física guardada e PT notificado!"
+                    } else {
+                        _statusBanner.value = "Avaliação física registada (IMC e TMB calculados)."
+                    }
+                }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }

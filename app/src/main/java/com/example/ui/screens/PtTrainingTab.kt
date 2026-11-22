@@ -41,13 +41,14 @@ fun PtTrainingTab(
     var selectedClientId by remember(activeClients) {
         mutableStateOf(activeClients.firstOrNull()?.id.orEmpty())
     }
-    val subTabs = listOf("Planos", "Agenda", "Exercícios (${state.exercises.size})")
+    val subTabs = listOf("Planos", "Marcações", "Agenda", "Exercícios (${state.exercises.size})")
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(
+        ScrollableTabRow(
             selectedTabIndex = selectedSubTab,
             containerColor = CharcoalSurface,
             contentColor = NewShapeGold,
+            edgePadding = 8.dp,
             divider = { HorizontalDivider(color = HairlineBorder) }
         ) {
             subTabs.forEachIndexed { idx, title ->
@@ -74,7 +75,13 @@ fun PtTrainingTab(
                 selectedClientId = selectedClientId,
                 onSelectClient = { selectedClientId = it }
             )
-            1 -> PtTrainingAgendaSection(
+            1 -> PtTrainingMarcacoesSection(
+                state = state,
+                viewModel = viewModel,
+                selectedClientId = selectedClientId,
+                onSelectClient = { selectedClientId = it }
+            )
+            2 -> PtTrainingAgendaSection(
                 state = state,
                 viewModel = viewModel,
                 onOpenClientPlan = { cid ->

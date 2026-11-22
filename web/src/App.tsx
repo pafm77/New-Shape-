@@ -52,6 +52,7 @@ import {
   isSuperAdminEmail,
 } from './types/studio';
 import {
+  buildWhatsAppUrl,
   DEFAULT_TEMPLATES,
   DEFAULT_WEB_BASE_URL,
   formatTimeAgo,
@@ -454,6 +455,8 @@ export function App() {
                 ? 'Treino cancelado · New Shape'
                 : first.type === 'UNAVAILABLE'
                 ? 'Aluno indisponível · New Shape'
+                : first.type === 'ASSESSMENT'
+                ? `Nova avaliação física · ${first.clientName}`
                 : 'Horário alterado · New Shape';
             void dispatchLocalPushNotification(title, first.summary, first.id, '/painel');
           }
@@ -1191,13 +1194,26 @@ export function App() {
             <PtTrainingSection
               uid={studioUid}
               clients={clients}
+              weeks={weeks}
+              activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
               exercises={exercises}
               workoutPlans={workoutPlans}
               workoutPlanItems={workoutPlanItems}
               workoutLoadLogs={workoutLoadLogs}
+              templates={effectiveTemplates}
+              settings={effectiveSettings}
               initialClientId={jumpClientId}
+              onShiftWeek={(delta) => {
+                const d = new Date(activeMondayMs);
+                d.setDate(d.getDate() + delta * 7);
+                setActiveMondayMs(d.getTime());
+              }}
+              onOpenWhatsApp={(phone, msg) => {
+                const url = buildWhatsAppUrl(phone, msg, effectiveSettings.whatsappWebMode);
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }}
               onBanner={showBanner}
             />
           )}
@@ -1265,7 +1281,7 @@ export function App() {
         <Modal
           open
           title="Notificações do Estúdio"
-          subtitle="Cancelamentos e alterações de horário feitos pelos alunos"
+          subtitle="Avaliações físicas, cancelamentos e alterações de horário feitos pelos alunos"
           onClose={() => setShowNotifModal(false)}
         >
           <div className="space-y-3">
@@ -1285,7 +1301,7 @@ export function App() {
             )}
             {ptNotifications.length === 0 ? (
               <p className="py-6 text-center text-xs text-[#A1A1AA]">
-                Sem notificações de cancelamento ou alteração ainda.
+                Sem notificações ainda.
               </p>
             ) : (
               <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
@@ -1308,6 +1324,8 @@ export function App() {
                                 ? 'red'
                                 : n.type === 'UNAVAILABLE'
                                 ? 'amber'
+                                : n.type === 'ASSESSMENT'
+                                ? 'green'
                                 : 'gold'
                             }
                           >
@@ -1315,6 +1333,8 @@ export function App() {
                               ? 'Cancelou'
                               : n.type === 'UNAVAILABLE'
                               ? 'Indisponível'
+                              : n.type === 'ASSESSMENT'
+                              ? 'Avaliação física'
                               : 'Alterou'}
                           </StatusPill>
                           <span className="text-[11px] text-[#A1A1AA]">
@@ -1322,6 +1342,22 @@ export function App() {
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-[#D4D4D8]">{n.summary}</p>
+                        {n.type === 'ASSESSMENT' && n.clientId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!n.read) {
+                                void repo.markPtNotificationRead(studioUid, n.id);
+                              }
+                              setJumpClientId(n.clientId);
+                              setPtTab('assessment');
+                              setShowNotifModal(false);
+                            }}
+                            className="mt-2 inline-flex items-center rounded-lg border border-[#22C55E]/50 bg-[#143524]/40 px-2.5 py-1 text-[11px] font-bold text-[#22C55E] hover:bg-[#143524]"
+                          >
+                            Ver avaliação →
+                          </button>
+                        )}
                       </div>
                       <div className="flex items-center gap-1">
                         {!n.read && (

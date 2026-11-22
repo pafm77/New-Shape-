@@ -4,7 +4,10 @@ import {
   BookingRecord,
   ClientRecord,
   ExerciseRecord,
+  MessageTemplateRecord,
+  StudioSettingsRecord,
   TrainingSessionRecord,
+  TrainingWeekRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
@@ -24,33 +27,46 @@ import {
 import { ExerciseLastLoadBadge } from './ExerciseLastLoadBadge';
 import { ExerciseProgressModal } from './ExerciseProgressModal';
 import { PtTrainingAgendaView } from './PtTrainingAgendaView';
+import { PtTrainingMarcacoesView } from './PtTrainingMarcacoesView';
 
 interface PtTrainingSectionProps {
   uid: string;
   clients: ClientRecord[];
+  weeks: TrainingWeekRecord[];
+  activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
   exercises: ExerciseRecord[];
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
   workoutLoadLogs: WorkoutLoadLogRecord[];
+  templates: MessageTemplateRecord[];
+  settings: StudioSettingsRecord;
   initialClientId?: string;
+  onShiftWeek: (delta: number) => void;
+  onOpenWhatsApp: (phone: string | null, msg: string) => void;
   onBanner: (msg: string) => void;
 }
 
 export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   uid,
   clients,
+  weeks,
+  activeWeek,
   sessions,
   bookings,
   exercises,
   workoutPlans,
   workoutPlanItems,
   workoutLoadLogs,
+  templates,
+  settings,
   initialClientId,
+  onShiftWeek,
+  onOpenWhatsApp,
   onBanner,
 }) => {
-  const [subTab, setSubTab] = useState<'plans' | 'agenda' | 'library'>('plans');
+  const [subTab, setSubTab] = useState<'plans' | 'marcacoes' | 'agenda' | 'library'>('plans');
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [selectedClientId, setSelectedClientId] = useState(
     initialClientId || activeClients[0]?.id || ''
@@ -77,7 +93,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
+      <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5 sm:grid-cols-4">
         <button
           type="button"
           onClick={() => setSubTab('plans')}
@@ -87,7 +103,18 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
               : 'text-[#A1A1AA] hover:text-white'
           }`}
         >
-          Planos de Treino
+          Planos
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('marcacoes')}
+          className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            subTab === 'marcacoes'
+              ? 'bg-[#EAB308] text-[#121214]'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          Marcações
         </button>
         <button
           type="button"
@@ -326,6 +353,22 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
             />
           )}
         </div>
+      ) : subTab === 'marcacoes' ? (
+        <PtTrainingMarcacoesView
+          uid={uid}
+          clients={clients}
+          weeks={weeks}
+          activeWeek={activeWeek}
+          sessions={sessions}
+          bookings={bookings}
+          templates={templates}
+          settings={settings}
+          selectedClientId={effectiveClient?.id || ''}
+          onSelectClient={(cid) => setSelectedClientId(cid)}
+          onShiftWeek={onShiftWeek}
+          onOpenWhatsApp={onOpenWhatsApp}
+          onBanner={onBanner}
+        />
       ) : subTab === 'agenda' ? (
         <PtTrainingAgendaView
           uid={uid}

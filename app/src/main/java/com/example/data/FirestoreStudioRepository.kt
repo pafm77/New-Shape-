@@ -1246,6 +1246,52 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
+    suspend fun swapBookingToSession(
+        booking: BookingRecord,
+        newSession: TrainingSessionRecord
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        if (booking.weekKey == newSession.weekKey) {
+            userDoc(uid).collection("bookings").document(booking.id)
+                .update(
+                    mapOf(
+                        "sessionId" to newSession.id,
+                        "status" to BookingStatus.CONFIRMED.name,
+                        "attendanceStatus" to "",
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+        } else {
+            val batch = db.batch()
+            batch.delete(userDoc(uid).collection("bookings").document(booking.id))
+            batch.delete(
+                userDoc(uid).collection("week_responses")
+                    .document("${newSession.weekKey}_${booking.clientId}")
+            )
+            val newRef = userDoc(uid).collection("bookings").document()
+            batch.set(
+                newRef,
+                mapOf(
+                    "userId" to uid,
+                    "sessionId" to newSession.id,
+                    "weekKey" to newSession.weekKey,
+                    "clientId" to booking.clientId,
+                    "status" to BookingStatus.CONFIRMED.name,
+                    "requestedAtMillis" to System.currentTimeMillis(),
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.commit().await()
+        }
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/bookings/${booking.id}")
+        Result.failure(e)
+    }
+
     suspend fun setBookingAttendance(bookingId: String, attendanceStatus: String): Result<Unit> = try {
         val uid = requireUserId()
         val safeStatus = when (attendanceStatus) {

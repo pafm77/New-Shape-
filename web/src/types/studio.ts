@@ -31,7 +31,7 @@ export interface PtAccountRecord {
   reviewedAtMillis: number;
 }
 
-export type PtNotificationType = 'CANCELLED' | 'ALTERED' | 'UNAVAILABLE';
+export type PtNotificationType = 'CANCELLED' | 'ALTERED' | 'UNAVAILABLE' | 'ASSESSMENT';
 
 export interface PtNotificationRecord {
   id: string;

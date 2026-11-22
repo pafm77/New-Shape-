@@ -410,7 +410,9 @@ export function subscribeStudioData(
         clientId: String(d.clientId ?? ''),
         clientName: String(d.clientName ?? ''),
         type:
-          d.type === 'CANCELLED' || d.type === 'UNAVAILABLE' ? d.type : 'ALTERED',
+          d.type === 'CANCELLED' || d.type === 'UNAVAILABLE' || d.type === 'ASSESSMENT'
+            ? d.type
+            : 'ALTERED',
         summary: String(d.summary ?? ''),
         weekKey: String(d.weekKey ?? ''),
         read: Boolean(d.read ?? false),
@@ -1440,6 +1442,36 @@ export async function moveBooking(uid: string, bookingId: string, newSessionId: 
     status: 'CONFIRMED',
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function swapBookingToSession(
+  uid: string,
+  booking: BookingRecord,
+  newSession: TrainingSessionRecord
+): Promise<void> {
+  if (booking.weekKey === newSession.weekKey) {
+    await updateDoc(doc(subcol(uid, 'bookings'), booking.id), {
+      sessionId: newSession.id,
+      status: 'CONFIRMED',
+      attendanceStatus: '',
+      updatedAt: serverTimestamp(),
+    });
+    return;
+  }
+  const batch = writeBatch(db);
+  batch.delete(doc(subcol(uid, 'bookings'), booking.id));
+  batch.delete(doc(subcol(uid, 'week_responses'), `${newSession.weekKey}_${booking.clientId}`));
+  batch.set(doc(subcol(uid, 'bookings')), {
+    userId: uid,
+    sessionId: newSession.id,
+    weekKey: newSession.weekKey,
+    clientId: booking.clientId,
+    status: 'CONFIRMED',
+    requestedAtMillis: Date.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  await batch.commit();
 }
 
 export async function setBookingAttendance(

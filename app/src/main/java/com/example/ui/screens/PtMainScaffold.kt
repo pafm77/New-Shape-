@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -57,6 +58,7 @@ fun PtMainScaffold(
                     val title = when (n.type) {
                         "CANCELLED" -> "Treino cancelado · ${n.clientName}"
                         "UNAVAILABLE" -> "Aluno indisponível · ${n.clientName}"
+                        "ASSESSMENT" -> "Nova avaliação física · ${n.clientName}"
                         else -> "Horário alterado · ${n.clientName}"
                     }
                     WorkoutNotificationHelper.showImmediateNotification(
@@ -396,7 +398,11 @@ fun PtMainScaffold(
             onDismiss = { showNotificationsDialog = false },
             onMarkRead = { id -> viewModel.markPtNotificationRead(id) },
             onMarkAllRead = { viewModel.markAllPtNotificationsRead() },
-            onDelete = { id -> viewModel.deletePtNotification(id) }
+            onDelete = { id -> viewModel.deletePtNotification(id) },
+            onOpenAssessment = {
+                showNotificationsDialog = false
+                selectedTab = 4
+            }
         )
     }
 }
@@ -407,7 +413,8 @@ private fun PtNotificationsDialog(
     onDismiss: () -> Unit,
     onMarkRead: (String) -> Unit,
     onMarkAllRead: () -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    onOpenAssessment: () -> Unit
 ) {
     val hasUnread = notifications.any { !it.read }
     AlertDialog(
@@ -433,7 +440,7 @@ private fun PtNotificationsDialog(
         text = {
             if (notifications.isEmpty()) {
                 Text(
-                    "Sem notificações de cancelamentos ou alterações de horário.",
+                    "Sem notificações de avaliações, cancelamentos ou alterações de horário.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondaryDark
                 )
@@ -444,14 +451,25 @@ private fun PtNotificationsDialog(
                 ) {
                     items(notifications, key = { it.id }) { notif ->
                         val isCancel = notif.type == "CANCELLED" || notif.type == "UNAVAILABLE"
+                        val isAssessment = notif.type == "ASSESSMENT"
                         Surface(
                             color = if (!notif.read) ElevatedCharcoal else ObsidianBg,
                             shape = RoundedCornerShape(10.dp),
                             border = BorderStroke(
                                 1.dp,
-                                if (!notif.read) (if (isCancel) DangerRed else PendingAmber) else HairlineBorder
+                                when {
+                                    notif.read -> HairlineBorder
+                                    isCancel -> DangerRed
+                                    isAssessment -> ConfirmedGreen
+                                    else -> PendingAmber
+                                }
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = isAssessment) {
+                                    if (!notif.read) onMarkRead(notif.id)
+                                    onOpenAssessment()
+                                }
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Row(
@@ -473,10 +491,19 @@ private fun PtNotificationsDialog(
                                             text = when (notif.type) {
                                                 "CANCELLED" -> "Cancelou"
                                                 "UNAVAILABLE" -> "Indisponível"
+                                                "ASSESSMENT" -> "Avaliação física"
                                                 else -> "Alterou"
                                             },
-                                            textColor = if (isCancel) DangerRed else PendingAmber,
-                                            containerColor = if (isCancel) DangerRedContainer else PendingAmberContainer
+                                            textColor = when {
+                                                isCancel -> DangerRed
+                                                isAssessment -> ConfirmedGreen
+                                                else -> PendingAmber
+                                            },
+                                            containerColor = when {
+                                                isCancel -> DangerRedContainer
+                                                isAssessment -> ConfirmedGreenContainer
+                                                else -> PendingAmberContainer
+                                            }
                                         )
                                     }
                                     Text(

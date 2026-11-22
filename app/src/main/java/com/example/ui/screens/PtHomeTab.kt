@@ -166,7 +166,7 @@ private fun PorConfirmarSection(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Text(
-                                    text = "Cancelamentos e Alterações (${unreadAlerts.size})",
+                                    text = "Notificações Recentes (${unreadAlerts.size})",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = TextPrimaryDark,
                                     fontWeight = FontWeight.Bold
@@ -185,12 +185,24 @@ private fun PorConfirmarSection(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "${alert.clientName} · ${formatTimeAgo(alert.timestampMillis)}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = NewShapeGoldBright
-                                    )
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "${alert.clientName} · ${formatTimeAgo(alert.timestampMillis)}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = NewShapeGoldBright
+                                        )
+                                        if (alert.type == "ASSESSMENT") {
+                                            StatusPill(
+                                                text = "Nova avaliação",
+                                                textColor = ConfirmedGreen,
+                                                containerColor = ConfirmedGreenContainer
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = alert.summary,
                                         style = MaterialTheme.typography.bodySmall,

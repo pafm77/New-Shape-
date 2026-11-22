@@ -324,7 +324,7 @@ const PorConfirmarView: React.FC<{
             <div className="flex items-center gap-2">
               <Bell className="h-4 w-4 text-[#FACC15]" />
               <h3 className="text-sm font-bold text-[#FACC15]">
-                Alertas de Cancelamento / Alteração ({unreadNotifs.length})
+                Notificações Recentes ({unreadNotifs.length})
               </h3>
             </div>
             <button
@@ -348,12 +348,22 @@ const PorConfirmarView: React.FC<{
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-xs font-bold text-[#F4F4F5]">{n.clientName}</span>
                     <StatusPill
-                      tone={n.type === 'CANCELLED' ? 'red' : n.type === 'UNAVAILABLE' ? 'amber' : 'gold'}
+                      tone={
+                        n.type === 'CANCELLED'
+                          ? 'red'
+                          : n.type === 'UNAVAILABLE'
+                          ? 'amber'
+                          : n.type === 'ASSESSMENT'
+                          ? 'green'
+                          : 'gold'
+                      }
                     >
                       {n.type === 'CANCELLED'
                         ? 'Cancelou treino'
                         : n.type === 'UNAVAILABLE'
                         ? 'Indisponível'
+                        : n.type === 'ASSESSMENT'
+                        ? 'Nova avaliação física'
                         : 'Alterou horário'}
                     </StatusPill>
                     <span className="text-[11px] text-[#A1A1AA]">
