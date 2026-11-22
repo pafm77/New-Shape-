@@ -52,6 +52,7 @@ fun PtClientsTab(
     var searchQuery by remember { mutableStateOf("") }
     var showInactive by remember { mutableStateOf(false) }
     var typeFilter by remember { mutableStateOf("ALL") }
+    var fidelizacaoFilter by remember { mutableStateOf("ALL") }
     var showNewClientDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var paymentTargetClient by remember { mutableStateOf<ClientRecord?>(null) }
@@ -73,14 +74,28 @@ fun PtClientsTab(
     val baseVisibleClients = remember(state.clients, showInactive) {
         state.clients.filter { showInactive || it.active }
     }
+    val clientFidMonthsMap = remember(state.clients, state.fidelizacoes) {
+        state.clients.associate { client ->
+            val eff = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, state.fidelizacoes)
+            client.id to if (eff == 6 || eff == 12) eff else 0
+        }
+    }
     val personalizadoCount = remember(baseVisibleClients) {
         baseVisibleClients.count { it.trainingType == "PERSONALIZADO" }
     }
     val grupoCount = remember(baseVisibleClients) {
         baseVisibleClients.count { it.trainingType != "PERSONALIZADO" }
     }
+    val fid6Count = remember(baseVisibleClients, clientFidMonthsMap) {
+        baseVisibleClients.count { clientFidMonthsMap[it.id] == 6 }
+    }
+    val fid12Count = remember(baseVisibleClients, clientFidMonthsMap) {
+        baseVisibleClients.count { clientFidMonthsMap[it.id] == 12 }
+    }
+    val fidAnyCount = fid6Count + fid12Count
+    val noFidCount = baseVisibleClients.size - fidAnyCount
 
-    val filteredClients = remember(baseVisibleClients, searchQuery, typeFilter) {
+    val filteredClients = remember(baseVisibleClients, searchQuery, typeFilter, fidelizacaoFilter, clientFidMonthsMap) {
         baseVisibleClients.filter { client ->
             val isPersonal = client.trainingType == "PERSONALIZADO"
             val matchesType = when (typeFilter) {
@@ -88,7 +103,16 @@ fun PtClientsTab(
                 "GRUPO" -> !isPersonal
                 else -> true
             }
+            val effFid = clientFidMonthsMap[client.id] ?: 0
+            val matchesFid = when (fidelizacaoFilter) {
+                "ANY_FID" -> effFid == 6 || effFid == 12
+                "6" -> effFid == 6
+                "12" -> effFid == 12
+                "NONE" -> effFid != 6 && effFid != 12
+                else -> true
+            }
             matchesType &&
+                matchesFid &&
                 (searchQuery.isBlank() ||
                     client.name.contains(searchQuery, ignoreCase = true) ||
                     client.phone.contains(searchQuery))
@@ -142,22 +166,53 @@ fun PtClientsTab(
         }
 
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                listOf(
-                    "ALL" to "Todos (${baseVisibleClients.size})",
-                    "PERSONALIZADO" to "Personalizado ($personalizadoCount)",
-                    "GRUPO" to "Grupo ($grupoCount)"
-                ).forEach { (key, label) ->
-                    FilterChip(
-                        selected = typeFilter == key,
-                        onClick = { typeFilter = key },
-                        label = { Text(label, maxLines = 1) },
-                        modifier = Modifier.testTag("clients_filter_$key"),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = NewShapeGold,
-                            selectedLabelColor = TextOnGold
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(
+                        "ALL" to "Todos (${baseVisibleClients.size})",
+                        "PERSONALIZADO" to "Personalizado ($personalizadoCount)",
+                        "GRUPO" to "Grupo ($grupoCount)"
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = typeFilter == key,
+                            onClick = { typeFilter = key },
+                            label = { Text(label, maxLines = 1) },
+                            modifier = Modifier.testTag("clients_filter_$key"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
                         )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "Fidelização:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondaryDark
                     )
+                    listOf(
+                        "ALL" to "Todas",
+                        "ANY_FID" to "6 ou 12m ($fidAnyCount)",
+                        "6" to "6 Meses ($fid6Count)",
+                        "12" to "12 Meses ($fid12Count)",
+                        "NONE" to "Sem fidel. ($noFidCount)"
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = fidelizacaoFilter == key,
+                            onClick = { fidelizacaoFilter = key },
+                            label = { Text(label, maxLines = 1) },
+                            modifier = Modifier.testTag("clients_fid_filter_$key"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -243,9 +298,10 @@ fun PtClientsTab(
                                     }
                                 }
                                 Text(client.phone, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
-                                if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || client.fidelizacaoMonths > 0 || client.weeklySessionLimit > 0) {
+                                val effectiveFid = clientFidMonthsMap[client.id] ?: 0
+                                if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || effectiveFid > 0 || client.weeklySessionLimit > 0) {
                                     val feeStr = if (state.isSuperAdmin && client.monthlyFeeEur > 0.0) "€${String.format("%.0f", client.monthlyFeeEur)}/mês" else ""
-                                    val fidStr = if (client.fidelizacaoMonths > 0) "Fidelização ${client.fidelizacaoMonths}m" else ""
+                                    val fidStr = if (effectiveFid > 0) "Fidelização ${effectiveFid}m" else ""
                                     val limitStr = if (client.weeklySessionLimit > 0) "${client.weeklySessionLimit}x/sem" else ""
                                     val info = listOf(feeStr, fidStr, limitStr).filter { it.isNotBlank() }.joinToString(" · ")
                                     Text(info, style = MaterialTheme.typography.labelSmall, color = NewShapeGold)

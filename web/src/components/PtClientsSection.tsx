@@ -95,6 +95,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [typeFilter, setTypeFilter] = useState<'ALL' | TrainingType>('ALL');
+  const [fidelizacaoFilter, setFidelizacaoFilter] = useState<'ALL' | 'ANY_FID' | '6' | '12' | 'NONE'>('ALL');
   const [showNewModal, setShowNewModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [payTarget, setPayTarget] = useState<ClientRecord | null>(null);
@@ -131,13 +132,32 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   }
 
   const activeClientsList = clients.filter((c) => c.active);
-  const persCount = activeClientsList.filter((c) => c.trainingType === 'PERSONALIZADO').length;
-  const grupoCount = activeClientsList.filter((c) => c.trainingType !== 'PERSONALIZADO').length;
+  const baseVisibleClients = showInactive ? clients : activeClientsList;
+  const persCount = baseVisibleClients.filter((c) => c.trainingType === 'PERSONALIZADO').length;
+  const grupoCount = baseVisibleClients.filter((c) => c.trainingType !== 'PERSONALIZADO').length;
 
-  const filtered = clients.filter((c) => {
-    if (!showInactive && !c.active) return false;
+  const clientFidMonthsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    clients.forEach((c) => {
+      const eff = getEffectiveClientFidelizacaoMonths(c, fidelizacoes);
+      map.set(c.id, eff === 6 || eff === 12 ? eff : 0);
+    });
+    return map;
+  }, [clients, fidelizacoes]);
+
+  const fid6Count = baseVisibleClients.filter((c) => clientFidMonthsMap.get(c.id) === 6).length;
+  const fid12Count = baseVisibleClients.filter((c) => clientFidMonthsMap.get(c.id) === 12).length;
+  const fidAnyCount = fid6Count + fid12Count;
+  const noFidCount = baseVisibleClients.length - fidAnyCount;
+
+  const filtered = baseVisibleClients.filter((c) => {
     if (typeFilter === 'PERSONALIZADO' && c.trainingType !== 'PERSONALIZADO') return false;
     if (typeFilter === 'GRUPO' && c.trainingType === 'PERSONALIZADO') return false;
+    const effFid = clientFidMonthsMap.get(c.id) || 0;
+    if (fidelizacaoFilter === 'ANY_FID' && effFid !== 6 && effFid !== 12) return false;
+    if (fidelizacaoFilter === '6' && effFid !== 6) return false;
+    if (fidelizacaoFilter === '12' && effFid !== 12) return false;
+    if (fidelizacaoFilter === 'NONE' && (effFid === 6 || effFid === 12)) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return c.name.toLowerCase().includes(q) || c.phone.includes(q);
@@ -186,34 +206,64 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         </label>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {(
-          [
-            { id: 'ALL' as const, label: `Todos (${showInactive ? clients.length : activeClientsList.length})` },
-            { id: 'PERSONALIZADO' as const, label: `Treino Personalizado (${persCount})` },
-            { id: 'GRUPO' as const, label: `Treino em Grupo (${grupoCount})` },
-          ] as const
-        ).map((opt) => (
-          <button
-            key={opt.id}
-            type="button"
-            onClick={() => setTypeFilter(opt.id)}
-            className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
-              typeFilter === opt.id
-                ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
-                : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              { id: 'ALL' as const, label: `Todos (${baseVisibleClients.length})` },
+              { id: 'PERSONALIZADO' as const, label: `Treino Personalizado (${persCount})` },
+              { id: 'GRUPO' as const, label: `Treino em Grupo (${grupoCount})` },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setTypeFilter(opt.id)}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                typeFilter === opt.id
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-[#71717A]">
+            Fidelização:
+          </span>
+          {(
+            [
+              { id: 'ALL' as const, label: 'Todas' },
+              { id: 'ANY_FID' as const, label: `6 ou 12m (${fidAnyCount})` },
+              { id: '6' as const, label: `6 Meses (${fid6Count})` },
+              { id: '12' as const, label: `12 Meses (${fid12Count})` },
+              { id: 'NONE' as const, label: `Sem fidel. (${noFidCount})` },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setFidelizacaoFilter(opt.id)}
+              className={`rounded-xl border px-2.5 py-1 text-xs font-bold transition ${
+                fidelizacaoFilter === opt.id
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:text-white'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {filtered.length === 0 ? (
         <EmptyState
           icon={<Users className="h-6 w-6" />}
           title="Nenhum aluno encontrado"
-          subtitle="Adiciona um novo cliente ou importa uma lista CSV."
+          subtitle="Adiciona um novo cliente, ajusta os filtros ou importa uma lista CSV."
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -225,6 +275,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                 p.paid &&
                 !isExtraFeePayment(p.note)
             );
+            const effectiveFid = clientFidMonthsMap.get(c.id) || 0;
             return (
               <div
                 key={c.id}
@@ -245,11 +296,11 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       {!c.active && <StatusPill>Inativo</StatusPill>}
                     </div>
                     <p className="text-xs text-[#A1A1AA]">{formatPhoneDisplay(c.phone)}</p>
-                    {((isSuperAdmin && c.monthlyFeeEur > 0) || c.fidelizacaoMonths > 0) && (
+                    {((isSuperAdmin && c.monthlyFeeEur > 0) || effectiveFid > 0) && (
                       <p className="mt-1 text-xs font-semibold text-[#EAB308]">
                         {[
                           isSuperAdmin && c.monthlyFeeEur > 0 ? `€${c.monthlyFeeEur.toFixed(0)}/mês` : '',
-                          c.fidelizacaoMonths > 0 ? `Fidelização ${c.fidelizacaoMonths}m` : '',
+                          effectiveFid > 0 ? `Fidelização ${effectiveFid}m` : '',
                         ]
                           .filter(Boolean)
                           .join(' · ')}
