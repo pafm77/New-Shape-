@@ -232,12 +232,30 @@ export function App() {
   } | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
   const bannerTimerRef = useRef<number | null>(null);
+  const seededUidsRef = useRef<Set<string>>(new Set());
 
   const showBanner = (msg: string) => {
     setBannerMsg(msg);
     if (bannerTimerRef.current) window.clearTimeout(bannerTimerRef.current);
     bannerTimerRef.current = window.setTimeout(() => setBannerMsg(null), 4000);
+  };
+
+  const handleFirestoreError = (err: unknown) => {
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+    const msg = err instanceof Error ? err.message : String(err ?? '');
+    if (code === 'resource-exhausted' || /quota|resource-exhausted/i.test(msg)) {
+      setQuotaExceeded(true);
+      showBanner(
+        'Limite diário gratuito da base de dados atingido. Os teus dados estão seguros — renova às 08:00 (Portugal).'
+      );
+      return;
+    }
+    showBanner(msg || 'Erro ao sincronizar com a base de dados.');
   };
 
   useEffect(() => {
@@ -397,6 +415,7 @@ export function App() {
   }, [isExternalStudentPortal, authUser, isSuperAdmin]);
 
   const isPtApproved = isSuperAdmin || ownPtAccount?.status === 'APPROVED';
+  const externalScopedClientId = isExternalStudentPortal ? studentId : null;
 
   useEffect(() => {
     if (!studioUid) {
@@ -408,9 +427,11 @@ export function App() {
       return;
     }
 
-    if (isStudioOwner) {
+    if (isStudioOwner && !seededUidsRef.current.has(studioUid)) {
+      seededUidsRef.current.add(studioUid);
       repo.ensureSeeded(studioUid, isSuperAdmin).catch((e) => {
-        showBanner(e?.message || 'Erro ao inicializar base de dados.');
+        seededUidsRef.current.delete(studioUid);
+        handleFirestoreError(e);
       });
     }
 
@@ -421,6 +442,7 @@ export function App() {
         clients: (list) => {
           setClients(list);
           setDataLoaded(true);
+          setQuotaExceeded(false);
         },
         weeks: setWeeks,
         sessions: setSessions,
@@ -462,17 +484,27 @@ export function App() {
           }
         },
         settings: setSettingsState,
-        onError: (err) => showBanner(err.message),
+        onError: (err) => handleFirestoreError(err),
       },
       {
         includePayments: (isExternalStudentPortal && !isStudioOwner) || isSuperAdmin,
         includePtNotifications: isStudioOwner,
         includeTemplates: isStudioOwner,
+        includeExercises: isStudioOwner,
+        scopedClientId: externalScopedClientId,
+        minimalAuthOnly: isExternalStudentPortal && !externalScopedClientId,
       }
     );
 
     return unsub;
-  }, [studioUid, isStudioOwner, isPtApproved, isSuperAdmin, isExternalStudentPortal]);
+  }, [
+    studioUid,
+    isStudioOwner,
+    isPtApproved,
+    isSuperAdmin,
+    isExternalStudentPortal,
+    externalScopedClientId,
+  ]);
 
   const effectiveSettings: StudioSettingsRecord = useMemo(
     () =>
@@ -1096,6 +1128,28 @@ export function App() {
         </header>
 
         <main className="mx-auto max-w-5xl px-4 py-5 space-y-4">
+          {quotaExceeded && (
+            <div className="flex flex-wrap items-start justify-between gap-2 rounded-2xl border border-[#F59E0B] bg-[#3D2E10] px-4 py-3 text-xs text-[#FDE68A]">
+              <div className="space-y-1">
+                <p className="font-bold text-[#FACC15]">
+                  Os teus dados estão todos seguros e guardados!
+                </p>
+                <p className="leading-relaxed">
+                  Foi atingido o limite diário gratuito de leituras do Firebase (50.000/dia). Nada
+                  foi apagado — todos os registos voltam a aparecer automaticamente quando o limite
+                  renovar às <strong>08:00 (hora de Portugal)</strong>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="rounded-lg bg-[#EAB308] px-3 py-1.5 font-bold text-[#121214]"
+              >
+                Tentar novamente
+              </button>
+            </div>
+          )}
+
           {lockedByWhatsApp && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#EAB308] bg-[#3D3314] px-4 py-3 text-xs text-[#FACC15]">
               <span>

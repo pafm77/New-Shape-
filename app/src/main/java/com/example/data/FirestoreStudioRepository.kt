@@ -86,10 +86,37 @@ class FirestoreStudioRepository(
     fun observeFidelizacoes(uid: String): Flow<List<FidelizacaoRecord>> =
         observeSubcollection<FidelizacaoRecord>(uid, "fidelizacoes") { it.sortedBy { f -> f.endDateMillis } }
 
-    fun observeExercises(uid: String): Flow<List<ExerciseRecord>> =
-        observeSubcollection<ExerciseRecord>(uid, "exercises") { list ->
-            list.sortedWith(compareBy<ExerciseRecord> { it.muscleGroup }.thenBy { it.name })
-        }
+    fun observeExercises(uid: String): Flow<List<ExerciseRecord>> = flow {
+        require(uid.isNotBlank()) { "UID inválido para consulta Firestore." }
+        val path = "users/$uid/exercises"
+        emitAll(
+            userDoc(uid).collection("exercises")
+                .whereEqualTo("custom", true)
+                .snapshots()
+                .map { snapshot ->
+                    val customList = snapshot.toObjects(ExerciseRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    val merged = LinkedHashMap<String, ExerciseRecord>()
+                    SeedCatalog.defaultExercises.forEach { ex ->
+                        merged[ex.id] = ex.copy(userId = uid, custom = false)
+                    }
+                    customList.forEach { ex ->
+                        merged[ex.id] = ex
+                    }
+                    merged.values.sortedWith(compareBy<ExerciseRecord> { it.muscleGroup }.thenBy { it.name })
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val toLog = firestoreError ?: (error as? Exception)
+                    if (toLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(toLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
 
     fun observeWorkoutPlans(uid: String): Flow<List<WorkoutPlanRecord>> =
         observeSubcollection<WorkoutPlanRecord>(uid, "workout_plans") { it.sortedByDescending { p -> p.createdAtMillis } }
@@ -97,8 +124,37 @@ class FirestoreStudioRepository(
     fun observeWorkoutPlanItems(uid: String): Flow<List<WorkoutPlanItemRecord>> =
         observeSubcollection<WorkoutPlanItemRecord>(uid, "workout_plan_items") { it.sortedBy { i -> i.orderIndex } }
 
-    fun observeFoods(uid: String): Flow<List<FoodItemRecord>> =
-        observeSubcollection<FoodItemRecord>(uid, "foods") { it.sortedBy { f -> f.name } }
+    fun observeFoods(uid: String): Flow<List<FoodItemRecord>> = flow {
+        require(uid.isNotBlank()) { "UID inválido para consulta Firestore." }
+        val path = "users/$uid/foods"
+        emitAll(
+            userDoc(uid).collection("foods")
+                .whereEqualTo("custom", true)
+                .snapshots()
+                .map { snapshot ->
+                    val customList = snapshot.toObjects(FoodItemRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    val merged = LinkedHashMap<String, FoodItemRecord>()
+                    SeedCatalog.defaultFoods.forEach { fd ->
+                        merged[fd.id] = fd.copy(userId = uid, custom = false)
+                    }
+                    customList.forEach { fd ->
+                        merged[fd.id] = fd
+                    }
+                    merged.values.sortedBy { it.name }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val toLog = firestoreError ?: (error as? Exception)
+                    if (toLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(toLog, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
 
     fun observeNutritionEntries(uid: String): Flow<List<NutritionEntryRecord>> =
         observeSubcollection(uid, "nutrition_entries")
@@ -352,95 +408,7 @@ class FirestoreStudioRepository(
         val settingsRef = userDoc(uid).collection("settings").document("studio")
         val settingsSnap = settingsRef.get().await()
         if (settingsSnap.exists() && settingsSnap.getBoolean("seeded") == true) {
-            // 1. Replace old non-custom exercises with the new 385-exercise CSV library (preserving PT custom exercises)
-            val existingExercisesSnap = userDoc(uid).collection("exercises").get().await()
-            val expectedExerciseIds = SeedCatalog.defaultExercises.map { it.id }.toSet()
-            val existingExerciseIds = existingExercisesSnap.documents.map { it.id }.toSet()
-            val obsoleteExerciseRefs = existingExercisesSnap.documents
-                .filter { it.getBoolean("custom") != true && it.id !in expectedExerciseIds }
-                .map { it.reference }
-            val missingExercises = SeedCatalog.defaultExercises.filter { it.id !in existingExerciseIds }
-
-            // 2. Backfill expanded food catalog & sample assessments for already-seeded accounts
-            val existingFoodsSnap = userDoc(uid).collection("foods").get().await()
-            val existingFoodIds = existingFoodsSnap.documents.map { it.id }.toSet()
-            val missingFoods = SeedCatalog.defaultFoods.filter { it.id !in existingFoodIds }
-
-            val existingAssessmentsSnap = userDoc(uid).collection("physical_assessments").limit(1).get().await()
-            val backfillWrites = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
-
-            missingExercises.forEach { ex ->
-                val ref = userDoc(uid).collection("exercises").document(ex.id)
-                backfillWrites += ref to mapOf(
-                    "userId" to uid,
-                    "name" to ex.name,
-                    "muscleGroup" to ex.muscleGroup,
-                    "equipment" to ex.equipment,
-                    "instructions" to ex.instructions,
-                    "custom" to false,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            }
-
-            missingFoods.forEach { fd ->
-                val ref = userDoc(uid).collection("foods").document(fd.id)
-                backfillWrites += ref to mapOf(
-                    "userId" to uid,
-                    "name" to fd.name,
-                    "category" to fd.category,
-                    "kcalPer100g" to fd.kcalPer100g,
-                    "proteinPer100g" to fd.proteinPer100g,
-                    "carbsPer100g" to fd.carbsPer100g,
-                    "fatPer100g" to fd.fatPer100g,
-                    "custom" to false,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            }
-
-            if (existingAssessmentsSnap.isEmpty) {
-                val now = System.currentTimeMillis()
-                val dayMs = 86_400_000L
-                listOf(
-                    listOf("pa_ana_1", now - dayMs * 60, 68.5, 29, 166.0, "F", 26.8, 36.6, 6.0, "Avaliação inicial"),
-                    listOf("pa_ana_2", now - dayMs * 30, 66.8, 29, 166.0, "F", 24.9, 38.2, 5.5, "Boa evolução de força"),
-                    listOf("pa_ana_3", now - dayMs * 2, 65.4, 29, 166.0, "F", 23.2, 39.8, 5.0, "Recomposição corporal consistente")
-                ).forEach { pa ->
-                    val w = pa[2] as Double
-                    val age = pa[3] as Int
-                    val h = pa[4] as Double
-                    val sex = pa[5] as String
-                    backfillWrites += userDoc(uid).collection("physical_assessments").document(pa[0] as String) to mapOf(
-                        "userId" to uid,
-                        "clientId" to "client_ana",
-                        "dateMillis" to (pa[1] as Long),
-                        "weightKg" to w,
-                        "ageYears" to age,
-                        "heightCm" to h,
-                        "sex" to sex,
-                        "bodyFatPct" to (pa[6] as Double),
-                        "muscleMassKg" to (pa[7] as Double),
-                        "visceralFat" to (pa[8] as Double),
-                        "bmi" to PhysicalCalculations.calculateBmi(w, h),
-                        "bmrKcal" to PhysicalCalculations.calculateBmrMifflinStJeor(w, h, age, sex),
-                        "notes" to (pa[9] as String),
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                }
-            }
-
-            obsoleteExerciseRefs.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { ref -> batch.delete(ref) }
-                batch.commit().await()
-            }
-            backfillWrites.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { (ref, payload) -> batch.set(ref, payload) }
-                batch.commit().await()
-            }
+            // Already seeded: avoid scanning exercises/foods/assessments (default catalogs are bundled locally)
             val existingCode = settingsSnap.getString("studentPortalCode").orEmpty()
             val missingCode = existingCode.length < 8
             val missingCutoff = !settingsSnap.contains("cutoffMinutes")
@@ -465,38 +433,7 @@ class FirestoreStudioRepository(
         } else {
             val writes = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
 
-            // Exercises
-            SeedCatalog.defaultExercises.forEach { ex ->
-                val ref = userDoc(uid).collection("exercises").document(ex.id)
-                writes += ref to mapOf(
-                    "userId" to uid,
-                    "name" to ex.name,
-                    "muscleGroup" to ex.muscleGroup,
-                    "equipment" to ex.equipment,
-                    "instructions" to ex.instructions,
-                    "custom" to false,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            }
-
-            // Foods
-            SeedCatalog.defaultFoods.forEach { fd ->
-                val ref = userDoc(uid).collection("foods").document(fd.id)
-                writes += ref to mapOf(
-                    "userId" to uid,
-                    "name" to fd.name,
-                    "category" to fd.category,
-                    "kcalPer100g" to fd.kcalPer100g,
-                    "proteinPer100g" to fd.proteinPer100g,
-                    "carbsPer100g" to fd.carbsPer100g,
-                    "fatPer100g" to fd.fatPer100g,
-                    "custom" to false,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            }
-
+            // Default exercises and foods are bundled locally in SeedCatalog (only custom items live in Firestore)
             // Templates
             SeedCatalog.defaultTemplates.forEach { tpl ->
                 val ref = userDoc(uid).collection("templates").document(tpl.templateKey)

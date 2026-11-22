@@ -1,6 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 
 export const FIRESTORE_DATABASE_ID =
   import.meta.env.VITE_FIRESTORE_DATABASE_ID ||
@@ -20,4 +26,20 @@ export const auth = getAuth(firebaseApp);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export const db = getFirestore(firebaseApp, FIRESTORE_DATABASE_ID);
+function initDb(): Firestore {
+  try {
+    return initializeFirestore(
+      firebaseApp,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      },
+      FIRESTORE_DATABASE_ID
+    );
+  } catch {
+    return getFirestore(firebaseApp, FIRESTORE_DATABASE_ID);
+  }
+}
+
+export const db = initDb();

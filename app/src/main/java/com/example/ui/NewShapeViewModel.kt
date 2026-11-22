@@ -339,7 +339,14 @@ class NewShapeViewModel(
             if (firestoreError == null && error is CancellationException) throw error
             val rootError = firestoreError ?: error
             Log.w(TAG, "Error observing Firestore studio streams", rootError)
-            emit(StudioStreamState.Error(rootError.localizedMessage ?: "Erro ao sincronizar dados com o Firestore."))
+            val isQuota = firestoreError?.code == FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ||
+                (rootError.message?.contains("quota", ignoreCase = true) == true)
+            val displayMsg = if (isQuota) {
+                "Limite diário gratuito de leituras atingido. Os teus dados estão todos seguros e guardados — o acesso renova automaticamente às 08:00 (Portugal)."
+            } else {
+                rootError.localizedMessage ?: "Erro ao sincronizar dados com o Firestore."
+            }
+            emit(StudioStreamState.Error(displayMsg))
         }
         .stateIn(
             scope = viewModelScope,

@@ -3,15 +3,15 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  getDocs,
-  limit,
   onSnapshot,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
   DocumentReference,
+  Query,
   Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -100,6 +100,33 @@ export interface StudioSubscriptionOptions {
   includePayments?: boolean;
   includePtNotifications?: boolean;
   includeTemplates?: boolean;
+  includeExercises?: boolean;
+  scopedClientId?: string | null;
+  minimalAuthOnly?: boolean;
+}
+
+function mergeExercisesWithDefaults(uid: string, customItems: ExerciseRecord[]): ExerciseRecord[] {
+  const byId = new Map<string, ExerciseRecord>();
+  DEFAULT_EXERCISES.forEach((ex) => {
+    byId.set(ex.id, { ...ex, userId: uid, custom: false });
+  });
+  customItems.forEach((ex) => {
+    byId.set(ex.id, ex);
+  });
+  return Array.from(byId.values()).sort(
+    (a, b) => a.muscleGroup.localeCompare(b.muscleGroup) || a.name.localeCompare(b.name)
+  );
+}
+
+function mergeFoodsWithDefaults(uid: string, customItems: FoodItemRecord[]): FoodItemRecord[] {
+  const byId = new Map<string, FoodItemRecord>();
+  DEFAULT_FOODS.forEach((fd) => {
+    byId.set(fd.id, { ...fd, userId: uid, custom: false });
+  });
+  customItems.forEach((fd) => {
+    byId.set(fd.id, fd);
+  });
+  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function subscribeStudioData(
@@ -111,18 +138,21 @@ export function subscribeStudioData(
     includePayments = true,
     includePtNotifications = false,
     includeTemplates = true,
+    includeExercises = true,
+    scopedClientId = null,
+    minimalAuthOnly = false,
   } = options;
   const unsubs: Unsubscribe[] = [];
 
-  const listen = <T>(
-    name: string,
+  const listenQuery = <T>(
+    source: Query,
     mapper: (id: string, data: Record<string, unknown>) => T,
     sort: (list: T[]) => T[],
     cb: (list: T[]) => void
   ) => {
     unsubs.push(
       onSnapshot(
-        subcol(uid, name),
+        source,
         (snap) => {
           const list = snap.docs.map((d) => mapper(d.id, d.data() as Record<string, unknown>));
           cb(sort(list));
@@ -132,6 +162,22 @@ export function subscribeStudioData(
     );
   };
 
+  const listen = <T>(
+    name: string,
+    mapper: (id: string, data: Record<string, unknown>) => T,
+    sort: (list: T[]) => T[],
+    cb: (list: T[]) => void,
+    filterByClient = false
+  ) => {
+    const colRef = subcol(uid, name);
+    const source =
+      filterByClient && scopedClientId
+        ? query(colRef, where('clientId', '==', scopedClientId))
+        : colRef;
+    listenQuery(source, mapper, sort, cb);
+  };
+
+  // Always subscribe to clients & studio settings (required for login/role/portal resolution)
   listen<ClientRecord>(
     'clients',
     (id, d) => ({
@@ -155,6 +201,57 @@ export function subscribeStudioData(
       }),
     handlers.clients
   );
+
+  unsubs.push(
+    onSnapshot(
+      doc(subcol(uid, 'settings'), 'studio'),
+      (snap) => {
+        if (!snap.exists()) {
+          handlers.settings(null);
+          return;
+        }
+        const d = snap.data() as Record<string, unknown>;
+        handlers.settings({
+          id: snap.id,
+          userId: String(d.userId ?? uid),
+          clientsCanEdit: Boolean(d.clientsCanEdit ?? true),
+          cutoffHours: Number(d.cutoffHours ?? 0),
+          cutoffMinutes:
+            d.cutoffMinutes !== undefined ? Number(d.cutoffMinutes) : undefined,
+          reminderLeadMinutes:
+            d.reminderLeadMinutes !== undefined ? Number(d.reminderLeadMinutes) : undefined,
+          whatsappWebMode: Boolean(d.whatsappWebMode ?? false),
+          siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin ?? DEFAULT_WEB_BASE_URL),
+          studentPortalCode: String(d.studentPortalCode ?? ''),
+          ptWhatsappPhone: String(d.ptWhatsappPhone ?? ''),
+          seeded: Boolean(d.seeded ?? false),
+        });
+      },
+      (err) => handlers.onError(err)
+    )
+  );
+
+  // Before an external student picks their phone/profile, don't read any other collections
+  if (minimalAuthOnly) {
+    handlers.weeks([]);
+    handlers.sessions([]);
+    handlers.bookings([]);
+    handlers.weekResponses([]);
+    handlers.payments([]);
+    handlers.fidelizacoes([]);
+    handlers.exercises([]);
+    handlers.workoutPlans([]);
+    handlers.workoutPlanItems([]);
+    handlers.foods(mergeFoodsWithDefaults(uid, []));
+    handlers.nutritionEntries([]);
+    handlers.physicalAssessments([]);
+    handlers.chatMessages([]);
+    handlers.templates([]);
+    handlers.ptNotifications?.([]);
+    handlers.workoutLoadLogs?.([]);
+    handlers.waitlistEntries?.([]);
+    return () => unsubs.forEach((u) => u());
+  }
 
   listen<TrainingWeekRecord>(
     'weeks',
@@ -219,7 +316,8 @@ export function subscribeStudioData(
       status: (String(d.status ?? 'UNAVAILABLE') as 'UNAVAILABLE' | 'REMINDED'),
     }),
     (list) => list,
-    handlers.weekResponses
+    handlers.weekResponses,
+    true
   );
 
   if (includePayments) {
@@ -237,7 +335,8 @@ export function subscribeStudioData(
         note: String(d.note ?? ''),
       }),
       (list) => list.sort((a, b) => b.paidAtMillis - a.paidAtMillis),
-      handlers.payments
+      handlers.payments,
+      true
     );
   } else {
     handlers.payments([]);
@@ -255,27 +354,29 @@ export function subscribeStudioData(
       notes: String(d.notes ?? ''),
     }),
     (list) => list.sort((a, b) => a.endDateMillis - b.endDateMillis),
-    handlers.fidelizacoes
+    handlers.fidelizacoes,
+    true
   );
 
-  listen<ExerciseRecord>(
-    'exercises',
-    (id, d) => ({
-      id,
-      userId: String(d.userId ?? uid),
-      name: String(d.name ?? ''),
-      muscleGroup: String(d.muscleGroup ?? ''),
-      equipment: String(d.equipment ?? ''),
-      instructions: String(d.instructions ?? ''),
-      custom: Boolean(d.custom ?? false),
-    }),
-    (list) =>
-      list.sort(
-        (a, b) =>
-          a.muscleGroup.localeCompare(b.muscleGroup) || a.name.localeCompare(b.name)
-      ),
-    handlers.exercises
-  );
+  // Exercises: bundled 385-exercise catalog is served locally; only PT custom exercises are read from Firestore
+  if (includeExercises) {
+    listenQuery<ExerciseRecord>(
+      query(subcol(uid, 'exercises'), where('custom', '==', true)),
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        name: String(d.name ?? ''),
+        muscleGroup: String(d.muscleGroup ?? ''),
+        equipment: String(d.equipment ?? ''),
+        instructions: String(d.instructions ?? ''),
+        custom: Boolean(d.custom ?? true),
+      }),
+      (customList) => mergeExercisesWithDefaults(uid, customList),
+      handlers.exercises
+    );
+  } else {
+    handlers.exercises([]);
+  }
 
   listen<WorkoutPlanRecord>(
     'workout_plans',
@@ -288,7 +389,8 @@ export function subscribeStudioData(
       createdAtMillis: Number(d.createdAtMillis ?? 0),
     }),
     (list) => list.sort((a, b) => b.createdAtMillis - a.createdAtMillis),
-    handlers.workoutPlans
+    handlers.workoutPlans,
+    true
   );
 
   listen<WorkoutPlanItemRecord>(
@@ -313,8 +415,9 @@ export function subscribeStudioData(
     handlers.workoutPlanItems
   );
 
-  listen<FoodItemRecord>(
-    'foods',
+  // Foods: bundled ~380-food catalog is served locally; only custom foods are read from Firestore
+  listenQuery<FoodItemRecord>(
+    query(subcol(uid, 'foods'), where('custom', '==', true)),
     (id, d) => ({
       id,
       userId: String(d.userId ?? uid),
@@ -324,9 +427,9 @@ export function subscribeStudioData(
       proteinPer100g: Number(d.proteinPer100g ?? 0),
       carbsPer100g: Number(d.carbsPer100g ?? 0),
       fatPer100g: Number(d.fatPer100g ?? 0),
-      custom: Boolean(d.custom ?? false),
+      custom: Boolean(d.custom ?? true),
     }),
-    (list) => list.sort((a, b) => a.name.localeCompare(b.name)),
+    (customList) => mergeFoodsWithDefaults(uid, customList),
     handlers.foods
   );
 
@@ -346,7 +449,8 @@ export function subscribeStudioData(
       fat: Number(d.fat ?? 0),
     }),
     (list) => list,
-    handlers.nutritionEntries
+    handlers.nutritionEntries,
+    true
   );
 
   listen<PhysicalAssessmentRecord>(
@@ -368,7 +472,8 @@ export function subscribeStudioData(
       notes: String(d.notes ?? ''),
     }),
     (list) => list.sort((a, b) => a.dateMillis - b.dateMillis),
-    handlers.physicalAssessments
+    handlers.physicalAssessments,
+    true
   );
 
   listen<ChatMessageRecord>(
@@ -382,7 +487,8 @@ export function subscribeStudioData(
       timestampMillis: Number(d.timestampMillis ?? 0),
     }),
     (list) => list.sort((a, b) => a.timestampMillis - b.timestampMillis),
-    handlers.chatMessages
+    handlers.chatMessages,
+    true
   );
 
   if (includeTemplates) {
@@ -400,6 +506,8 @@ export function subscribeStudioData(
       (list) => list,
       handlers.templates
     );
+  } else {
+    handlers.templates([]);
   }
 
   if (includePtNotifications && handlers.ptNotifications) {
@@ -442,7 +550,8 @@ export function subscribeStudioData(
         loggedAtMillis: Number(d.loggedAtMillis ?? 0),
       }),
       (list) => list.sort((a, b) => a.loggedAtMillis - b.loggedAtMillis),
-      handlers.workoutLoadLogs
+      handlers.workoutLoadLogs,
+      true
     );
   }
 
@@ -461,35 +570,6 @@ export function subscribeStudioData(
       handlers.waitlistEntries
     );
   }
-
-  unsubs.push(
-    onSnapshot(
-      doc(subcol(uid, 'settings'), 'studio'),
-      (snap) => {
-        if (!snap.exists()) {
-          handlers.settings(null);
-          return;
-        }
-        const d = snap.data() as Record<string, unknown>;
-        handlers.settings({
-          id: snap.id,
-          userId: String(d.userId ?? uid),
-          clientsCanEdit: Boolean(d.clientsCanEdit ?? true),
-          cutoffHours: Number(d.cutoffHours ?? 0),
-          cutoffMinutes:
-            d.cutoffMinutes !== undefined ? Number(d.cutoffMinutes) : undefined,
-          reminderLeadMinutes:
-            d.reminderLeadMinutes !== undefined ? Number(d.reminderLeadMinutes) : undefined,
-          whatsappWebMode: Boolean(d.whatsappWebMode ?? false),
-          siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin ?? DEFAULT_WEB_BASE_URL),
-          studentPortalCode: String(d.studentPortalCode ?? ''),
-          ptWhatsappPhone: String(d.ptWhatsappPhone ?? ''),
-          seeded: Boolean(d.seeded ?? false),
-        });
-      },
-      (err) => handlers.onError(err)
-    )
-  );
 
   return () => unsubs.forEach((u) => u());
 }
@@ -657,14 +737,6 @@ async function commitWrites(writes: Array<[DocumentReference, Record<string, unk
   }
 }
 
-async function commitDeletes(refs: DocumentReference[]) {
-  for (let i = 0; i < refs.length; i += 400) {
-    const batch = writeBatch(db);
-    refs.slice(i, i + 400).forEach((ref) => batch.delete(ref));
-    await batch.commit();
-  }
-}
-
 export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<void> {
   const settingsRef = doc(subcol(uid, 'settings'), 'studio');
   const settingsSnap = await getDoc(settingsRef);
@@ -672,87 +744,7 @@ export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<v
   const dayMs = 86_400_000;
 
   if (settingsSnap.exists() && settingsSnap.data()?.seeded === true) {
-    // 1. Replace old non-custom exercises with the new 385-exercise CSV library (preserving PT custom exercises)
-    const existingExercisesSnap = await getDocs(subcol(uid, 'exercises'));
-    const expectedExerciseIds = new Set(DEFAULT_EXERCISES.map((ex) => ex.id));
-    const existingExerciseIds = new Set(existingExercisesSnap.docs.map((d) => d.id));
-    const obsoleteExerciseRefs = existingExercisesSnap.docs
-      .filter((d) => d.data()?.custom !== true && !expectedExerciseIds.has(d.id))
-      .map((d) => d.ref);
-    const missingExercises = DEFAULT_EXERCISES.filter((ex) => !existingExerciseIds.has(ex.id));
-
-    // 2. Ensure any missing default foods or initial assessment backfill
-    const existingFoodsSnap = await getDocs(subcol(uid, 'foods'));
-    const existingFoodIds = new Set(existingFoodsSnap.docs.map((d) => d.id));
-    const missingFoods = DEFAULT_FOODS.filter((f) => !existingFoodIds.has(f.id));
-    const existingAssess = await getDocs(query(subcol(uid, 'physical_assessments'), limit(1)));
-    const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
-
-    missingExercises.forEach((ex) => {
-      writes.push([
-        doc(subcol(uid, 'exercises'), ex.id),
-        {
-          userId: uid,
-          name: ex.name,
-          muscleGroup: ex.muscleGroup,
-          equipment: ex.equipment,
-          instructions: ex.instructions,
-          custom: false,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-      ]);
-    });
-
-    missingFoods.forEach((fd) => {
-      writes.push([
-        doc(subcol(uid, 'foods'), fd.id),
-        {
-          userId: uid,
-          name: fd.name,
-          category: fd.category,
-          kcalPer100g: fd.kcalPer100g,
-          proteinPer100g: fd.proteinPer100g,
-          carbsPer100g: fd.carbsPer100g,
-          fatPer100g: fd.fatPer100g,
-          custom: false,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-      ]);
-    });
-
-    if (existingAssess.empty) {
-      [
-        ['pa_ana_1', now - dayMs * 60, 68.5, 29, 166, 'F' as const, 26.8, 36.6, 6.0, 'Avaliação inicial'],
-        ['pa_ana_2', now - dayMs * 30, 66.8, 29, 166, 'F' as const, 24.9, 38.2, 5.5, 'Boa evolução de força'],
-        ['pa_ana_3', now - dayMs * 2, 65.4, 29, 166, 'F' as const, 23.2, 39.8, 5.0, 'Recomposição corporal consistente'],
-      ].forEach(([id, dt, w, age, h, sex, fat, muscle, visc, notes]) => {
-        writes.push([
-          doc(subcol(uid, 'physical_assessments'), String(id)),
-          {
-            userId: uid,
-            clientId: 'client_ana',
-            dateMillis: Math.round(Number(dt)),
-            weightKg: Number(w),
-            ageYears: Math.round(Number(age)),
-            heightCm: Number(h),
-            sex: String(sex),
-            bodyFatPct: Number(fat),
-            muscleMassKg: Number(muscle),
-            visceralFat: Number(visc),
-            bmi: calculateBmi(Number(w), Number(h)),
-            bmrKcal: calculateBmrMifflinStJeor(Number(w), Number(h), Number(age), sex as 'M' | 'F'),
-            notes: String(notes),
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          },
-        ]);
-      });
-    }
-
-    if (obsoleteExerciseRefs.length > 0) await commitDeletes(obsoleteExerciseRefs);
-    if (writes.length > 0) await commitWrites(writes);
+    // Already seeded: avoid scanning exercises/foods/assessments (static catalogs are bundled locally)
     const settingsData = settingsSnap.data();
     const currentCode = settingsData?.studentPortalCode;
     const missingPortalCode = typeof currentCode !== 'string' || currentCode.length < 8;
@@ -783,40 +775,7 @@ export async function ensureSeeded(uid: string, isSuperAdmin = false): Promise<v
 
   const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
 
-  DEFAULT_EXERCISES.forEach((ex) => {
-    writes.push([
-      doc(subcol(uid, 'exercises'), ex.id),
-      {
-        userId: uid,
-        name: ex.name,
-        muscleGroup: ex.muscleGroup,
-        equipment: ex.equipment,
-        instructions: ex.instructions,
-        custom: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-    ]);
-  });
-
-  DEFAULT_FOODS.forEach((fd) => {
-    writes.push([
-      doc(subcol(uid, 'foods'), fd.id),
-      {
-        userId: uid,
-        name: fd.name,
-        category: fd.category,
-        kcalPer100g: fd.kcalPer100g,
-        proteinPer100g: fd.proteinPer100g,
-        carbsPer100g: fd.carbsPer100g,
-        fatPer100g: fd.fatPer100g,
-        custom: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-    ]);
-  });
-
+  // Default exercises and foods are bundled locally in the app (only custom items are written to Firestore)
   DEFAULT_TEMPLATES.forEach((tpl) => {
     writes.push([
       doc(subcol(uid, 'templates'), tpl.templateKey),
