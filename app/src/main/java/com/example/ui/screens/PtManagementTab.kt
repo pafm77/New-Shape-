@@ -44,9 +44,19 @@ fun PtManagementTab(
     val subTabs = remember(state.isSuperAdmin, state.pendingPtApprovalsCount) {
         if (state.isSuperAdmin) {
             val teamTitle = if (state.pendingPtApprovalsCount > 0) "Equipa PT (${state.pendingPtApprovalsCount})" else "Equipa PT"
-            listOf("FINANCES" to "Finanças", "FIDELIZACOES" to "Fidelizações", "CHAT" to "Chat", "TEAM" to teamTitle)
+            listOf(
+                "FINANCES" to "Finanças",
+                "FIDELIZACOES" to "Fidelizações",
+                "CHAT" to "Chat",
+                "TEAM" to teamTitle,
+                "GUIDE" to "Guia App (PDF)"
+            )
         } else {
-            listOf("FIDELIZACOES" to "Fidelizações", "CHAT" to "Chat")
+            listOf(
+                "FIDELIZACOES" to "Fidelizações",
+                "CHAT" to "Chat",
+                "GUIDE" to "Guia App (PDF)"
+            )
         }
     }
 
@@ -122,6 +132,7 @@ fun PtManagementTab(
                 onSelectClient = { activeChatClientId = it }
             )
             "TEAM" -> if (state.isSuperAdmin) PtTeamApprovalsSection(state = state, viewModel = viewModel)
+            "GUIDE" -> PtAppInstallGuideSection(state = state)
         }
     }
 }

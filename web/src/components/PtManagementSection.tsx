@@ -18,6 +18,7 @@ import {
   FidelizacaoRecord,
   PaymentRecord,
   PtAccountRecord,
+  StudioSettingsRecord,
   TrainingType,
 } from '../types/studio';
 import {
@@ -44,8 +45,9 @@ import {
 import { RegisterPaymentModal } from './PtClientsSection';
 import { FinanceChart } from './FinanceChart';
 import { FinanceAdminTools } from './FinanceAdminTools';
+import { AppInstallGuideSubTab } from './AppInstallGuideSubTab';
 
-export type ManagementSubTab = 'finance' | 'team' | 'fidelizacao' | 'chat';
+export type ManagementSubTab = 'finance' | 'team' | 'fidelizacao' | 'chat' | 'guide';
 
 interface PtManagementSectionProps {
   uid: string;
@@ -55,9 +57,11 @@ interface PtManagementSectionProps {
   fidelizacoes: FidelizacaoRecord[];
   chatMessages: ChatMessageRecord[];
   ptAccounts: PtAccountRecord[];
+  settings: StudioSettingsRecord;
   whatsappWebMode?: boolean;
   initialSubTab?: ManagementSubTab;
   initialChatClientId?: string;
+  onOpenWhatsApp: (phone: string | null, msg: string) => void;
   onBanner: (msg: string) => void;
 }
 
@@ -69,9 +73,11 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
   fidelizacoes,
   chatMessages,
   ptAccounts,
+  settings,
   whatsappWebMode = false,
   initialSubTab = 'finance',
   initialChatClientId = '',
+  onOpenWhatsApp,
   onBanner,
 }) => {
   const safeInitial: ManagementSubTab =
@@ -108,17 +114,19 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
         },
         { id: 'fidelizacao', label: 'Fidelizações' },
         { id: 'chat', label: 'Chat' },
+        { id: 'guide', label: 'Guia App (PDF)' },
       ]
     : [
         { id: 'fidelizacao', label: 'Fidelizações' },
         { id: 'chat', label: 'Chat' },
+        { id: 'guide', label: 'Guia App (PDF)' },
       ];
 
   return (
     <div className="space-y-4">
       <div
         className={`grid gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5 ${
-          isSuperAdmin ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'
+          isSuperAdmin ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-3'
         }`}
       >
         {tabs.map((t) => (
@@ -169,6 +177,15 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           chatMessages={chatMessages}
           selectedClientId={selectedChatClientId}
           onSelectClient={setSelectedChatClientId}
+        />
+      )}
+
+      {subTab === 'guide' && (
+        <AppInstallGuideSubTab
+          uid={uid}
+          settings={settings}
+          onOpenWhatsApp={onOpenWhatsApp}
+          onBanner={onBanner}
         />
       )}
     </div>

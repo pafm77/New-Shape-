@@ -545,4 +545,252 @@ object ReportExporter {
             false
         }
     }
+
+    /**
+     * Generates a branded A4 PDF guide ("Colocar a App New Shape no Ecrã Principal — iPhone & Android")
+     * embedding the studio's direct Student Portal link and opens Android's share sheet (WhatsApp, Files, etc.).
+     */
+    fun shareHomeScreenGuidePdf(context: Context, portalUrl: String): Boolean {
+        val cleanUrl = portalUrl.trim().ifBlank { "https://newshape.vercel.app" }
+        val pageWidth = 595
+        val pageHeight = 842
+        val doc = PdfDocument()
+        val page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create())
+        val canvas = page.canvas
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#F8F8FA") }
+        val darkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#121214") }
+        val greenHeaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#142A1E") }
+        val goldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#EAB308") }
+        val goldSoftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#3D3314") }
+        val creamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FFFBEB") }
+        val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+        val greenBadgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#22C55E") }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#E4E4E7")
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+        val goldBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#EAB308")
+            style = Paint.Style.STROKE
+            strokeWidth = 1.4f
+        }
+        val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#F4F4F5")
+            strokeWidth = 1f
+        }
+
+        fun textPaint(hex: String, size: Float, bold: Boolean = false) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor(hex)
+            textSize = size
+            typeface = Typeface.create(Typeface.SANS_SERIF, if (bold) Typeface.BOLD else Typeface.NORMAL)
+        }
+
+        fun wrapLines(text: String, paint: Paint, maxWidth: Float): List<String> {
+            val words = text.split(" ")
+            val lines = mutableListOf<String>()
+            var current = ""
+            for (word in words) {
+                val candidate = if (current.isEmpty()) word else "$current $word"
+                if (paint.measureText(candidate) <= maxWidth) {
+                    current = candidate
+                } else {
+                    if (current.isNotEmpty()) lines += current
+                    current = word
+                }
+            }
+            if (current.isNotEmpty()) lines += current
+            return lines
+        }
+
+        // Background
+        canvas.drawRect(0f, 0f, pageWidth.toFloat(), pageHeight.toFloat(), bgPaint)
+
+        // Header banner
+        canvas.drawRect(0f, 0f, pageWidth.toFloat(), 126f, darkPaint)
+        canvas.drawRect(0f, 126f, pageWidth.toFloat(), 130f, goldPaint)
+
+        // Top badge
+        canvas.drawRoundRect(36f, 22f, 212f, 42f, 10f, 10f, goldSoftPaint)
+        canvas.drawText("NEW SHAPE  •  GUIA RÁPIDO", 48f, 35.5f, textPaint("#FACC15", 9.5f, bold = true))
+
+        canvas.drawText("Colocar a App no Ecrã Principal", 36f, 68f, textPaint("#FFFFFF", 22.5f, bold = true))
+        canvas.drawText(
+            "Acede aos teus treinos, agenda, nutrição e avaliações com 1 toque — no iPhone e Android.",
+            36f,
+            92f,
+            textPaint("#D4D4D8", 10.2f)
+        )
+        canvas.drawText(
+            "Sem precisar de App Store nem Play Store  •  Demora menos de 30 segundos",
+            36f,
+            110f,
+            textPaint("#FACC15", 9.5f, bold = true)
+        )
+
+        // Direct link card
+        val linkX = 36f
+        val linkY = 146f
+        val linkW = pageWidth - 72f
+        val linkH = 74f
+        canvas.drawRoundRect(linkX, linkY, linkX + linkW, linkY + linkH, 12f, 12f, creamPaint)
+        canvas.drawRoundRect(linkX, linkY, linkX + linkW, linkY + linkH, 12f, 12f, goldBorderPaint)
+
+        canvas.drawText(
+            "PASSO 0 — ABRE O LINK DIRETO DO ESTÚDIO NO TELEMÓVEL",
+            linkX + 16f,
+            linkY + 21f,
+            textPaint("#A16207", 9.5f, bold = true)
+        )
+        canvas.drawText(
+            "Abre este link no Safari (iPhone) ou no Google Chrome (Android):",
+            linkX + 16f,
+            linkY + 37f,
+            textPaint("#3F3F46", 9.5f)
+        )
+        canvas.drawRoundRect(linkX + 16f, linkY + 44f, linkX + linkW - 16f, linkY + 66f, 7f, 7f, darkPaint)
+        val displayUrl = if (cleanUrl.length > 74) cleanUrl.take(71) + "..." else cleanUrl
+        canvas.drawText(displayUrl, linkX + 26f, linkY + 58.5f, textPaint("#FACC15", 9.0f, bold = true))
+
+        // Two-column cards
+        val colGap = 16f
+        val colW = (pageWidth - 72f - colGap) / 2f
+        val leftX = 36f
+        val rightX = 36f + colW + colGap
+        val cardsY = 236f
+        val cardsH = 448f
+
+        // --- LEFT CARD: iPhone (Safari) ---
+        canvas.drawRoundRect(leftX, cardsY, leftX + colW, cardsY + cardsH, 14f, 14f, whitePaint)
+        canvas.drawRoundRect(leftX, cardsY, leftX + colW, cardsY + cardsH, 14f, 14f, borderPaint)
+        canvas.drawRoundRect(leftX, cardsY, leftX + colW, cardsY + 56f, 14f, 14f, darkPaint)
+        canvas.drawRect(leftX, cardsY + 42f, leftX + colW, cardsY + 56f, darkPaint)
+
+        // Vector Safari Share icon
+        val shareStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#EAB308")
+            style = Paint.Style.STROKE
+            strokeWidth = 1.6f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        val ix = leftX + colW - 40f
+        val iy = cardsY + 15f
+        canvas.drawLine(ix + 8f, iy + 10f, ix + 4f, iy + 10f, shareStroke)
+        canvas.drawLine(ix + 4f, iy + 10f, ix + 4f, iy + 23f, shareStroke)
+        canvas.drawLine(ix + 4f, iy + 23f, ix + 20f, iy + 23f, shareStroke)
+        canvas.drawLine(ix + 20f, iy + 23f, ix + 20f, iy + 10f, shareStroke)
+        canvas.drawLine(ix + 20f, iy + 10f, ix + 16f, iy + 10f, shareStroke)
+        canvas.drawLine(ix + 12f, iy + 16f, ix + 12f, iy + 2f, shareStroke)
+        canvas.drawLine(ix + 8f, iy + 6f, ix + 12f, iy + 2f, shareStroke)
+        canvas.drawLine(ix + 16f, iy + 6f, ix + 12f, iy + 2f, shareStroke)
+
+        canvas.drawText("iPhone (iOS)", leftX + 16f, cardsY + 26f, textPaint("#FFFFFF", 14f, bold = true))
+        canvas.drawText("Usar o navegador Safari", leftX + 16f, cardsY + 44f, textPaint("#FACC15", 9.5f, bold = true))
+
+        val iphoneSteps = listOf(
+            "Abre o link no Safari" to "Usa sempre o Safari (navegador oficial do iPhone). Se abriste pelo WhatsApp, toca na bússola em baixo à direita para abrir no Safari.",
+            "Toca no botão Partilhar" to "Na barra inferior do Safari, toca no ícone de quadrado com seta para cima (Partilhar).",
+            "Escolhe \"Adicionar ao ecrã principal\"" to "Desliza o menu para baixo até encontrares a opção \"Adicionar ao ecrã principal\" (com o símbolo +) e toca nela.",
+            "Confirma em \"Adicionar\"" to "Mantém o nome \"New Shape\" e toca em \"Adicionar\" no canto superior direito. A app fica logo no teu ecrã principal!"
+        )
+
+        val stepTitlePaint = textPaint("#18181B", 10.3f, bold = true)
+        val stepDescPaint = textPaint("#52525B", 9.1f, bold = false)
+        val badgeNumDark = textPaint("#121214", 10.5f, bold = true)
+        val badgeNumLight = textPaint("#FFFFFF", 10.5f, bold = true)
+
+        var curY = cardsY + 78f
+        iphoneSteps.forEachIndexed { idx, (title, desc) ->
+            canvas.drawCircle(leftX + 24f, curY + 2f, 11f, goldPaint)
+            canvas.drawText("${idx + 1}", leftX + 20.8f, curY + 5.8f, badgeNumDark)
+            val tLines = wrapLines(title, stepTitlePaint, colW - 56f)
+            tLines.forEachIndexed { li, line ->
+                canvas.drawText(line, leftX + 44f, curY + 5f + li * 13f, stepTitlePaint)
+            }
+            val dStart = curY + 5f + tLines.size * 13f + 3f
+            val dLines = wrapLines(desc, stepDescPaint, colW - 56f)
+            dLines.forEachIndexed { li, line ->
+                canvas.drawText(line, leftX + 44f, dStart + li * 12.2f, stepDescPaint)
+            }
+            curY = dStart + dLines.size * 12.2f + 16f
+            if (idx < iphoneSteps.lastIndex) {
+                canvas.drawLine(leftX + 16f, curY - 8f, leftX + colW - 16f, curY - 8f, dividerPaint)
+            }
+        }
+
+        // --- RIGHT CARD: Android (Chrome) ---
+        canvas.drawRoundRect(rightX, cardsY, rightX + colW, cardsY + cardsH, 14f, 14f, whitePaint)
+        canvas.drawRoundRect(rightX, cardsY, rightX + colW, cardsY + cardsH, 14f, 14f, borderPaint)
+        canvas.drawRoundRect(rightX, cardsY, rightX + colW, cardsY + 56f, 14f, 14f, greenHeaderPaint)
+        canvas.drawRect(rightX, cardsY + 42f, rightX + colW, cardsY + 56f, greenHeaderPaint)
+
+        // Vector Chrome 3 dots icon
+        val dx = rightX + colW - 26f
+        canvas.drawCircle(dx, cardsY + 20f, 2.5f, greenBadgePaint)
+        canvas.drawCircle(dx, cardsY + 28f, 2.5f, greenBadgePaint)
+        canvas.drawCircle(dx, cardsY + 36f, 2.5f, greenBadgePaint)
+
+        canvas.drawText("Android", rightX + 16f, cardsY + 26f, textPaint("#FFFFFF", 14f, bold = true))
+        canvas.drawText("Usar o Google Chrome", rightX + 16f, cardsY + 44f, textPaint("#4ADE80", 9.5f, bold = true))
+
+        val androidSteps = listOf(
+            "Abre o link no Google Chrome" to "Toca no link do estúdio acima. Se abrir dentro do WhatsApp, toca nos 3 pontinhos em cima e escolhe \"Abrir no Chrome\".",
+            "Abre o menu do Chrome (3 pontos)" to "Toca nos 3 pontinhos verticais no canto superior direito do ecrã do Chrome.",
+            "Toca em \"Instalar aplicação\" ou \"Adicionar ao ecrã principal\"" to "Seleciona \"Instalar aplicação\" (ou \"Adicionar ao ecrã principal\", consoante o modelo do telemóvel).",
+            "Confirma em \"Instalar\" / \"Adicionar\"" to "Confirma na janela que aparece. O ícone dourado da New Shape vai surgir no ecrã principal como uma app normal!"
+        )
+
+        curY = cardsY + 78f
+        androidSteps.forEachIndexed { idx, (title, desc) ->
+            canvas.drawCircle(rightX + 24f, curY + 2f, 11f, greenBadgePaint)
+            canvas.drawText("${idx + 1}", rightX + 20.8f, curY + 5.8f, badgeNumLight)
+            val tLines = wrapLines(title, stepTitlePaint, colW - 56f)
+            tLines.forEachIndexed { li, line ->
+                canvas.drawText(line, rightX + 44f, curY + 5f + li * 13f, stepTitlePaint)
+            }
+            val dStart = curY + 5f + tLines.size * 13f + 3f
+            val dLines = wrapLines(desc, stepDescPaint, colW - 56f)
+            dLines.forEachIndexed { li, line ->
+                canvas.drawText(line, rightX + 44f, dStart + li * 12.2f, stepDescPaint)
+            }
+            curY = dStart + dLines.size * 12.2f + 16f
+            if (idx < androidSteps.lastIndex) {
+                canvas.drawLine(rightX + 16f, curY - 8f, rightX + colW - 16f, curY - 8f, dividerPaint)
+            }
+        }
+
+        // Bottom Tips Box
+        val tipsY = 700f
+        val tipsH = 98f
+        canvas.drawRoundRect(36f, tipsY, pageWidth - 36f, tipsY + tipsH, 12f, 12f, darkPaint)
+        canvas.drawText("DICAS IMPORTANTES DEPOIS DE INSTALAR", 52f, tipsY + 22f, textPaint("#FACC15", 10f, bold = true))
+        val tips = listOf(
+            "• Entra apenas com o teu número de telemóvel (9 dígitos) — sem precisar de palavra-passe.",
+            "• Na 1.ª vez, aceita as notificações para receberes lembretes antes dos teus treinos confirmados.",
+            "• Em Agenda podes marcar treinos dia a dia e consultar os confirmados na subaba Marcações.",
+            "• Qualquer dúvida, fala diretamente com o teu Personal Trainer pelo Chat da App ou WhatsApp."
+        )
+        val tipPaint = textPaint("#E4E4E7", 9.0f)
+        tips.forEachIndexed { i, tip ->
+            canvas.drawText(tip, 52f, tipsY + 41f + i * 14.5f, tipPaint)
+        }
+
+        // Footer
+        canvas.drawText("New Shape Studio  •  Portal do Aluno (iPhone & Android)", 36f, 822f, textPaint("#71717A", 8.5f))
+        canvas.drawText("newshape.vercel.app", pageWidth - 128f, 822f, textPaint("#A16207", 8.5f, bold = true))
+
+        doc.finishPage(page)
+
+        val file = File(reportsDir(context), "Colocar-App-New-Shape-Ecra-Principal.pdf")
+        return try {
+            FileOutputStream(file).use { out -> doc.writeTo(out) }
+            doc.close()
+            shareFile(context, file, "application/pdf", "Guia PDF · Colocar App New Shape no Ecrã Principal")
+        } catch (_: Exception) {
+            doc.close()
+            false
+        }
+    }
 }

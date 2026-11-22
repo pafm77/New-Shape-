@@ -1245,9 +1245,14 @@ export function App() {
               fidelizacoes={fidelizacoes}
               chatMessages={chatMessages}
               ptAccounts={allPtAccounts}
+              settings={effectiveSettings}
               whatsappWebMode={effectiveSettings.whatsappWebMode}
               initialSubTab={mgmtSubTab}
               initialChatClientId={jumpClientId}
+              onOpenWhatsApp={(phone, msg) => {
+                const url = buildWhatsAppUrl(phone, msg, effectiveSettings.whatsappWebMode);
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }}
               onBanner={showBanner}
             />
           )}
