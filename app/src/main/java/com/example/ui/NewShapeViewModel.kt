@@ -552,6 +552,45 @@ class NewShapeViewModel(
         }
     }
 
+    fun acceptBookingSilently(booking: BookingRecord, clientName: String = "") {
+        viewModelScope.launch {
+            repository.confirmClientBookings(listOf(booking))
+                .onSuccess {
+                    _statusBanner.value = if (clientName.isNotBlank()) {
+                        "$clientName aceite ✓ (envia a mensagem no final quando quiseres)"
+                    } else {
+                        "Marcação aceite ✓"
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun acceptBookingsSilently(bookingsToAccept: List<BookingRecord>) {
+        if (bookingsToAccept.isEmpty()) return
+        viewModelScope.launch {
+            repository.confirmClientBookings(bookingsToAccept)
+                .onSuccess {
+                    _statusBanner.value = "${bookingsToAccept.size} marcação(ões) aceite(s) ✓"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun rejectBookingSilently(booking: BookingRecord, clientName: String = "") {
+        viewModelScope.launch {
+            repository.removeBooking(booking.id)
+                .onSuccess {
+                    _statusBanner.value = if (clientName.isNotBlank()) {
+                        "Pedido de $clientName recusado."
+                    } else {
+                        "Pedido recusado."
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     fun moveBooking(booking: BookingRecord, newSessionId: String) {
         viewModelScope.launch {
             repository.moveBookingToSession(booking, newSessionId)

@@ -32,7 +32,7 @@ fun PtHomeTab(
     onJumpToPtApprovals: () -> Unit = {}
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) }
-    val subTabs = listOf("Por confirmar", "Semanas", "Respostas", "Mensagens")
+    val subTabs = listOf("Por confirmar", "Marcações", "Semanas", "Respostas", "Mensagens")
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScrollableTabRow(
@@ -63,12 +63,13 @@ fun PtHomeTab(
             0 -> PorConfirmarSection(
                 state = state,
                 viewModel = viewModel,
-                onJumpToResponses = { selectedSubTab = 2 },
+                onJumpToResponses = { selectedSubTab = 3 },
                 onJumpToPtApprovals = onJumpToPtApprovals
             )
-            1 -> SemanasSection(state = state, viewModel = viewModel)
-            2 -> RespostasSection(state = state, viewModel = viewModel)
-            3 -> MensagensSettingsSection(state = state, viewModel = viewModel)
+            1 -> PtMarcacoesSection(state = state, viewModel = viewModel)
+            2 -> SemanasSection(state = state, viewModel = viewModel)
+            3 -> RespostasSection(state = state, viewModel = viewModel)
+            4 -> MensagensSettingsSection(state = state, viewModel = viewModel)
         }
     }
 }

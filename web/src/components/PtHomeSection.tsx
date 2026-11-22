@@ -67,6 +67,7 @@ import {
   StatusPill,
   Textarea,
 } from './UiPrimitives';
+import { PtMarcacoesView } from './PtMarcacoesView';
 
 interface PtHomeSectionProps {
   uid: string;
@@ -112,7 +113,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   onJumpToTeamApprovals,
   onBanner,
 }) => {
-  const [subTab, setSubTab] = useState<'confirm' | 'weeks' | 'responses' | 'messages'>('confirm');
+  const [subTab, setSubTab] = useState<'confirm' | 'marcacoes' | 'weeks' | 'responses' | 'messages'>('confirm');
 
   const openWa = (phone: string | null, message: string, lock: boolean) => {
     const url = buildWhatsAppUrl(phone, message, settings.whatsappWebMode);
@@ -122,13 +123,14 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Sub-navigation matching PDF: Início / Semanas / Respostas / Mensagens */}
+      {/* Sub-navigation: Por confirmar / Marcações / Semanas / Respostas / Mensagens */}
       <div className="flex gap-1.5 overflow-x-auto rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
         {[
           {
             id: 'confirm' as const,
             label: pendingQueue.length > 0 ? `Por confirmar (${pendingQueue.length})` : 'Por confirmar',
           },
+          { id: 'marcacoes' as const, label: 'Marcações' },
           { id: 'weeks' as const, label: 'Semanas' },
           { id: 'responses' as const, label: 'Respostas' },
           { id: 'messages' as const, label: 'Mensagens' },
@@ -167,6 +169,22 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
           onJumpToTeamApprovals={onJumpToTeamApprovals}
           onConfirmCard={onConfirmCard}
           onOpenWhatsApp={(phone, msg) => openWa(phone, msg, true)}
+          onBanner={onBanner}
+        />
+      )}
+
+      {subTab === 'marcacoes' && (
+        <PtMarcacoesView
+          uid={uid}
+          clients={clients}
+          activeWeek={activeWeek}
+          sessions={sessions}
+          bookings={bookings}
+          waitlistEntries={waitlistEntries}
+          templates={templates}
+          settings={settings}
+          onShiftWeek={onShiftWeek}
+          onOpenWhatsApp={(phone, msg) => openWa(phone, msg, false)}
           onBanner={onBanner}
         />
       )}

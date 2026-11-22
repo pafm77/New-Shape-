@@ -37,7 +37,11 @@ fun PtTrainingTab(
     viewModel: NewShapeViewModel
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) }
-    val subTabs = listOf("Planos de Treino", "Exercícios (${state.exercises.size})")
+    val activeClients = remember(state.clients) { state.clients.filter { it.active } }
+    var selectedClientId by remember(activeClients) {
+        mutableStateOf(activeClients.firstOrNull()?.id.orEmpty())
+    }
+    val subTabs = listOf("Planos", "Agenda", "Exercícios (${state.exercises.size})")
 
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(
@@ -54,6 +58,7 @@ fun PtTrainingTab(
                     text = {
                         Text(
                             text = title,
+                            maxLines = 1,
                             fontWeight = if (selectedSubTab == idx) FontWeight.Bold else FontWeight.Medium,
                             color = if (selectedSubTab == idx) NewShapeGold else TextSecondaryDark
                         )
@@ -62,10 +67,22 @@ fun PtTrainingTab(
             }
         }
 
-        if (selectedSubTab == 0) {
-            WorkoutPlansBuilderSection(state = state, viewModel = viewModel)
-        } else {
-            ExerciseLibrarySection(state = state, viewModel = viewModel)
+        when (selectedSubTab) {
+            0 -> WorkoutPlansBuilderSection(
+                state = state,
+                viewModel = viewModel,
+                selectedClientId = selectedClientId,
+                onSelectClient = { selectedClientId = it }
+            )
+            1 -> PtTrainingAgendaSection(
+                state = state,
+                viewModel = viewModel,
+                onOpenClientPlan = { cid ->
+                    selectedClientId = cid
+                    selectedSubTab = 0
+                }
+            )
+            else -> ExerciseLibrarySection(state = state, viewModel = viewModel)
         }
     }
 }
@@ -74,10 +91,11 @@ fun PtTrainingTab(
 @Composable
 private fun WorkoutPlansBuilderSection(
     state: StudioUiState,
-    viewModel: NewShapeViewModel
+    viewModel: NewShapeViewModel,
+    selectedClientId: String,
+    onSelectClient: (String) -> Unit
 ) {
     val activeClients = remember(state.clients) { state.clients.filter { it.active } }
-    var selectedClientId by remember(activeClients) { mutableStateOf(activeClients.firstOrNull()?.id.orEmpty()) }
     val selectedClient = activeClients.find { it.id == selectedClientId } ?: activeClients.firstOrNull()
     var clientMenuExpanded by remember { mutableStateOf(false) }
 
@@ -120,7 +138,7 @@ private fun WorkoutPlansBuilderSection(
                             DropdownMenuItem(
                                 text = { Text(client.name) },
                                 onClick = {
-                                    selectedClientId = client.id
+                                    onSelectClient(client.id)
                                     clientMenuExpanded = false
                                 }
                             )

@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Dumbbell, Plus, Search, Trash2, Users, X } from 'lucide-react';
 import {
+  BookingRecord,
   ClientRecord,
   ExerciseRecord,
+  TrainingSessionRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
@@ -21,10 +23,13 @@ import {
 } from './UiPrimitives';
 import { ExerciseLastLoadBadge } from './ExerciseLastLoadBadge';
 import { ExerciseProgressModal } from './ExerciseProgressModal';
+import { PtTrainingAgendaView } from './PtTrainingAgendaView';
 
 interface PtTrainingSectionProps {
   uid: string;
   clients: ClientRecord[];
+  sessions: TrainingSessionRecord[];
+  bookings: BookingRecord[];
   exercises: ExerciseRecord[];
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
@@ -36,6 +41,8 @@ interface PtTrainingSectionProps {
 export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   uid,
   clients,
+  sessions,
+  bookings,
   exercises,
   workoutPlans,
   workoutPlanItems,
@@ -43,7 +50,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   initialClientId,
   onBanner,
 }) => {
-  const [subTab, setSubTab] = useState<'plans' | 'library'>('plans');
+  const [subTab, setSubTab] = useState<'plans' | 'agenda' | 'library'>('plans');
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [selectedClientId, setSelectedClientId] = useState(
     initialClientId || activeClients[0]?.id || ''
@@ -70,7 +77,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
+      <div className="grid grid-cols-3 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
         <button
           type="button"
           onClick={() => setSubTab('plans')}
@@ -81,6 +88,17 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
           }`}
         >
           Planos de Treino
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('agenda')}
+          className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            subTab === 'agenda'
+              ? 'bg-[#EAB308] text-[#121214]'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          Agenda
         </button>
         <button
           type="button"
@@ -308,6 +326,18 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
             />
           )}
         </div>
+      ) : subTab === 'agenda' ? (
+        <PtTrainingAgendaView
+          uid={uid}
+          clients={clients}
+          sessions={sessions}
+          bookings={bookings}
+          onOpenClientPlan={(cid) => {
+            setSelectedClientId(cid);
+            setSubTab('plans');
+          }}
+          onBanner={onBanner}
+        />
       ) : (
         <ExerciseLibraryView uid={uid} exercises={exercises} onBanner={onBanner} />
       )}

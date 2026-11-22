@@ -1158,6 +1158,8 @@ export function App() {
             <PtTrainingSection
               uid={studioUid}
               clients={clients}
+              sessions={sessions}
+              bookings={bookings}
               exercises={exercises}
               workoutPlans={workoutPlans}
               workoutPlanItems={workoutPlanItems}
