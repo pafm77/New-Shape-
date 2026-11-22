@@ -339,7 +339,18 @@ export const AuthRoleScreen: React.FC<{
     try {
       await onRegisterNewStudent(`${f} ${l}`, clean, formatRgpdConsentStamp());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao registar aluno.');
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      const rawMsg = err instanceof Error ? err.message : '';
+      if (code === 'permission-denied' || /permission/i.test(rawMsg)) {
+        setError(
+          'Sem permissão para criar o registo com este link. Recarrega a página ou pede ao teu Personal Trainer o link semanal atualizado.'
+        );
+      } else {
+        setError(rawMsg || 'Erro ao registar aluno.');
+      }
     } finally {
       setSubmitting(false);
     }

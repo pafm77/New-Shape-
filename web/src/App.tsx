@@ -462,7 +462,7 @@ export function App() {
         onError: (err) => showBanner(err.message),
       },
       {
-        includePayments: isExternalStudentPortal || isSuperAdmin,
+        includePayments: (isExternalStudentPortal && !isStudioOwner) || isSuperAdmin,
         includePtNotifications: isStudioOwner,
         includeTemplates: isStudioOwner,
       }
@@ -828,12 +828,45 @@ export function App() {
           }
         }}
         onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote) => {
-          const newId = await repo.addClient(studioUid, {
-            name: fullName,
-            phone: cleanPhone,
-            notes: rgpdConsentNote,
-            newClient: true,
-          });
+          let newId: string;
+          try {
+            newId = await repo.addClient(studioUid, {
+              name: fullName,
+              phone: cleanPhone,
+              notes: rgpdConsentNote,
+              newClient: true,
+            });
+          } catch (err) {
+            const errCode =
+              typeof err === 'object' && err !== null && 'code' in err
+                ? String((err as { code?: unknown }).code)
+                : '';
+            const isPermErr =
+              errCode === 'permission-denied' ||
+              (err instanceof Error && /permission/i.test(err.message));
+            const currentUser = auth.currentUser;
+            if (
+              isPermErr &&
+              currentUser &&
+              pathInfo.portalPtUid &&
+              pathInfo.portalCode &&
+              currentUser.uid !== pathInfo.portalPtUid
+            ) {
+              await repo.joinStudioPortal(
+                pathInfo.portalPtUid,
+                pathInfo.portalCode,
+                currentUser.uid
+              );
+              newId = await repo.addClient(studioUid, {
+                name: fullName,
+                phone: cleanPhone,
+                notes: rgpdConsentNote,
+                newClient: true,
+              });
+            } else {
+              throw err;
+            }
+          }
           localStorage.setItem('newshape_student_id', newId);
           setStudentId(newId);
           setRole('STUDENT');

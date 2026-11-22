@@ -508,7 +508,7 @@ test("Student portal link access: requires valid studentPortalCode and enforces 
     })
   );
 
-  // Student can register self, book as PENDING, log nutrition/assessment/chat
+  // Student can register self (minimal 8-field payload and full 13-field Web/Android payload), book as PENDING, log nutrition/assessment/chat
   await assertSucceeds(
     studentDb.collection(`users/${ALICE_UID}/clients`).doc("c_student").set({
       userId: ALICE_UID,
@@ -517,6 +517,23 @@ test("Student portal link access: requires valid studentPortalCode and enforces 
       notes: "RGPD aceite",
       active: true,
       newClient: true,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/clients`).doc("c_student_full").set({
+      userId: ALICE_UID,
+      name: "Rita Gonçalves",
+      phone: "964190778",
+      notes: "RGPD aceite em 22/11/2026 às 11:10",
+      active: true,
+      newClient: true,
+      monthlyFeeEur: 0,
+      fidelizacaoMonths: 0,
+      fidelizacaoStartMillis: 0,
+      trainingType: "GRUPO",
+      weeklySessionLimit: 0,
       createdAt: created,
       updatedAt: created,
     })

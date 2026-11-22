@@ -1,10 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bell,
   Calendar,
   Check,
-  ChevronLeft,
-  ChevronRight,
   Clock,
   CreditCard,
   Dumbbell,
@@ -45,22 +42,18 @@ import {
 import {
   buildRecentMonthOptions,
   buildWhatsAppUrl,
-  formatCutoffLabel,
   formatShortDate,
-  getEffectiveCutoffMinutes,
   getEffectiveReminderLeadMinutes,
   MEAL_TYPES,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
 import {
   dispatchLocalPushNotification,
-  formatLeadMinutesLabel,
   getNotificationPermission,
   getReminderPreferences,
-  requestNotificationPermission,
-  saveReminderPreferences,
   scheduleConfirmedWorkoutReminders,
 } from '../services/notificationService';
+import { StudentAgendaSection } from './StudentAgendaSection';
 import { NewShapeLogo } from './NewShapeLogo';
 import {
   ExerciseLastLoadBadge,
@@ -484,523 +477,35 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
         <main className="mx-auto max-w-5xl px-4 py-5 space-y-4">
           {tab === 'agenda' && (
-            <div className="space-y-4">
-              {publishedWeeks.length === 0 ? (
-                <EmptyState
-                  icon={<Calendar className="h-6 w-6" />}
-                  title="Sem semanas publicadas"
-                  subtitle="O teu Personal Trainer ainda não publicou os horários da próxima semana."
-                />
-              ) : (
-                <>
-                  <BrandCard>
-                    <div className="flex items-center justify-between">
-                      <button
-                        type="button"
-                        disabled={activeWeekIdx <= 0}
-                        onClick={() => {
-                          const prev = publishedWeeks[activeWeekIdx - 1];
-                          if (prev) setSelectedWeekKey(prev.weekKey);
-                        }}
-                        aria-label="Semana anterior"
-                        className="rounded-xl p-2 text-[#EAB308] hover:bg-[#242429] disabled:opacity-30"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
-                      <div className="text-center">
-                        <p className="text-xs font-semibold text-[#EAB308]">
-                          Escolhe os teus treinos
-                        </p>
-                        <h2 className="text-lg font-bold text-[#F4F4F5]">
-                          Semana {activeWeek?.label}
-                        </h2>
-                        {weeklyLimit > 0 && (
-                          <div className="mt-1.5 flex justify-center">
-                            <StatusPill
-                              tone={draftSessionIds.size >= weeklyLimit ? 'amber' : 'gold'}
-                            >
-                              Pacote: {draftSessionIds.size} / {weeklyLimit} treinos esta semana
-                            </StatusPill>
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        disabled={activeWeekIdx >= publishedWeeks.length - 1}
-                        onClick={() => {
-                          const next = publishedWeeks[activeWeekIdx + 1];
-                          if (next) setSelectedWeekKey(next.weekKey);
-                        }}
-                        aria-label="Semana seguinte"
-                        className="rounded-xl p-2 text-[#EAB308] hover:bg-[#242429] disabled:opacity-30"
-                      >
-                        <ChevronRight className="h-5 w-5" />
-                      </button>
-                    </div>
-                  </BrandCard>
-
-                  {/* Training Reminder Push Notification Card */}
-                  <BrandCard>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Bell className="h-4 w-4 text-[#EAB308]" />
-                        <div>
-                          <p className="text-xs sm:text-sm font-bold text-[#F4F4F5]">
-                            Lembretes de Treino (Notificações Push)
-                          </p>
-                          <p className="text-[11px] text-[#A1A1AA]">
-                            Recebe um aviso antes de cada treino confirmado.
-                          </p>
-                        </div>
-                      </div>
-                      {notifPerm === 'granted' && reminderEnabled ? (
-                        <StatusPill tone="green">
-                          Ativo · {formatLeadMinutesLabel(reminderLeadMins)} antes
-                        </StatusPill>
-                      ) : (
-                        <StatusPill tone="neutral">Desativado</StatusPill>
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {notifPerm !== 'granted' ? (
-                        <GoldButton
-                          onClick={async () => {
-                            const res = await requestNotificationPermission();
-                            setNotifPerm(res);
-                            if (res === 'granted') {
-                              setReminderEnabled(true);
-                              saveReminderPreferences(
-                                true,
-                                hasCustomLead ? reminderLeadMins : null
-                              );
-                              onBanner('Lembretes de treino ativados!');
-                            } else {
-                              onBanner('Autoriza as notificações nas definições do browser.');
-                            }
-                          }}
-                        >
-                          <Bell className="h-4 w-4" />
-                          {notifPerm === 'unsupported'
-                            ? 'Indisponível neste browser'
-                            : 'Ativar lembretes push'}
-                        </GoldButton>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const next = !reminderEnabled;
-                              setReminderEnabled(next);
-                              saveReminderPreferences(
-                                next,
-                                hasCustomLead ? reminderLeadMins : null
-                              );
-                              onBanner(
-                                next
-                                  ? 'Lembretes de treino ativados!'
-                                  : 'Lembretes de treino desativados.'
-                              );
-                            }}
-                            className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
-                              reminderEnabled
-                                ? 'border-[#22C55E] bg-[#143521] text-[#86EFAC]'
-                                : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
-                            }`}
-                          >
-                            {reminderEnabled ? 'Lembretes ligados ✓' : 'Ligar lembretes'}
-                          </button>
-
-                          {Array.from(new Set([studioDefaultLeadMins, 15, 30, 60, 120]))
-                            .sort((a, b) => a - b)
-                            .map((mins) => {
-                              const isStudioDefault = mins === studioDefaultLeadMins;
-                              return (
-                                <button
-                                  key={mins}
-                                  type="button"
-                                  onClick={() => {
-                                    setReminderLeadMins(mins);
-                                    setReminderEnabled(true);
-                                    if (isStudioDefault) {
-                                      setHasCustomLead(false);
-                                      saveReminderPreferences(true, null);
-                                    } else {
-                                      setHasCustomLead(true);
-                                      saveReminderPreferences(true, mins);
-                                    }
-                                    onBanner(
-                                      `Lembrete definido para ${formatLeadMinutesLabel(mins)} antes do treino.`
-                                    );
-                                  }}
-                                  className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
-                                    reminderLeadMins === mins && reminderEnabled
-                                      ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
-                                      : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
-                                  }`}
-                                >
-                                  {formatLeadMinutesLabel(mins)}
-                                  {isStudioDefault ? ' (PT)' : ''}
-                                </button>
-                              );
-                            })}
-
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              await dispatchLocalPushNotification(
-                                'Lembrete de Treino · New Shape',
-                                `Olá ${firstName}! Os teus lembretes push estão ativos (${formatLeadMinutesLabel(reminderLeadMins)} antes do treino) 💪`
-                              );
-                              onBanner('Notificação de teste enviada!');
-                            }}
-                            className="rounded-lg border border-[#323238] bg-[#242429] px-2.5 py-1 text-xs font-semibold text-[#FACC15] hover:border-[#EAB308]"
-                          >
-                            Testar
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </BrandCard>
-
-                  {weekResponse?.status === 'UNAVAILABLE' && (
-                    <div className="rounded-2xl border border-[#F59E0B]/50 bg-[#3B2A10] p-4 text-sm text-[#FDE68A]">
-                      Marcaste que <strong>não podes treinar</strong> esta semana. Se mudares de
-                      ideia, seleciona os horários abaixo.
-                    </div>
-                  )}
-
-                  {clientWeekBookings.length > 0 && (
-                    <div
-                      className={`rounded-2xl border p-4 text-sm ${
-                        clientWeekBookings.some(
-                          (b) => b.status === 'PENDING' || b.status === 'ALTERED'
-                        )
-                          ? 'border-[#EAB308] bg-[#3D3314] text-[#FACC15]'
-                          : 'border-[#22C55E]/50 bg-[#143521] text-[#86EFAC]'
-                      }`}
-                    >
-                      {clientWeekBookings.some(
-                        (b) => b.status === 'PENDING' || b.status === 'ALTERED'
-                      )
-                        ? 'Pedido recebido! 🙌 O teu PT vai confirmar no WhatsApp em breve.'
-                        : 'Treinos confirmados ✓ — Até já no estúdio!'}
-                    </div>
-                  )}
-
-                  {activeWeek && (
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                      {sessions
-                        .filter((s) => s.weekKey === activeWeek.weekKey)
-                        .sort((a, b) => a.startMillis - b.startMillis)
-                        .map((s) => {
-                          // Apenas marcações confirmadas pelo PT preenchem vaga
-                          const confirmedCount = bookings.filter(
-                            (b) => b.sessionId === s.id && b.status === 'CONFIRMED'
-                          ).length;
-                          const isFull = confirmedCount >= s.capacity;
-                          const isMine = draftSessionIds.has(s.id);
-                          const existingForSession = clientWeekBookings.find(
-                            (b) => b.sessionId === s.id
-                          );
-                          const alreadyBooked = Boolean(existingForSession);
-                          const cutoffMinutes = getEffectiveCutoffMinutes(settings);
-                          const cutoffMs = cutoffMinutes * 60_000;
-                          const isCutoffLocked =
-                            cutoffMs > 0 &&
-                            s.startMillis > 0 &&
-                            Date.now() > s.startMillis - cutoffMs;
-                          const editLocked = !settings.clientsCanEdit || isCutoffLocked;
-                          const fullAndNotMine = isFull && !alreadyBooked;
-                          const sessionWaitlist = waitlistEntries
-                            .filter((w) => w.sessionId === s.id)
-                            .sort((a, b) => a.createdAtMillis - b.createdAtMillis);
-                          const myWaitlistIdx = sessionWaitlist.findIndex(
-                            (w) => w.clientId === client.id
-                          );
-                          const myWaitlistEntry =
-                            myWaitlistIdx >= 0 ? sessionWaitlist[myWaitlistIdx] : null;
-
-                          const pillTone = existingForSession
-                            ? existingForSession.status === 'CONFIRMED'
-                              ? 'green'
-                              : 'amber'
-                            : myWaitlistEntry
-                            ? 'amber'
-                            : isFull
-                            ? 'red'
-                            : isMine
-                            ? 'gold'
-                            : 'green';
-
-                          const pillLabel = existingForSession
-                            ? existingForSession.status === 'CONFIRMED'
-                              ? 'Confirmado'
-                              : 'Por confirmar'
-                            : myWaitlistEntry
-                            ? `Espera #${myWaitlistIdx + 1}`
-                            : isFull
-                            ? 'Esgotado'
-                            : 'Disponível';
-
-                          return (
-                            <div
-                              key={s.id}
-                              className={`flex flex-col justify-between rounded-2xl border p-4 text-left transition ${
-                                isMine
-                                  ? 'border-[#EAB308] bg-[#3D3314]/70'
-                                  : myWaitlistEntry
-                                  ? 'border-[#F59E0B]/60 bg-[#3B2A10]/40'
-                                  : 'border-[#323238] bg-[#1B1B1E] hover:border-[#EAB308]/50'
-                              }`}
-                            >
-                              <button
-                                type="button"
-                                disabled={editLocked || fullAndNotMine}
-                                onClick={() => {
-                                  if (
-                                    !isMine &&
-                                    weeklyLimit > 0 &&
-                                    draftSessionIds.size >= weeklyLimit
-                                  ) {
-                                    onBanner(
-                                      `Atingiste o limite semanal do teu pacote (${weeklyLimit} treino(s)/semana). Retira um horário ou fala com o teu PT.`
-                                    );
-                                    return;
-                                  }
-                                  setDraftSessionIds((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(s.id)) next.delete(s.id);
-                                    else next.add(s.id);
-                                    return next;
-                                  });
-                                }}
-                                className="w-full text-left disabled:cursor-not-allowed disabled:opacity-65"
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div>
-                                    <p className="text-xs font-semibold text-[#EAB308]">
-                                      {s.dateLabel}
-                                    </p>
-                                    <p className="mt-0.5 text-lg font-extrabold text-[#F4F4F5]">
-                                      {s.timeLabel} · {s.durationMinutes} min
-                                    </p>
-                                    {s.note && (
-                                      <p className="mt-0.5 text-xs text-[#A1A1AA]">{s.note}</p>
-                                    )}
-                                  </div>
-                                  <div className="flex flex-col items-end gap-1.5">
-                                    <StatusPill tone={pillTone}>{pillLabel}</StatusPill>
-                                    {isMine && (
-                                      <span className="inline-flex items-center gap-1 text-xs font-bold text-[#FACC15]">
-                                        <Check className="h-3.5 w-3.5" />
-                                        Selecionado
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                {isCutoffLocked && (
-                                  <p className="mt-2 text-[11px] text-[#F59E0B]">
-                                    Prazo de alteração ({formatCutoffLabel(cutoffMinutes)} antes) encerrado
-                                  </p>
-                                )}
-                              </button>
-
-                              {fullAndNotMine && !editLocked && (
-                                <div className="mt-3 border-t border-[#323238]/70 pt-2.5 flex items-center justify-between gap-2">
-                                  <span className="text-[11px] text-[#A1A1AA]">
-                                    {myWaitlistEntry
-                                      ? `Estás em #${myWaitlistIdx + 1} na lista de espera`
-                                      : sessionWaitlist.length > 0
-                                      ? `${sessionWaitlist.length} em lista de espera`
-                                      : 'Turma completa'}
-                                  </span>
-                                  {myWaitlistEntry ? (
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        await repo.leaveWaitlist(uid, myWaitlistEntry.id);
-                                        onBanner('Saíste da lista de espera.');
-                                      }}
-                                      className="rounded-lg border border-[#EF4444]/60 bg-[#3B1518] px-2.5 py-1 text-xs font-bold text-[#FCA5A5] hover:bg-[#4B1A1E]"
-                                    >
-                                      Sair da espera
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        await repo.joinWaitlist(
-                                          uid,
-                                          s.id,
-                                          activeWeek.weekKey,
-                                          client.id
-                                        );
-                                        onBanner('Entraste na lista de espera! O PT será avisado se abrir vaga.');
-                                      }}
-                                      className="rounded-lg border border-[#EAB308]/60 bg-[#3D3314] px-2.5 py-1 text-xs font-bold text-[#FACC15] hover:bg-[#4D4019]"
-                                    >
-                                      Entrar na lista de espera
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-
-                  {activeWeek && (
-                    <div className="flex flex-col sm:flex-row gap-2 pt-1">
-                      <GoldButton
-                        fullWidth
-                        disabled={!settings.clientsCanEdit}
-                        onClick={async () => {
-                          if (weeklyLimit > 0 && draftSessionIds.size > weeklyLimit) {
-                            onBanner(
-                              `O teu pacote permite até ${weeklyLimit} treino(s) por semana.`
-                            );
-                            return;
-                          }
-                          const sessionMap = new Map(sessions.map((s) => [s.id, s]));
-                          const prevIds = new Set(clientWeekBookings.map((b) => b.sessionId));
-                          const removedIds = Array.from(prevIds).filter(
-                            (id) => !draftSessionIds.has(id)
-                          );
-                          const addedIds = Array.from(draftSessionIds).filter(
-                            (id) => !prevIds.has(id)
-                          );
-                          const hadExisting = clientWeekBookings.length > 0;
-                          const hasScheduleChange =
-                            hadExisting && (removedIds.length > 0 || addedIds.length > 0);
-                          const isFullCancel = hadExisting && draftSessionIds.size === 0;
-
-                          await repo.submitStudentBookings(
-                            uid,
-                            activeWeek.weekKey,
-                            client.id,
-                            draftSessionIds,
-                            clientWeekBookings
-                          );
-
-                          if (isFullCancel || hasScheduleChange) {
-                            const fmtSessions = (ids: string[]) =>
-                              ids
-                                .map((id) => sessionMap.get(id))
-                                .filter((s): s is TrainingSessionRecord => Boolean(s))
-                                .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
-                                .join(', ');
-
-                            const removedTxt = fmtSessions(removedIds);
-                            const nextTxt = fmtSessions(Array.from(draftSessionIds));
-
-                            const notifType = isFullCancel ? 'CANCELLED' : 'ALTERED';
-                            const summary = isFullCancel
-                              ? `${client.name} cancelou o(s) treino(s) da semana ${activeWeek.label}${
-                                  removedTxt ? ` (${removedTxt})` : ''
-                                }.`
-                              : `${client.name} alterou o horário na semana ${activeWeek.label}.${
-                                  removedTxt ? ` Retirou: ${removedTxt}.` : ''
-                                }${nextTxt ? ` Novo horário: ${nextTxt}.` : ''}`;
-
-                            await repo
-                              .createPtNotification(uid, {
-                                clientId: client.id,
-                                clientName: client.name,
-                                type: notifType,
-                                summary,
-                                weekKey: activeWeek.weekKey,
-                              })
-                              .catch(() => {});
-
-                            const waMsg = isFullCancel
-                              ? `Olá! Sou ${client.name} (New Shape). Tive de cancelar o meu treino da semana ${activeWeek.label}${
-                                  removedTxt ? ` (${removedTxt})` : ''
-                                }. Já atualizei na app!`
-                              : `Olá! Sou ${client.name} (New Shape). Modifiquei o meu horário de treino da semana ${activeWeek.label}.${
-                                  removedTxt ? `\n• Retirado: ${removedTxt}` : ''
-                                }${nextTxt ? `\n• Novo horário: ${nextTxt}` : ''}\nJá atualizei na app!`;
-
-                            setWhatsAppAlertModal({
-                              title: isFullCancel
-                                ? 'Treino cancelado — Avisa o PT no WhatsApp'
-                                : 'Horário modificado — Avisa o PT no WhatsApp',
-                              subtitle:
-                                'O teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
-                              message: waMsg,
-                            });
-                          }
-
-                          onBanner(
-                            isFullCancel
-                              ? 'Treino cancelado e PT notificado!'
-                              : hasScheduleChange
-                              ? 'Alteração de horário enviada e PT notificado!'
-                              : 'Marcação enviada ao Personal Trainer!'
-                          );
-                        }}
-                      >
-                        <Check className="h-4 w-4" />
-                        {clientWeekBookings.length > 0
-                          ? `Guardar alterações (${draftSessionIds.size})`
-                          : `Marcar treinos (${draftSessionIds.size})`}
-                      </GoldButton>
-
-                      <SecondaryButton
-                        fullWidth
-                        disabled={!settings.clientsCanEdit}
-                        onClick={async () => {
-                          const sessionMap = new Map(sessions.map((s) => [s.id, s]));
-                          const hadExisting = clientWeekBookings.length > 0;
-                          const prevSessionsTxt = clientWeekBookings
-                            .map((b) => sessionMap.get(b.sessionId))
-                            .filter((s): s is TrainingSessionRecord => Boolean(s))
-                            .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
-                            .join(', ');
-
-                          await repo.markStudentUnavailable(
-                            uid,
-                            activeWeek.weekKey,
-                            client.id,
-                            clientWeekBookings
-                          );
-                          setDraftSessionIds(new Set());
-
-                          if (hadExisting) {
-                            const summary = `${client.name} cancelou os treinos e marcou indisponibilidade na semana ${activeWeek.label}${
-                              prevSessionsTxt ? ` (${prevSessionsTxt})` : ''
-                            }.`;
-                            await repo
-                              .createPtNotification(uid, {
-                                clientId: client.id,
-                                clientName: client.name,
-                                type: 'UNAVAILABLE',
-                                summary,
-                                weekKey: activeWeek.weekKey,
-                              })
-                              .catch(() => {});
-
-                            setWhatsAppAlertModal({
-                              title: 'Treinos cancelados — Avisa o PT no WhatsApp',
-                              subtitle:
-                                'O teu PT foi notificado na app de que não podes treinar esta semana. Envia-lhe a mensagem pelo WhatsApp.',
-                              message: `Olá! Sou ${client.name} (New Shape). Esta semana (${activeWeek.label}) não vou conseguir treinar e cancelei a minha marcação${
-                                prevSessionsTxt ? ` (${prevSessionsTxt})` : ''
-                              } na app.`,
-                            });
-                          }
-
-                          onBanner('Registado: indisponível esta semana.');
-                        }}
-                      >
-                        Esta semana não posso
-                      </SecondaryButton>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+            <StudentAgendaSection
+              uid={uid}
+              client={client}
+              firstName={firstName}
+              publishedWeeks={publishedWeeks}
+              activeWeek={activeWeek}
+              activeWeekIdx={activeWeekIdx}
+              onSelectWeekKey={setSelectedWeekKey}
+              sessions={sessions}
+              bookings={bookings}
+              clientWeekBookings={clientWeekBookings}
+              draftSessionIds={draftSessionIds}
+              setDraftSessionIds={setDraftSessionIds}
+              waitlistEntries={waitlistEntries}
+              weekResponse={weekResponse}
+              settings={settings}
+              weeklyLimit={weeklyLimit}
+              studioDefaultLeadMins={studioDefaultLeadMins}
+              notifPerm={notifPerm}
+              setNotifPerm={setNotifPerm}
+              reminderEnabled={reminderEnabled}
+              setReminderEnabled={setReminderEnabled}
+              hasCustomLead={hasCustomLead}
+              setHasCustomLead={setHasCustomLead}
+              reminderLeadMins={reminderLeadMins}
+              setReminderLeadMins={setReminderLeadMins}
+              onBanner={onBanner}
+              onWhatsAppAlert={setWhatsAppAlertModal}
+            />
           )}
 
           {tab === 'treino' && (

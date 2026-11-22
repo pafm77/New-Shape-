@@ -1123,24 +1123,39 @@ export async function addClient(
   }
 ): Promise<string> {
   const ref = doc(subcol(uid, 'clients'));
-  const fidMonths = payload.fidelizacaoMonths === 6 || payload.fidelizacaoMonths === 12 ? payload.fidelizacaoMonths : 0;
-  const trainingType: TrainingType = payload.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
-  const weeklySessionLimit = Math.max(0, Math.min(21, Math.round(payload.weeklySessionLimit ?? 0)));
-  await setDoc(ref, {
+  const docData: Record<string, unknown> = {
     userId: uid,
     name: payload.name.trim().slice(0, 100),
     phone: normalizePortuguesePhone(payload.phone),
     notes: payload.notes.trim().slice(0, 500),
     active: true,
     newClient: Boolean(payload.newClient ?? false),
-    monthlyFeeEur: Math.max(0, Math.min(100000, payload.monthlyFeeEur ?? 0)),
-    fidelizacaoMonths: fidMonths,
-    fidelizacaoStartMillis: Math.max(0, Math.round(payload.fidelizacaoStartMillis ?? 0)),
-    trainingType,
-    weeklySessionLimit,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (payload.monthlyFeeEur !== undefined) {
+    docData.monthlyFeeEur = Math.max(0, Math.min(100000, payload.monthlyFeeEur));
+  }
+  if (payload.fidelizacaoMonths !== undefined) {
+    docData.fidelizacaoMonths =
+      payload.fidelizacaoMonths === 6 || payload.fidelizacaoMonths === 12
+        ? payload.fidelizacaoMonths
+        : 0;
+  }
+  if (payload.fidelizacaoStartMillis !== undefined) {
+    docData.fidelizacaoStartMillis = Math.max(0, Math.round(payload.fidelizacaoStartMillis));
+  }
+  if (payload.trainingType !== undefined) {
+    docData.trainingType =
+      payload.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
+  }
+  if (payload.weeklySessionLimit !== undefined) {
+    docData.weeklySessionLimit = Math.max(
+      0,
+      Math.min(21, Math.round(payload.weeklySessionLimit))
+    );
+  }
+  await setDoc(ref, docData);
   return ref.id;
 }
 
