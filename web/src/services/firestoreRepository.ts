@@ -1616,6 +1616,18 @@ export async function markClientReminded(
 }
 
 // --- Payments & Fidelizações ---
+function computeFidelizacaoStartMillisForMonth(monthYear: string, fallbackMillis: number): number {
+  const nowDate = new Date(fallbackMillis);
+  const currentMonthKey = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}`;
+  if (!monthYear || monthYear === currentMonthKey) {
+    return Math.round(fallbackMillis);
+  }
+  const [yStr, mStr] = monthYear.split('-');
+  const y = Number(yStr) || nowDate.getFullYear();
+  const mIdx = Math.max(0, Math.min(11, (Number(mStr) || nowDate.getMonth() + 1) - 1));
+  return new Date(y, mIdx, 1, 9, 0, 0, 0).getTime();
+}
+
 export async function recordPayment(
   uid: string,
   clientId: string,
@@ -1623,39 +1635,116 @@ export async function recordPayment(
   monthLabel: string,
   amountEur: number,
   note: string,
-  durationMonths: 1 | 6 | 12 = 1
+  durationMonths: 1 | 6 | 12 = 1,
+  extras?: {
+    seguroEur?: number;
+    joiaEur?: number;
+    skipAutoFidelizacao?: boolean;
+  }
 ): Promise<void> {
   const validMethod = normalizePaymentMethod(note) || 'MbWay';
   const monthsCount: 1 | 6 | 12 = durationMonths === 6 || durationMonths === 12 ? durationMonths : 1;
-  const totalClamped = Math.max(0, Math.min(100000, amountEur));
-  const perMonthAmounts = splitAmountAcrossMonths(totalClamped, monthsCount);
-  const targetMonths =
-    monthsCount === 1
-      ? [{ monthYear, monthLabel }]
-      : buildConsecutiveMonths(monthYear, monthsCount);
+  const totalClamped = Math.max(0, Math.min(100000, Number.isFinite(amountEur) ? amountEur : 0));
+  const seguroClamped = Math.max(0, Math.min(100000, Number.isFinite(extras?.seguroEur) ? Number(extras?.seguroEur) : 0));
+  const joiaClamped = Math.max(0, Math.min(100000, Number.isFinite(extras?.joiaEur) ? Number(extras?.joiaEur) : 0));
+
+  if (totalClamped <= 0 && seguroClamped <= 0 && joiaClamped <= 0) return;
+
   const now = Date.now();
   const batch = writeBatch(db);
 
-  targetMonths.forEach((m, idx) => {
-    const installmentNote =
-      monthsCount > 1
-        ? `${validMethod} · Fidelização ${monthsCount}m (${idx + 1}/${monthsCount} · total €${totalClamped.toFixed(2)})`.slice(0, 200)
-        : validMethod;
+  if (totalClamped > 0) {
+    const perMonthAmounts = splitAmountAcrossMonths(totalClamped, monthsCount);
+    const targetMonths =
+      monthsCount === 1
+        ? [{ monthYear, monthLabel }]
+        : buildConsecutiveMonths(monthYear, monthsCount);
+
+    targetMonths.forEach((m, idx) => {
+      const installmentNote =
+        monthsCount > 1
+          ? `${validMethod} · Fidelização ${monthsCount}m (${idx + 1}/${monthsCount} · total €${totalClamped.toFixed(2)})`.slice(0, 200)
+          : validMethod;
+      batch.set(doc(subcol(uid, 'payments')), {
+        userId: uid,
+        clientId,
+        monthYear: m.monthYear,
+        monthLabel: m.monthLabel,
+        amountEur: perMonthAmounts[idx] ?? Number((totalClamped / monthsCount).toFixed(2)),
+        paid: true,
+        paidAtMillis: now,
+        note: installmentNote,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    // Automatically register the 6/12-month contract in Fidelizações
+    if (monthsCount > 1 && !extras?.skipAutoFidelizacao) {
+      const fidStartMillis = computeFidelizacaoStartMillisForMonth(monthYear, now);
+      const endDate = new Date(fidStartMillis);
+      endDate.setMonth(endDate.getMonth() + monthsCount);
+      const fidEndMillis = endDate.getTime();
+      const perMonth = totalClamped / monthsCount;
+      const fidNotes = `Fidelização ${monthsCount}m · Pago €${totalClamped.toFixed(2)} (€${perMonth.toFixed(2)}/mês · ${validMethod})`.slice(0, 300);
+
+      batch.set(doc(subcol(uid, 'fidelizacoes')), {
+        userId: uid,
+        clientId,
+        durationMonths: monthsCount,
+        startDateMillis: Math.round(fidStartMillis),
+        endDateMillis: Math.round(fidEndMillis),
+        notes: fidNotes,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  if (seguroClamped > 0) {
     batch.set(doc(subcol(uid, 'payments')), {
       userId: uid,
       clientId,
-      monthYear: m.monthYear,
-      monthLabel: m.monthLabel,
-      amountEur: perMonthAmounts[idx] ?? Number((totalClamped / monthsCount).toFixed(2)),
+      monthYear,
+      monthLabel,
+      amountEur: Number(seguroClamped.toFixed(2)),
       paid: true,
       paidAtMillis: now,
-      note: installmentNote,
+      note: `${validMethod} · Seguro`.slice(0, 200),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-  });
+  }
+
+  if (joiaClamped > 0) {
+    batch.set(doc(subcol(uid, 'payments')), {
+      userId: uid,
+      clientId,
+      monthYear,
+      monthLabel,
+      amountEur: Number(joiaClamped.toFixed(2)),
+      paid: true,
+      paidAtMillis: now,
+      note: `${validMethod} · Jóia de Inscrição`.slice(0, 200),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
 
   await batch.commit();
+
+  if (totalClamped > 0 && monthsCount > 1 && !extras?.skipAutoFidelizacao) {
+    const fidStartMillis = computeFidelizacaoStartMillisForMonth(monthYear, now);
+    try {
+      await updateDoc(doc(subcol(uid, 'clients'), clientId), {
+        fidelizacaoMonths: monthsCount,
+        fidelizacaoStartMillis: Math.round(fidStartMillis),
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      // Ignore if client document is missing
+    }
+  }
 }
 
 export async function splitPaymentIntoFidelizacao(
@@ -1668,6 +1757,13 @@ export async function splitPaymentIntoFidelizacao(
   const perMonthAmounts = splitAmountAcrossMonths(totalClamped, durationMonths);
   const targetMonths = buildConsecutiveMonths(payment.monthYear, durationMonths);
   const paidAt = payment.paidAtMillis > 0 ? Math.round(payment.paidAtMillis) : Date.now();
+  const fidStartMillis = computeFidelizacaoStartMillisForMonth(payment.monthYear, paidAt);
+  const endDate = new Date(fidStartMillis);
+  endDate.setMonth(endDate.getMonth() + durationMonths);
+  const fidEndMillis = endDate.getTime();
+  const perMonth = totalClamped / durationMonths;
+  const fidNotes = `Fidelização ${durationMonths}m · Pago €${totalClamped.toFixed(2)} (€${perMonth.toFixed(2)}/mês · ${validMethod})`.slice(0, 300);
+
   const batch = writeBatch(db);
 
   batch.delete(doc(subcol(uid, 'payments'), payment.id));
@@ -1688,7 +1784,28 @@ export async function splitPaymentIntoFidelizacao(
     });
   });
 
+  batch.set(doc(subcol(uid, 'fidelizacoes')), {
+    userId: uid,
+    clientId: payment.clientId,
+    durationMonths,
+    startDateMillis: Math.round(fidStartMillis),
+    endDateMillis: Math.round(fidEndMillis),
+    notes: fidNotes,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
   await batch.commit();
+
+  try {
+    await updateDoc(doc(subcol(uid, 'clients'), payment.clientId), {
+      fidelizacaoMonths: durationMonths,
+      fidelizacaoStartMillis: Math.round(fidStartMillis),
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Ignore if client document is missing
+  }
 }
 
 export async function deletePayment(uid: string, paymentId: string): Promise<void> {
@@ -1701,12 +1818,16 @@ export async function saveFidelizacao(
   durationMonths: 6 | 12,
   startDateMillis: number,
   notes: string,
-  existingId?: string
+  existingId?: string,
+  customEndDateMillis?: number
 ): Promise<void> {
   const start = new Date(startDateMillis);
-  const end = new Date(start);
-  end.setMonth(end.getMonth() + durationMonths);
-  const endDateMillis = end.getTime();
+  const autoEnd = new Date(start);
+  autoEnd.setMonth(autoEnd.getMonth() + durationMonths);
+  const endDateMillis =
+    customEndDateMillis && customEndDateMillis > startDateMillis
+      ? customEndDateMillis
+      : autoEnd.getTime();
 
   if (existingId) {
     await updateDoc(doc(subcol(uid, 'fidelizacoes'), existingId), {

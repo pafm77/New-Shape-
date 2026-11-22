@@ -30,6 +30,7 @@ import {
 } from '../types/studio';
 import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 import {
+  DEFAULT_JOIA_EUR,
   PAYMENT_METHODS,
   PaymentMethod,
   buildConsecutiveMonths,
@@ -38,6 +39,8 @@ import {
   formatRgpdConsentStamp,
   formatShortDate,
   getEffectiveClientFidelizacaoMonths,
+  getPaymentCategory,
+  isExtraFeePayment,
   splitAmountAcrossMonths,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
@@ -216,7 +219,11 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {filtered.map((c) => {
             const monthPay = payments.find(
-              (p) => p.clientId === c.id && p.monthYear === currentMonthYear && p.paid
+              (p) =>
+                p.clientId === c.id &&
+                p.monthYear === currentMonthYear &&
+                p.paid &&
+                !isExtraFeePayment(p.note)
             );
             return (
               <div
@@ -310,7 +317,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
           defaultAmount={payTarget.monthlyFeeEur > 0 ? payTarget.monthlyFeeEur : 120}
           defaultDurationMonths={getEffectiveClientFidelizacaoMonths(payTarget, fidelizacoes)}
           onClose={() => setPayTarget(null)}
-          onConfirm={async (my, ml, amount, method, durationMonths) => {
+          onConfirm={async (my, ml, amount, method, durationMonths, extras) => {
             await repo.recordPayment(
               uid,
               payTarget.id,
@@ -318,15 +325,20 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
               ml,
               amount,
               method,
-              durationMonths
+              durationMonths,
+              extras
             );
             setPayTarget(null);
+            const extraParts: string[] = [];
+            if (extras.seguroEur > 0) extraParts.push(`Seguro €${extras.seguroEur.toFixed(2)}`);
+            if (extras.joiaEur > 0) extraParts.push(`Jóia €${extras.joiaEur.toFixed(2)}`);
+            const extraSuffix = extraParts.length > 0 ? ` + ${extraParts.join(' + ')}` : '';
             onBanner(
-              durationMonths > 1
-                ? `Pagamento de ${durationMonths} meses registado (€${(
+              durationMonths > 1 && amount > 0
+                ? `Pagamento de ${durationMonths} meses (€${(
                     amount / durationMonths
-                  ).toFixed(2)}/mês)!`
-                : 'Mensalidade registada!'
+                  ).toFixed(2)}/mês)${extraSuffix} registado e adicionado às Fidelizações!`
+                : `Pagamento registado${extraSuffix ? ` (${extraParts.join(' + ')})` : ''}!`
             );
           }}
         />
@@ -394,7 +406,9 @@ const ClientProfileView: React.FC<{
   const [showPay, setShowPay] = useState(false);
   const [splitTargetPayment, setSplitTargetPayment] = useState<PaymentRecord | null>(null);
 
-  const monthPayment = payments.find((p) => p.monthYear === currentMonthYear && p.paid);
+  const monthPayment = payments.find(
+    (p) => p.monthYear === currentMonthYear && p.paid && !isExtraFeePayment(p.note)
+  );
 
   const endMillis = useMemo(() => {
     if (!fidMonths) return 0;
@@ -823,6 +837,8 @@ const ClientProfileView: React.FC<{
             {payments.map((p) => {
               const isFuture = Boolean(currentMonthYear && p.monthYear > currentMonthYear);
               const isAlreadyFid = p.note.toLowerCase().includes('fideliza');
+              const category = getPaymentCategory(p.note);
+              const isExtra = category !== 'MENSALIDADE';
               return (
                 <div
                   key={p.id}
@@ -833,6 +849,8 @@ const ClientProfileView: React.FC<{
                       <p className="font-bold text-[#F4F4F5]">
                         {p.monthLabel} · €{p.amountEur.toFixed(2)}
                       </p>
+                      {category === 'SEGURO' && <StatusPill tone="blue">Seguro</StatusPill>}
+                      {category === 'JOIA' && <StatusPill tone="amber">Jóia</StatusPill>}
                       {isFuture && <StatusPill tone="amber">Futuro</StatusPill>}
                     </div>
                     <p className="text-[#A1A1AA]">
@@ -841,7 +859,7 @@ const ClientProfileView: React.FC<{
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
-                    {!isAlreadyFid && p.amountEur > 0 && (
+                    {!isAlreadyFid && !isExtra && p.amountEur > 0 && (
                       <button
                         type="button"
                         onClick={() => setSplitTargetPayment(p)}
@@ -901,15 +919,19 @@ const ClientProfileView: React.FC<{
           defaultAmount={client.monthlyFeeEur > 0 ? client.monthlyFeeEur : 120}
           defaultDurationMonths={getEffectiveClientFidelizacaoMonths(client, fidelizacoes)}
           onClose={() => setShowPay(false)}
-          onConfirm={async (my, ml, amt, method, durationMonths) => {
-            await repo.recordPayment(uid, client.id, my, ml, amt, method, durationMonths);
+          onConfirm={async (my, ml, amt, method, durationMonths, extras) => {
+            await repo.recordPayment(uid, client.id, my, ml, amt, method, durationMonths, extras);
             setShowPay(false);
+            const extraParts: string[] = [];
+            if (extras.seguroEur > 0) extraParts.push(`Seguro €${extras.seguroEur.toFixed(2)}`);
+            if (extras.joiaEur > 0) extraParts.push(`Jóia €${extras.joiaEur.toFixed(2)}`);
+            const extraSuffix = extraParts.length > 0 ? ` + ${extraParts.join(' + ')}` : '';
             onBanner(
-              durationMonths > 1
-                ? `Pagamento de ${durationMonths} meses registado (€${(
+              durationMonths > 1 && amt > 0
+                ? `Pagamento de ${durationMonths} meses (€${(
                     amt / durationMonths
-                  ).toFixed(2)}/mês · 1 mensalidade/mês)!`
-                : 'Pagamento registado!'
+                  ).toFixed(2)}/mês)${extraSuffix} registado e adicionado às Fidelizações!`
+                : `Pagamento registado${extraSuffix ? ` (${extraParts.join(' + ')})` : ''}!`
             );
           }}
         />
@@ -927,7 +949,7 @@ const ClientProfileView: React.FC<{
             onBanner(
               `Pagamento dividido por ${months} meses (€${(
                 splitTargetPayment.amountEur / months
-              ).toFixed(2)}/mês · 1 mensalidade por mês)!`
+              ).toFixed(2)}/mês) e adicionado às Fidelizações!`
             );
           }}
         />
@@ -1104,7 +1126,8 @@ export const RegisterPaymentModal: React.FC<{
     monthLabel: string,
     amount: number,
     method: PaymentMethod,
-    durationMonths: 1 | 6 | 12
+    durationMonths: 1 | 6 | 12,
+    extras: { seguroEur: number; joiaEur: number }
   ) => Promise<void>;
 }> = ({ clientName, defaultAmount, defaultDurationMonths = 1, onClose, onConfirm }) => {
   const initialDuration: 1 | 6 | 12 =
@@ -1114,8 +1137,15 @@ export const RegisterPaymentModal: React.FC<{
   const [durationMonths, setDurationMonths] = useState<1 | 6 | 12>(initialDuration);
   const [amount, setAmount] = useState(String(defaultAmount * initialDuration));
   const [method, setMethod] = useState<PaymentMethod>('MbWay');
+  const [includeSeguro, setIncludeSeguro] = useState(false);
+  const [seguroAmount, setSeguroAmount] = useState('');
+  const [includeJoia, setIncludeJoia] = useState(false);
+  const [joiaAmount, setJoiaAmount] = useState(String(DEFAULT_JOIA_EUR));
 
   const numericAmount = Math.max(0, Number(amount) || 0);
+  const numericSeguro = includeSeguro ? Math.max(0, Number(seguroAmount) || 0) : 0;
+  const numericJoia = includeJoia ? Math.max(0, Number(joiaAmount) || 0) : 0;
+  const grandTotal = numericAmount + numericSeguro + numericJoia;
   const perMonthValue = numericAmount / durationMonths;
   const coveredMonths = useMemo(
     () => buildConsecutiveMonths(monthOptions[selectedIdx].monthYear, durationMonths),
@@ -1180,8 +1210,8 @@ export const RegisterPaymentModal: React.FC<{
         <div>
           <FieldLabel>
             {durationMonths > 1
-              ? `Valor total pago (${durationMonths} meses) (€)`
-              : 'Valor (€)'}
+              ? `Valor total da mensalidade (${durationMonths} meses) (€)`
+              : 'Valor da mensalidade (€)'}
           </FieldLabel>
           <Input
             type="number"
@@ -1196,11 +1226,84 @@ export const RegisterPaymentModal: React.FC<{
                 {perMonthValue.toFixed(2)}/mês
               </p>
               <p className="mt-0.5 text-[11px] text-[#F4F4F5]/85">
-                No mês do pagamento é contabilizada apenas 1 mensalidade (€
-                {perMonthValue.toFixed(2)}). Os restantes meses ({coveredMonths[0]?.monthLabel} →{' '}
-                {coveredMonths[coveredMonths.length - 1]?.monthLabel}) entram automaticamente 1 por
-                mês.
+                Conta 1 mensalidade/mês ({coveredMonths[0]?.monthLabel} →{' '}
+                {coveredMonths[coveredMonths.length - 1]?.monthLabel}) e adiciona automaticamente o
+                contrato à subaba <strong>Fidelizações</strong> (datas editáveis pelo admin).
               </p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-[#323238] bg-[#242429]/80 p-3">
+          <div>
+            <FieldLabel>Taxas adicionais (opcional)</FieldLabel>
+            <p className="-mt-1 text-[11px] text-[#A1A1AA]">
+              Incluídos na faturação total, mas excluídos da média de mensalidades.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-2.5">
+            <label className="flex flex-1 cursor-pointer items-center gap-2 text-xs font-semibold text-[#F4F4F5]">
+              <input
+                type="checkbox"
+                checked={includeSeguro}
+                onChange={(e) => setIncludeSeguro(e.target.checked)}
+                className="h-4 w-4 shrink-0 accent-[#EAB308]"
+              />
+              <span>Seguro</span>
+            </label>
+            <div className="relative w-28">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                disabled={!includeSeguro}
+                value={seguroAmount}
+                onChange={(e) => setSeguroAmount(e.target.value)}
+                placeholder="Valor €"
+                className="pr-6 text-right disabled:opacity-40"
+              />
+              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[#A1A1AA]">
+                €
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-2.5">
+            <label className="flex flex-1 cursor-pointer items-center gap-2 text-xs font-semibold text-[#F4F4F5]">
+              <input
+                type="checkbox"
+                checked={includeJoia}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setIncludeJoia(checked);
+                  if (checked && !joiaAmount) setJoiaAmount(String(DEFAULT_JOIA_EUR));
+                }}
+                className="h-4 w-4 shrink-0 accent-[#EAB308]"
+              />
+              <span>Jóia de Inscrição ({DEFAULT_JOIA_EUR}€)</span>
+            </label>
+            <div className="relative w-28">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                disabled={!includeJoia}
+                value={joiaAmount}
+                onChange={(e) => setJoiaAmount(e.target.value)}
+                placeholder={String(DEFAULT_JOIA_EUR)}
+                className="pr-6 text-right disabled:opacity-40"
+              />
+              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[#A1A1AA]">
+                €
+              </span>
+            </div>
+          </div>
+
+          {(numericSeguro > 0 || numericJoia > 0) && (
+            <div className="flex items-center justify-between border-t border-[#323238] pt-2 text-xs">
+              <span className="text-[#A1A1AA]">Total a faturar</span>
+              <span className="font-extrabold text-[#FACC15]">€{grandTotal.toFixed(2)}</span>
             </div>
           )}
         </div>
@@ -1228,13 +1331,15 @@ export const RegisterPaymentModal: React.FC<{
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
           <GoldButton
+            disabled={grandTotal <= 0}
             onClick={() =>
               onConfirm(
                 monthOptions[selectedIdx].monthYear,
                 monthOptions[selectedIdx].monthLabel,
                 numericAmount,
                 method,
-                durationMonths
+                durationMonths,
+                { seguroEur: numericSeguro, joiaEur: numericJoia }
               )
             }
           >

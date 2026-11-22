@@ -31,6 +31,8 @@ import {
   formatShortDate,
   formatTimeAgo,
   getEffectiveClientFidelizacaoMonths,
+  getPaymentCategory,
+  isExtraFeePayment,
   normalizePaymentMethod,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
@@ -414,16 +416,19 @@ const FinanceSubTab: React.FC<{
   const trainingBreakdown = useMemo(() => {
     const calc = (type: TrainingType) => {
       const list = scopedAllPaidPayments.filter((p) => getPaymentType(p) === type);
+      const monthlyList = list.filter((p) => !isExtraFeePayment(p.note));
       const total = list.reduce((s, p) => s + p.amountEur, 0);
       const monthList = list.filter((p) => p.monthYear === currentMonthYear);
       const monthTotal = monthList.reduce((s, p) => s + p.amountEur, 0);
-      const pairCount = new Set(list.map((p) => `${p.clientId}__${p.monthYear}`)).size;
-      const avgPerStudent = pairCount > 0 ? total / pairCount : 0;
+      const monthlyTotal = monthlyList.reduce((s, p) => s + p.amountEur, 0);
+      const pairCount = new Set(monthlyList.map((p) => `${p.clientId}__${p.monthYear}`)).size;
+      const avgPerStudent = pairCount > 0 ? monthlyTotal / pairCount : 0;
       return {
-        count: list.length,
+        count: monthlyList.length,
+        totalRecords: list.length,
         total,
         monthTotal,
-        monthCount: monthList.length,
+        monthCount: monthList.filter((p) => !isExtraFeePayment(p.note)).length,
         avgPerStudent,
       };
     };
@@ -433,45 +438,77 @@ const FinanceSubTab: React.FC<{
     };
   }, [scopedAllPaidPayments, currentMonthYear, clientMap]);
 
+  const monthlyFeePayments = useMemo(
+    () => paidPayments.filter((p) => !isExtraFeePayment(p.note)),
+    [paidPayments]
+  );
+  const extraFeePayments = useMemo(
+    () => paidPayments.filter((p) => isExtraFeePayment(p.note)),
+    [paidPayments]
+  );
+  const extraFeeTotal = useMemo(
+    () => extraFeePayments.reduce((s, p) => s + p.amountEur, 0),
+    [extraFeePayments]
+  );
+
   const currentMonthPayments = useMemo(
     () => paidPayments.filter((p) => p.monthYear === currentMonthYear),
     [paidPayments, currentMonthYear]
+  );
+  const currentMonthMonthlyPayments = useMemo(
+    () => currentMonthPayments.filter((p) => !isExtraFeePayment(p.note)),
+    [currentMonthPayments]
+  );
+  const currentMonthExtraTotal = useMemo(
+    () =>
+      currentMonthPayments
+        .filter((p) => isExtraFeePayment(p.note))
+        .reduce((s, p) => s + p.amountEur, 0),
+    [currentMonthPayments]
   );
 
   const currentMonthRevenue = useMemo(
     () => currentMonthPayments.reduce((s, p) => s + p.amountEur, 0),
     [currentMonthPayments]
   );
+  const currentMonthMonthlyRevenue = useMemo(
+    () => currentMonthMonthlyPayments.reduce((s, p) => s + p.amountEur, 0),
+    [currentMonthMonthlyPayments]
+  );
 
   const totalRevenue = useMemo(
     () => paidPayments.reduce((s, p) => s + p.amountEur, 0),
     [paidPayments]
   );
+  const monthlyFeeTotal = useMemo(
+    () => monthlyFeePayments.reduce((s, p) => s + p.amountEur, 0),
+    [monthlyFeePayments]
+  );
 
   const activeMonthsCount = Math.max(
     1,
-    new Set(paidPayments.map((p) => p.monthYear).filter(Boolean)).size
+    new Set(monthlyFeePayments.map((p) => p.monthYear).filter(Boolean)).size
   );
-  const monthlyAvg = totalRevenue / activeMonthsCount;
+  const monthlyAvg = monthlyFeePayments.length > 0 ? monthlyFeeTotal / activeMonthsCount : 0;
 
   const studentMonthPairsCount = useMemo(() => {
     const keys = new Set(
-      paidPayments.map((p) => `${p.clientId}__${p.monthYear}`)
+      monthlyFeePayments.map((p) => `${p.clientId}__${p.monthYear}`)
     );
     return keys.size;
-  }, [paidPayments]);
+  }, [monthlyFeePayments]);
 
   const avgMonthlyPerStudent =
-    studentMonthPairsCount > 0 ? totalRevenue / studentMonthPairsCount : 0;
+    studentMonthPairsCount > 0 ? monthlyFeeTotal / studentMonthPairsCount : 0;
 
   const currentMonthUniqueStudents = useMemo(
-    () => new Set(currentMonthPayments.map((p) => p.clientId)).size,
-    [currentMonthPayments]
+    () => new Set(currentMonthMonthlyPayments.map((p) => p.clientId)).size,
+    [currentMonthMonthlyPayments]
   );
 
   const currentMonthAvgPerStudent =
     currentMonthUniqueStudents > 0
-      ? currentMonthRevenue / currentMonthUniqueStudents
+      ? currentMonthMonthlyRevenue / currentMonthUniqueStudents
       : 0;
 
   const groupedByMethod = useMemo(() => {
@@ -547,7 +584,12 @@ const FinanceSubTab: React.FC<{
           <div className="flex flex-wrap gap-1.5">
             {(
               [
-                { id: 'ALL' as const, label: `Todos (${scopedAllPaidPayments.length})` },
+                {
+                  id: 'ALL' as const,
+                  label: `Todos (${
+                    trainingBreakdown.PERSONALIZADO.count + trainingBreakdown.GRUPO.count
+                  })`,
+                },
                 {
                   id: 'PERSONALIZADO' as const,
                   label: `Treino Personalizado (${trainingBreakdown.PERSONALIZADO.count})`,
@@ -642,7 +684,8 @@ const FinanceSubTab: React.FC<{
             €{currentMonthRevenue.toFixed(2)}
           </p>
           <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
-            {currentMonthPayments.length} mensalidade(s) este mês
+            {currentMonthMonthlyPayments.length} mens.
+            {currentMonthExtraTotal > 0 ? ` + €${currentMonthExtraTotal.toFixed(2)} seguro/jóia` : ' este mês'}
           </p>
         </BrandCard>
         <BrandCard>
@@ -651,7 +694,7 @@ const FinanceSubTab: React.FC<{
             €{monthlyAvg.toFixed(2)}
           </p>
           <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
-            {activeMonthsCount} mês(es) com registo
+            só mensalidades ({activeMonthsCount} mês/es)
           </p>
         </BrandCard>
         <BrandCard>
@@ -662,15 +705,19 @@ const FinanceSubTab: React.FC<{
           <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
             {currentMonthUniqueStudents > 0
               ? `Este mês: €${currentMonthAvgPerStudent.toFixed(2)} (${currentMonthUniqueStudents} al.)`
-              : `${studentMonthPairsCount} mensalidade(s)/aluno`}
+              : `${studentMonthPairsCount} mens./aluno (excl. seguro/jóia)`}
           </p>
         </BrandCard>
         <BrandCard>
           <p className="text-xs text-[#A1A1AA]">Mensalidades Pagas</p>
           <p className="mt-1 text-2xl font-extrabold text-[#22C55E]">
-            {paidPayments.length}
+            {monthlyFeePayments.length}
           </p>
-          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">1 por mês de fidelização</p>
+          <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+            {extraFeePayments.length > 0
+              ? `+ ${extraFeePayments.length} seguro/jóia (€${extraFeeTotal.toFixed(2)})`
+              : '1 por mês de fidelização'}
+          </p>
         </BrandCard>
         <BrandCard className="col-span-2 lg:col-span-1">
           <p className="text-xs text-[#A1A1AA]">
@@ -684,7 +731,9 @@ const FinanceSubTab: React.FC<{
             €{totalRevenue.toFixed(2)}
           </p>
           <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
-            {periodScope === 'realized'
+            {extraFeeTotal > 0
+              ? `Inclui €${extraFeeTotal.toFixed(2)} seguro/jóia`
+              : periodScope === 'realized'
               ? 'Até este mês (1/mês fidel.)'
               : periodScope === 'current_month'
               ? 'Apenas mês atual'
@@ -814,6 +863,8 @@ const FinanceSubTab: React.FC<{
                       const client = clientMap.get(p.clientId);
                       const isFuture = Boolean(currentMonthYear && p.monthYear > currentMonthYear);
                       const isFid = p.note.toLowerCase().includes('fideliza');
+                      const category = getPaymentCategory(p.note);
+                      const isExtra = category !== 'MENSALIDADE';
                       const fidDetail = isFid ? p.note.split('·').slice(1).join('·').trim() : '';
                       return (
                         <div
@@ -835,6 +886,8 @@ const FinanceSubTab: React.FC<{
                                   ? 'Personalizado'
                                   : 'Grupo'}
                               </StatusPill>
+                              {category === 'SEGURO' && <StatusPill tone="blue">Seguro</StatusPill>}
+                              {category === 'JOIA' && <StatusPill tone="amber">Jóia</StatusPill>}
                               {isFuture && <StatusPill tone="amber">Futuro</StatusPill>}
                             </div>
                             <p className="text-xs text-[#A1A1AA]">
@@ -845,7 +898,7 @@ const FinanceSubTab: React.FC<{
                             </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
-                            {!isFid && p.amountEur > 0 && (
+                            {!isFid && !isExtra && p.amountEur > 0 && (
                               <button
                                 type="button"
                                 onClick={() => setSplitTargetPayment(p)}
@@ -892,6 +945,8 @@ const FinanceSubTab: React.FC<{
                   const client = clientMap.get(p.clientId);
                   const isFuture = Boolean(currentMonthYear && p.monthYear > currentMonthYear);
                   const isFid = p.note.toLowerCase().includes('fideliza');
+                  const category = getPaymentCategory(p.note);
+                  const isExtra = category !== 'MENSALIDADE';
                   return (
                     <div
                       key={p.id}
@@ -912,6 +967,8 @@ const FinanceSubTab: React.FC<{
                               ? 'Personalizado'
                               : 'Grupo'}
                           </StatusPill>
+                          {category === 'SEGURO' && <StatusPill tone="blue">Seguro</StatusPill>}
+                          {category === 'JOIA' && <StatusPill tone="amber">Jóia</StatusPill>}
                           {isFuture && <StatusPill tone="amber">Futuro</StatusPill>}
                         </div>
                         <p className="text-xs text-[#A1A1AA]">
@@ -920,7 +977,7 @@ const FinanceSubTab: React.FC<{
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        {!isFid && p.amountEur > 0 && (
+                        {!isFid && !isExtra && p.amountEur > 0 && (
                           <button
                             type="button"
                             onClick={() => setSplitTargetPayment(p)}
@@ -986,15 +1043,19 @@ const FinanceSubTab: React.FC<{
           defaultAmount={payClient.monthlyFeeEur > 0 ? payClient.monthlyFeeEur : 120}
           defaultDurationMonths={getEffectiveClientFidelizacaoMonths(payClient, fidelizacoes)}
           onClose={() => setPayClient(null)}
-          onConfirm={async (my, ml, amt, method, durationMonths) => {
-            await repo.recordPayment(uid, payClient.id, my, ml, amt, method, durationMonths);
+          onConfirm={async (my, ml, amt, method, durationMonths, extras) => {
+            await repo.recordPayment(uid, payClient.id, my, ml, amt, method, durationMonths, extras);
             setPayClient(null);
+            const extraParts: string[] = [];
+            if (extras.seguroEur > 0) extraParts.push(`Seguro €${extras.seguroEur.toFixed(2)}`);
+            if (extras.joiaEur > 0) extraParts.push(`Jóia €${extras.joiaEur.toFixed(2)}`);
+            const extraSuffix = extraParts.length > 0 ? ` + ${extraParts.join(' + ')}` : '';
             onBanner(
-              durationMonths > 1
-                ? `Pagamento de ${durationMonths} meses registado (€${(
+              durationMonths > 1 && amt > 0
+                ? `Pagamento de ${durationMonths} meses (€${(
                     amt / durationMonths
-                  ).toFixed(2)}/mês · 1 mensalidade/mês)!`
-                : 'Mensalidade registada!'
+                  ).toFixed(2)}/mês)${extraSuffix} registado e adicionado às Fidelizações!`
+                : `Pagamento registado${extraSuffix ? ` (${extraParts.join(' + ')})` : ''}!`
             );
           }}
         />
@@ -1019,7 +1080,7 @@ const FinanceSubTab: React.FC<{
             onBanner(
               `Pagamento dividido por ${months} meses (€${(
                 splitTargetPayment.amountEur / months
-              ).toFixed(2)}/mês · 1 mensalidade por mês)!`
+              ).toFixed(2)}/mês) e adicionado às Fidelizações!`
             );
           }}
         />
@@ -1150,14 +1211,15 @@ const FidelizacaoSubTab: React.FC<{
             setModalOpen(false);
             setEditing(null);
           }}
-          onSave={async (clientId, duration, startMillis, notes, payment) => {
+          onSave={async (clientId, duration, startMillis, endMillis, notes, payment) => {
             await repo.saveFidelizacao(
               uid,
               clientId,
               duration,
               startMillis,
               notes,
-              editing?.id
+              editing?.id,
+              isSuperAdmin ? endMillis : undefined
             );
             if (!editing && isSuperAdmin && payment && payment.totalAmountEur > 0) {
               const startDate = new Date(startMillis);
@@ -1172,7 +1234,8 @@ const FidelizacaoSubTab: React.FC<{
                 startMonthLabel,
                 payment.totalAmountEur,
                 payment.method,
-                duration
+                duration,
+                { skipAutoFidelizacao: true }
               );
               setModalOpen(false);
               setEditing(null);
@@ -1193,6 +1256,20 @@ const FidelizacaoSubTab: React.FC<{
   );
 };
 
+function toIsoDateLocal(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+}
+
+function addMonthsToIsoDate(isoDate: string, months: number): string {
+  const parsed = isoDate ? new Date(`${isoDate}T09:00:00`) : new Date();
+  const base = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  base.setMonth(base.getMonth() + months);
+  return toIsoDateLocal(base.getTime());
+}
+
 export const FidelizacaoModal: React.FC<{
   clients: ClientRecord[];
   existing: FidelizacaoRecord | null;
@@ -1202,21 +1279,25 @@ export const FidelizacaoModal: React.FC<{
     clientId: string,
     duration: 6 | 12,
     startMillis: number,
+    endMillis: number,
     notes: string,
     payment?: { totalAmountEur: number; method: PaymentMethod }
   ) => Promise<void>;
 }> = ({ clients, existing, isSuperAdmin = false, onClose, onSave }) => {
   const [clientId, setClientId] = useState(existing?.clientId || clients[0]?.id || '');
   const [duration, setDuration] = useState<6 | 12>(existing?.durationMonths || 6);
-  const toIsoDate = (ms: number) => {
-    const d = new Date(ms);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-      d.getDate()
-    ).padStart(2, '0')}`;
-  };
-  const [startDateStr, setStartDateStr] = useState(
-    toIsoDate(existing?.startDateMillis || Date.now())
+  const initialStartStr = toIsoDateLocal(existing?.startDateMillis || Date.now());
+  const [startDateStr, setStartDateStr] = useState(initialStartStr);
+  const [endDateStr, setEndDateStr] = useState(
+    existing?.endDateMillis
+      ? toIsoDateLocal(existing.endDateMillis)
+      : addMonthsToIsoDate(initialStartStr, existing?.durationMonths || 6)
   );
+  const [endDateCustomized, setEndDateCustomized] = useState(() => {
+    if (!existing?.endDateMillis) return false;
+    const autoEnd = addMonthsToIsoDate(initialStartStr, existing.durationMonths);
+    return toIsoDateLocal(existing.endDateMillis) !== autoEnd;
+  });
   const [notes, setNotes] = useState(existing?.notes || '');
   const [recordPaymentNow, setRecordPaymentNow] = useState(false);
   const selectedClient = clients.find((c) => c.id === clientId);
@@ -1226,11 +1307,20 @@ export const FidelizacaoModal: React.FC<{
 
   const numericTotalPaid = Math.max(0, Number(totalPaidStr) || 0);
   const previewPerMonth = numericTotalPaid / duration;
-  const startMonthKey = startDateStr ? startDateStr.slice(0, 7) : toIsoDate(Date.now()).slice(0, 7);
+  const startMonthKey = startDateStr ? startDateStr.slice(0, 7) : toIsoDateLocal(Date.now()).slice(0, 7);
   const previewMonths = useMemo(
     () => buildConsecutiveMonths(startMonthKey, duration),
     [startMonthKey, duration]
   );
+
+  const startMillisPreview = startDateStr ? new Date(`${startDateStr}T09:00:00`).getTime() : Date.now();
+  const endMillisPreview = endDateStr
+    ? new Date(`${endDateStr}T09:00:00`).getTime()
+    : new Date(`${addMonthsToIsoDate(startDateStr, duration)}T09:00:00`).getTime();
+  const invalidRange =
+    !Number.isNaN(startMillisPreview) &&
+    !Number.isNaN(endMillisPreview) &&
+    endMillisPreview <= startMillisPreview;
 
   const handleClientChange = (nextId: string) => {
     setClientId(nextId);
@@ -1245,6 +1335,16 @@ export const FidelizacaoModal: React.FC<{
       setTotalPaidStr(String(baseMonthly * nextDuration));
     }
     setDuration(nextDuration);
+    setEndDateStr(addMonthsToIsoDate(startDateStr, nextDuration));
+    setEndDateCustomized(false);
+  };
+
+  const handleStartDateChange = (nextStart: string) => {
+    setStartDateStr(nextStart);
+    if (nextStart) {
+      setEndDateStr(addMonthsToIsoDate(nextStart, duration));
+      setEndDateCustomized(false);
+    }
   };
 
   return (
@@ -1291,14 +1391,53 @@ export const FidelizacaoModal: React.FC<{
           </div>
         </div>
 
-        <div>
-          <FieldLabel>Data de início</FieldLabel>
-          <Input
-            type="date"
-            value={startDateStr}
-            onChange={(e) => setStartDateStr(e.target.value)}
-          />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <FieldLabel>Data de início</FieldLabel>
+            <Input
+              type="date"
+              value={startDateStr}
+              onChange={(e) => handleStartDateChange(e.target.value)}
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between gap-1">
+              <FieldLabel>Data de fim</FieldLabel>
+              {isSuperAdmin && endDateCustomized && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEndDateStr(addMonthsToIsoDate(startDateStr, duration));
+                    setEndDateCustomized(false);
+                  }}
+                  className="mb-1 text-[11px] font-bold text-[#FACC15] hover:underline"
+                >
+                  Auto (+{duration}m)
+                </button>
+              )}
+            </div>
+            <Input
+              type="date"
+              value={endDateStr}
+              disabled={!isSuperAdmin}
+              onChange={(e) => {
+                setEndDateStr(e.target.value);
+                setEndDateCustomized(true);
+              }}
+              className="disabled:opacity-60"
+            />
+          </div>
         </div>
+        <p className="text-[11px] text-[#A1A1AA]">
+          {isSuperAdmin
+            ? 'A data de fim é calculada automaticamente (+6/+12 meses), mas o administrador pode adaptar a data de início e fim.'
+            : 'Data de fim calculada automaticamente a partir da data de início.'}
+        </p>
+        {invalidRange && (
+          <p className="text-xs font-semibold text-[#EF4444]">
+            A data de fim deve ser posterior à data de início.
+          </p>
+        )}
 
         <div>
           <FieldLabel>Notas (opcional)</FieldLabel>
@@ -1367,13 +1506,20 @@ export const FidelizacaoModal: React.FC<{
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
           <GoldButton
-            disabled={!clientId}
+            disabled={!clientId || invalidRange}
             onClick={() => {
-              const parsed = startDateStr ? new Date(`${startDateStr}T09:00:00`).getTime() : Date.now();
+              const safeStart = Number.isNaN(startMillisPreview) ? Date.now() : startMillisPreview;
+              const fallbackEnd = new Date(safeStart);
+              fallbackEnd.setMonth(fallbackEnd.getMonth() + duration);
+              const safeEnd =
+                isSuperAdmin && !Number.isNaN(endMillisPreview) && endMillisPreview > safeStart
+                  ? endMillisPreview
+                  : fallbackEnd.getTime();
               return onSave(
                 clientId,
                 duration,
-                Number.isNaN(parsed) ? Date.now() : parsed,
+                safeStart,
+                safeEnd,
                 notes,
                 !existing && isSuperAdmin && recordPaymentNow && numericTotalPaid > 0
                   ? { totalAmountEur: numericTotalPaid, method: payMethod }

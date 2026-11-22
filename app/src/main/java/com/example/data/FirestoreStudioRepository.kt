@@ -1450,50 +1450,165 @@ class FirestoreStudioRepository(
     }
 
     // --- Payments ---
+    private fun computeFidelizacaoStartMillisForMonth(monthYear: String, fallbackMillis: Long): Long {
+        val nowCal = Calendar.getInstance().apply { timeInMillis = fallbackMillis }
+        val currentKey = String.format(
+            java.util.Locale.US,
+            "%04d-%02d",
+            nowCal.get(Calendar.YEAR),
+            nowCal.get(Calendar.MONTH) + 1
+        )
+        if (monthYear.isBlank() || monthYear == currentKey) return fallbackMillis
+        val parts = monthYear.split("-")
+        val y = parts.getOrNull(0)?.toIntOrNull() ?: nowCal.get(Calendar.YEAR)
+        val mIdx = ((parts.getOrNull(1)?.toIntOrNull() ?: (nowCal.get(Calendar.MONTH) + 1)) - 1).coerceIn(0, 11)
+        return Calendar.getInstance().apply {
+            set(Calendar.YEAR, y)
+            set(Calendar.MONTH, mIdx)
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 9)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+
     suspend fun recordPayment(
         clientId: String,
         monthYear: String,
         monthLabel: String,
         amountEur: Double,
         note: String,
-        durationMonths: Int = 1
+        durationMonths: Int = 1,
+        seguroEur: Double = 0.0,
+        joiaEur: Double = 0.0,
+        skipAutoFidelizacao: Boolean = false
     ): Result<Unit> = try {
         val uid = requireUserId()
         val validMethod = SeedCatalog.normalizePaymentMethod(note) ?: "MbWay"
         val monthsCount = if (durationMonths == 6 || durationMonths == 12) durationMonths else 1
         val totalClamped = amountEur.coerceIn(0.0, 100000.0)
-        val perMonthAmounts = SeedCatalog.splitAmountAcrossMonths(totalClamped, monthsCount)
-        val targetMonths = if (monthsCount == 1) {
-            listOf(monthYear to monthLabel)
-        } else {
-            SeedCatalog.buildConsecutiveMonths(monthYear, monthsCount)
+        val seguroClamped = seguroEur.coerceIn(0.0, 100000.0)
+        val joiaClamped = joiaEur.coerceIn(0.0, 100000.0)
+
+        if (totalClamped <= 0.0 && seguroClamped <= 0.0 && joiaClamped <= 0.0) {
+            return Result.success(Unit)
         }
+
         val now = System.currentTimeMillis()
         val batch = db.batch()
-        targetMonths.forEachIndexed { idx, (mYear, mLabel) ->
-            val installmentNote = if (monthsCount > 1) {
-                "$validMethod · Fidelização ${monthsCount}m (${idx + 1}/$monthsCount · total €${String.format(java.util.Locale.US, "%.2f", totalClamped)})".take(200)
+
+        if (totalClamped > 0.0) {
+            val perMonthAmounts = SeedCatalog.splitAmountAcrossMonths(totalClamped, monthsCount)
+            val targetMonths = if (monthsCount == 1) {
+                listOf(monthYear to monthLabel)
             } else {
-                validMethod
+                SeedCatalog.buildConsecutiveMonths(monthYear, monthsCount)
             }
-            val ref = userDoc(uid).collection("payments").document()
+            targetMonths.forEachIndexed { idx, (mYear, mLabel) ->
+                val installmentNote = if (monthsCount > 1) {
+                    "$validMethod · Fidelização ${monthsCount}m (${idx + 1}/$monthsCount · total €${String.format(java.util.Locale.US, "%.2f", totalClamped)})".take(200)
+                } else {
+                    validMethod
+                }
+                val ref = userDoc(uid).collection("payments").document()
+                batch.set(
+                    ref,
+                    mapOf(
+                        "userId" to uid,
+                        "clientId" to clientId,
+                        "monthYear" to mYear,
+                        "monthLabel" to mLabel,
+                        "amountEur" to (perMonthAmounts.getOrNull(idx) ?: (kotlin.math.round((totalClamped / monthsCount) * 100.0) / 100.0)),
+                        "paid" to true,
+                        "paidAtMillis" to now,
+                        "note" to installmentNote,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+
+            if (monthsCount > 1 && !skipAutoFidelizacao) {
+                val fidStartMillis = computeFidelizacaoStartMillisForMonth(monthYear, now)
+                val endCal = Calendar.getInstance().apply {
+                    timeInMillis = fidStartMillis
+                    add(Calendar.MONTH, monthsCount)
+                }
+                val perMonth = totalClamped / monthsCount
+                val fidNotes = "Fidelização ${monthsCount}m · Pago €${String.format(java.util.Locale.US, "%.2f", totalClamped)} (€${String.format(java.util.Locale.US, "%.2f", perMonth)}/mês · $validMethod)".take(300)
+                val fidRef = userDoc(uid).collection("fidelizacoes").document()
+                batch.set(
+                    fidRef,
+                    mapOf(
+                        "userId" to uid,
+                        "clientId" to clientId,
+                        "durationMonths" to monthsCount,
+                        "startDateMillis" to fidStartMillis,
+                        "endDateMillis" to endCal.timeInMillis,
+                        "notes" to fidNotes,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+        }
+
+        if (seguroClamped > 0.0) {
+            val seguroRef = userDoc(uid).collection("payments").document()
             batch.set(
-                ref,
+                seguroRef,
                 mapOf(
                     "userId" to uid,
                     "clientId" to clientId,
-                    "monthYear" to mYear,
-                    "monthLabel" to mLabel,
-                    "amountEur" to (perMonthAmounts.getOrNull(idx) ?: (kotlin.math.round((totalClamped / monthsCount) * 100.0) / 100.0)),
+                    "monthYear" to monthYear,
+                    "monthLabel" to monthLabel,
+                    "amountEur" to (kotlin.math.round(seguroClamped * 100.0) / 100.0),
                     "paid" to true,
                     "paidAtMillis" to now,
-                    "note" to installmentNote,
+                    "note" to "$validMethod · Seguro".take(200),
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             )
         }
+
+        if (joiaClamped > 0.0) {
+            val joiaRef = userDoc(uid).collection("payments").document()
+            batch.set(
+                joiaRef,
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to clientId,
+                    "monthYear" to monthYear,
+                    "monthLabel" to monthLabel,
+                    "amountEur" to (kotlin.math.round(joiaClamped * 100.0) / 100.0),
+                    "paid" to true,
+                    "paidAtMillis" to now,
+                    "note" to "$validMethod · Jóia de Inscrição".take(200),
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+
         batch.commit().await()
+
+        if (totalClamped > 0.0 && monthsCount > 1 && !skipAutoFidelizacao) {
+            val fidStartMillis = computeFidelizacaoStartMillisForMonth(monthYear, now)
+            try {
+                userDoc(uid).collection("clients").document(clientId).update(
+                    mapOf(
+                        "fidelizacaoMonths" to monthsCount,
+                        "fidelizacaoStartMillis" to fidStartMillis,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } catch (_: Exception) {
+                // Ignore if client document is missing
+            }
+        }
+
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
@@ -1513,6 +1628,14 @@ class FirestoreStudioRepository(
         val perMonthAmounts = SeedCatalog.splitAmountAcrossMonths(totalClamped, monthsCount)
         val targetMonths = SeedCatalog.buildConsecutiveMonths(payment.monthYear, monthsCount)
         val paidAt = if (payment.paidAtMillis > 0L) payment.paidAtMillis else System.currentTimeMillis()
+        val fidStartMillis = computeFidelizacaoStartMillisForMonth(payment.monthYear, paidAt)
+        val endCal = Calendar.getInstance().apply {
+            timeInMillis = fidStartMillis
+            add(Calendar.MONTH, monthsCount)
+        }
+        val perMonth = totalClamped / monthsCount
+        val fidNotes = "Fidelização ${monthsCount}m · Pago €${String.format(java.util.Locale.US, "%.2f", totalClamped)} (€${String.format(java.util.Locale.US, "%.2f", perMonth)}/mês · $validMethod)".take(300)
+
         val batch = db.batch()
         batch.delete(userDoc(uid).collection("payments").document(payment.id))
         targetMonths.forEachIndexed { idx, (mYear, mLabel) ->
@@ -1535,7 +1658,33 @@ class FirestoreStudioRepository(
                 )
             )
         }
+        batch.set(
+            userDoc(uid).collection("fidelizacoes").document(),
+            mapOf(
+                "userId" to uid,
+                "clientId" to payment.clientId,
+                "durationMonths" to monthsCount,
+                "startDateMillis" to fidStartMillis,
+                "endDateMillis" to endCal.timeInMillis,
+                "notes" to fidNotes,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
         batch.commit().await()
+
+        try {
+            userDoc(uid).collection("clients").document(payment.clientId).update(
+                mapOf(
+                    "fidelizacaoMonths" to monthsCount,
+                    "fidelizacaoStartMillis" to fidStartMillis,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } catch (_: Exception) {
+            // Ignore if client document is missing
+        }
+
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
@@ -1556,14 +1705,25 @@ class FirestoreStudioRepository(
     }
 
     // --- Fidelizações ---
-    suspend fun saveFidelizacao(clientId: String, durationMonths: Int, startDateMillis: Long, notes: String, existingId: String = ""): Result<Unit> = try {
+    suspend fun saveFidelizacao(
+        clientId: String,
+        durationMonths: Int,
+        startDateMillis: Long,
+        notes: String,
+        existingId: String = "",
+        customEndDateMillis: Long? = null
+    ): Result<Unit> = try {
         val uid = requireUserId()
         val months = if (durationMonths == 12) 12 else 6
-        val cal = Calendar.getInstance().apply {
+        val autoEndCal = Calendar.getInstance().apply {
             timeInMillis = startDateMillis
             add(Calendar.MONTH, months)
         }
-        val endDateMillis = cal.timeInMillis
+        val endDateMillis = if (customEndDateMillis != null && customEndDateMillis > startDateMillis) {
+            customEndDateMillis
+        } else {
+            autoEndCal.timeInMillis
+        }
         if (existingId.isNotBlank()) {
             userDoc(uid).collection("fidelizacoes").document(existingId).update(
                 mapOf(

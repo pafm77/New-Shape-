@@ -38,6 +38,7 @@ import com.example.ui.StudioUiState
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import java.util.Calendar
+import java.util.TimeZone
 
 @Composable
 fun PtClientsTab(
@@ -199,7 +200,10 @@ fun PtClientsTab(
         } else {
             items(filteredClients, key = { it.id }) { client ->
                 val monthPayment = state.payments.find {
-                    it.clientId == client.id && it.monthYear == state.currentMonthYear && it.paid
+                    it.clientId == client.id &&
+                        it.monthYear == state.currentMonthYear &&
+                        it.paid &&
+                        !SeedCatalog.isExtraFeePayment(it.note)
                 }
                 val isPaidThisMonth = monthPayment != null
 
@@ -320,8 +324,17 @@ fun PtClientsTab(
                 defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
                 defaultDurationMonths = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, state.fidelizacoes),
                 onDismiss = { paymentTargetClient = null },
-                onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
-                    viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
+                onConfirm = { monthYear, monthLabel, amount, method, durationMonths, seguroEur, joiaEur ->
+                    viewModel.recordPayment(
+                        clientId = client.id,
+                        monthYear = monthYear,
+                        monthLabel = monthLabel,
+                        amountEur = amount,
+                        note = method,
+                        durationMonths = durationMonths,
+                        seguroEur = seguroEur,
+                        joiaEur = joiaEur
+                    )
                     paymentTargetClient = null
                 }
             )
@@ -377,7 +390,9 @@ fun PtClientProfileScreen(
     val clientFids = remember(state.fidelizacoes, client.id) {
         state.fidelizacoes.filter { it.clientId == client.id }
     }
-    val currentMonthPayment = clientPayments.find { it.monthYear == state.currentMonthYear && it.paid }
+    val currentMonthPayment = clientPayments.find {
+        it.monthYear == state.currentMonthYear && it.paid && !SeedCatalog.isExtraFeePayment(it.note)
+    }
 
     val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
     val confirmedBookings = remember(state.bookings, sessionMap, client.id) {
@@ -708,6 +723,8 @@ fun PtClientProfileScreen(
                                 clientPayments.forEach { p ->
                                     val isFuture = p.monthYear > state.currentMonthYear
                                     val isAlreadyFid = p.note.contains("fideliza", ignoreCase = true)
+                                    val category = SeedCatalog.getPaymentCategory(p.note)
+                                    val isExtra = category != "MENSALIDADE"
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -723,6 +740,11 @@ fun PtClientProfileScreen(
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     color = TextPrimaryDark
                                                 )
+                                                if (category == "SEGURO") {
+                                                    StatusPill("Seguro", InfoBlue, InfoBlueContainer)
+                                                } else if (category == "JOIA") {
+                                                    StatusPill("Jóia", PendingAmber, PendingAmberContainer)
+                                                }
                                                 if (isFuture) {
                                                     StatusPill("Futuro", PendingAmber, PendingAmberContainer)
                                                 }
@@ -734,7 +756,7 @@ fun PtClientProfileScreen(
                                             )
                                         }
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            if (!isAlreadyFid && p.amountEur > 0.0) {
+                                            if (!isAlreadyFid && !isExtra && p.amountEur > 0.0) {
                                                 TextButton(
                                                     onClick = { splitTargetPayment = p },
                                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
@@ -987,8 +1009,17 @@ fun PtClientProfileScreen(
             defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
             defaultDurationMonths = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, clientFids),
             onDismiss = { showPayDialog = false },
-            onConfirm = { monthYear, monthLabel, amount, method, durationMonths ->
-                viewModel.recordPayment(client.id, monthYear, monthLabel, amount, method, durationMonths)
+            onConfirm = { monthYear, monthLabel, amount, method, durationMonths, seguroEur, joiaEur ->
+                viewModel.recordPayment(
+                    clientId = client.id,
+                    monthYear = monthYear,
+                    monthLabel = monthLabel,
+                    amountEur = amount,
+                    note = method,
+                    durationMonths = durationMonths,
+                    seguroEur = seguroEur,
+                    joiaEur = joiaEur
+                )
                 showPayDialog = false
             }
         )
@@ -1018,18 +1049,40 @@ fun PtClientProfileScreen(
                 showNewFidDialog = false
                 editingFid = null
             },
-            onSave = { months, startMillis, fidNotes ->
-                viewModel.saveFidelizacao(client.id, months, startMillis, fidNotes, editingFid?.id.orEmpty())
+            onSave = { months, startMillis, endMillis, fidNotes ->
+                viewModel.saveFidelizacao(
+                    clientId = client.id,
+                    durationMonths = months,
+                    startDateMillis = startMillis,
+                    notes = fidNotes,
+                    existingId = editingFid?.id.orEmpty(),
+                    customEndDateMillis = if (state.isSuperAdmin) endMillis else null
+                )
                 showNewFidDialog = false
                 editingFid = null
             },
-            onSaveWithPayment = { months, startMillis, fidNotes, totalPaidEur, method ->
-                viewModel.saveFidelizacao(client.id, months, startMillis, fidNotes, "")
+            onSaveWithPayment = { months, startMillis, endMillis, fidNotes, totalPaidEur, method ->
+                viewModel.saveFidelizacao(
+                    clientId = client.id,
+                    durationMonths = months,
+                    startDateMillis = startMillis,
+                    notes = fidNotes,
+                    existingId = "",
+                    customEndDateMillis = if (state.isSuperAdmin) endMillis else null
+                )
                 val startCal = Calendar.getInstance().apply { timeInMillis = startMillis }
                 val monthsPt = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
                 val my = String.format("%04d-%02d", startCal.get(Calendar.YEAR), startCal.get(Calendar.MONTH) + 1)
                 val ml = "${monthsPt[startCal.get(Calendar.MONTH)]} ${startCal.get(Calendar.YEAR)}"
-                viewModel.recordPayment(client.id, my, ml, totalPaidEur, method, months)
+                viewModel.recordPayment(
+                    clientId = client.id,
+                    monthYear = my,
+                    monthLabel = ml,
+                    amountEur = totalPaidEur,
+                    note = method,
+                    durationMonths = months,
+                    skipAutoFidelizacao = true
+                )
                 showNewFidDialog = false
                 editingFid = null
             }
@@ -1256,7 +1309,7 @@ fun RegisterPaymentDialog(
     defaultAmountEur: Double = 120.0,
     defaultDurationMonths: Int = 1,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, Double, String, Int) -> Unit
+    onConfirm: (String, String, Double, String, Int, Double, Double) -> Unit
 ) {
     val initialDuration = if (defaultDurationMonths == 6 || defaultDurationMonths == 12) defaultDurationMonths else 1
     var durationMonths by remember(defaultDurationMonths) { mutableIntStateOf(initialDuration) }
@@ -1265,12 +1318,20 @@ fun RegisterPaymentDialog(
     var amountText by remember(defaultAmountEur, initialDuration) {
         mutableStateOf(formatAmt(defaultAmountEur * initialDuration))
     }
+    var includeSeguro by remember { mutableStateOf(false) }
+    var seguroText by remember { mutableStateOf("") }
+    var includeJoia by remember { mutableStateOf(false) }
+    var joiaText by remember { mutableStateOf(formatAmt(SeedCatalog.DEFAULT_JOIA_EUR)) }
+
     var selectedMethod by remember { mutableStateOf("MbWay") }
     val paymentMethods = SeedCatalog.PAYMENT_METHODS
     val monthOptions = remember(defaultMonthYear) { buildRecentMonthOptions() }
     var selectedMonth by remember { mutableStateOf(monthOptions.firstOrNull() ?: (defaultMonthYear to defaultMonthLabel)) }
 
     val numericAmount = amountText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+    val numericSeguro = if (includeSeguro) (seguroText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0) else 0.0
+    val numericJoia = if (includeJoia) (joiaText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0) else 0.0
+    val grandTotal = numericAmount + numericSeguro + numericJoia
     val perMonthAmount = numericAmount / durationMonths
     val coveredMonths = remember(selectedMonth, durationMonths) {
         SeedCatalog.buildConsecutiveMonths(selectedMonth.first, durationMonths)
@@ -1330,8 +1391,8 @@ fun RegisterPaymentDialog(
                     onValueChange = { amountText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
                     label = {
                         Text(
-                            if (durationMonths > 1) "Valor total pago ($durationMonths meses) (€)"
-                            else "Valor (€)"
+                            if (durationMonths > 1) "Valor total da mensalidade ($durationMonths meses) (€)"
+                            else "Valor da mensalidade (€)"
                         )
                     },
                     singleLine = true,
@@ -1354,13 +1415,136 @@ fun RegisterPaymentDialog(
                                 color = NewShapeGoldBright
                             )
                             Text(
-                                text = "No mês do pagamento conta apenas 1 mensalidade (€${String.format("%.2f", perMonthAmount)}). Os restantes meses (${coveredMonths.firstOrNull()?.second.orEmpty()} → ${coveredMonths.lastOrNull()?.second.orEmpty()}) entram automaticamente 1 por mês.",
+                                text = "Conta 1 mensalidade/mês (${coveredMonths.firstOrNull()?.second.orEmpty()} → ${coveredMonths.lastOrNull()?.second.orEmpty()}) e adiciona automaticamente às Fidelizações (datas editáveis pelo admin).",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimaryDark
                             )
                         }
                     }
                 }
+
+                // Seguro & Jóia de Inscrição (30€)
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, HairlineBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Taxas adicionais (opcional)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = NewShapeGoldBright,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Incluídos na faturação total, mas excluídos da média de mensalidades.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondaryDark
+                        )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { includeSeguro = !includeSeguro }
+                            ) {
+                                Checkbox(
+                                    checked = includeSeguro,
+                                    onCheckedChange = { includeSeguro = it },
+                                    modifier = Modifier.testTag("payment_seguro_checkbox"),
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = NewShapeGold,
+                                        checkmarkColor = TextOnGold,
+                                        uncheckedColor = TextSecondaryDark
+                                    )
+                                )
+                                Text("Seguro", style = MaterialTheme.typography.bodyMedium, color = TextPrimaryDark)
+                            }
+                            OutlinedTextField(
+                                value = seguroText,
+                                onValueChange = { seguroText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                                enabled = includeSeguro,
+                                placeholder = { Text("€") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.width(104.dp).testTag("payment_seguro_input"),
+                                colors = darkFieldColors()
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        includeJoia = !includeJoia
+                                        if (includeJoia && joiaText.isBlank()) {
+                                            joiaText = formatAmt(SeedCatalog.DEFAULT_JOIA_EUR)
+                                        }
+                                    }
+                            ) {
+                                Checkbox(
+                                    checked = includeJoia,
+                                    onCheckedChange = { checked ->
+                                        includeJoia = checked
+                                        if (checked && joiaText.isBlank()) {
+                                            joiaText = formatAmt(SeedCatalog.DEFAULT_JOIA_EUR)
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("payment_joia_checkbox"),
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = NewShapeGold,
+                                        checkmarkColor = TextOnGold,
+                                        uncheckedColor = TextSecondaryDark
+                                    )
+                                )
+                                Text("Jóia (30€)", style = MaterialTheme.typography.bodyMedium, color = TextPrimaryDark)
+                            }
+                            OutlinedTextField(
+                                value = joiaText,
+                                onValueChange = { joiaText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                                enabled = includeJoia,
+                                placeholder = { Text("30") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.width(104.dp).testTag("payment_joia_input"),
+                                colors = darkFieldColors()
+                            )
+                        }
+
+                        if (numericSeguro > 0.0 || numericJoia > 0.0) {
+                            HorizontalDivider(color = HairlineBorder)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Total a faturar", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                                Text(
+                                    text = "€${String.format("%.2f", grandTotal)}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NewShapeGoldBright
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Text("Método de pagamento", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     paymentMethods.forEach { method ->
@@ -1381,8 +1565,17 @@ fun RegisterPaymentDialog(
         confirmButton = {
             GoldPrimaryButton(
                 text = "Marcar como Pago",
+                enabled = grandTotal > 0.0,
                 onClick = {
-                    onConfirm(selectedMonth.first, selectedMonth.second, numericAmount, selectedMethod, durationMonths)
+                    onConfirm(
+                        selectedMonth.first,
+                        selectedMonth.second,
+                        numericAmount,
+                        selectedMethod,
+                        durationMonths,
+                        numericSeguro,
+                        numericJoia
+                    )
                 },
                 testTag = "confirm_payment_dialog_btn"
             )
@@ -1475,6 +1668,29 @@ fun SplitPaymentFidelizacaoDialog(
     )
 }
 
+private fun computeAutoEndMillis(startMillis: Long, durationMonths: Int): Long =
+    Calendar.getInstance().apply {
+        timeInMillis = startMillis
+        add(Calendar.MONTH, durationMonths)
+    }.timeInMillis
+
+private fun localMillisToUtcPickerMillis(localMillis: Long): Long {
+    val local = Calendar.getInstance().apply { timeInMillis = localMillis }
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(local.get(Calendar.YEAR), local.get(Calendar.MONTH), local.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+    }.timeInMillis
+}
+
+private fun utcPickerMillisToLocalMillis(utcMillis: Long): Long {
+    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+    return Calendar.getInstance().apply {
+        set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH), 9, 0, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FidelizacaoDialog(
     clientName: String,
@@ -1482,30 +1698,38 @@ fun FidelizacaoDialog(
     isSuperAdmin: Boolean = false,
     defaultMonthlyFeeEur: Double = 0.0,
     onDismiss: () -> Unit,
-    onSave: (Int, Long, String) -> Unit,
-    onSaveWithPayment: ((Int, Long, String, Double, String) -> Unit)? = null
+    onSave: (Int, Long, Long, String) -> Unit,
+    onSaveWithPayment: ((Int, Long, Long, String, Double, String) -> Unit)? = null
 ) {
-    var durationMonths by remember { mutableIntStateOf(existing?.durationMonths ?: 6) }
-    var startOffsetMonths by remember { mutableIntStateOf(0) }
-    var notes by remember { mutableStateOf(existing?.notes ?: "Plano $durationMonths meses") }
+    var durationMonths by remember(existing?.id) { mutableIntStateOf(existing?.durationMonths ?: 6) }
+    var startMillis by remember(existing?.id) {
+        mutableLongStateOf(existing?.startDateMillis?.takeIf { it > 0L } ?: System.currentTimeMillis())
+    }
+    var endMillis by remember(existing?.id) {
+        mutableLongStateOf(
+            existing?.endDateMillis?.takeIf { it > 0L }
+                ?: computeAutoEndMillis(existing?.startDateMillis?.takeIf { it > 0L } ?: System.currentTimeMillis(), existing?.durationMonths ?: 6)
+        )
+    }
+    var endDateCustomized by remember(existing?.id) {
+        val initStart = existing?.startDateMillis?.takeIf { it > 0L } ?: System.currentTimeMillis()
+        val autoEnd = computeAutoEndMillis(initStart, existing?.durationMonths ?: 6)
+        val customized = existing != null && kotlin.math.abs(existing.endDateMillis - autoEnd) > 86_400_000L
+        mutableStateOf(customized)
+    }
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
+
+    var notes by remember(existing?.id) { mutableStateOf(existing?.notes ?: "Plano $durationMonths meses") }
     var recordPaymentNow by remember { mutableStateOf(false) }
     val baseMonthly = if (defaultMonthlyFeeEur > 0.0) defaultMonthlyFeeEur else 100.0
     fun fmt(v: Double) = if (v % 1.0 == 0.0) v.toInt().toString() else String.format("%.2f", v)
     var totalPaidText by remember(defaultMonthlyFeeEur) { mutableStateOf(fmt(baseMonthly * (existing?.durationMonths ?: 6))) }
     var payMethod by remember { mutableStateOf("MbWay") }
 
-    val startMillis = remember(startOffsetMonths, existing) {
-        if (existing != null && startOffsetMonths == 0) existing.startDateMillis
-        else Calendar.getInstance().apply { add(Calendar.MONTH, startOffsetMonths) }.timeInMillis
-    }
-    val previewEndMillis = remember(startMillis, durationMonths) {
-        Calendar.getInstance().apply {
-            timeInMillis = startMillis
-            add(Calendar.MONTH, durationMonths)
-        }.timeInMillis
-    }
     val numericTotalPaid = totalPaidText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
     val previewPerMonth = numericTotalPaid / durationMonths
+    val invalidRange = endMillis <= startMillis
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1527,6 +1751,8 @@ fun FidelizacaoDialog(
                                     totalPaidText = fmt(baseMonthly * m)
                                 }
                                 durationMonths = m
+                                endMillis = computeAutoEndMillis(startMillis, m)
+                                endDateCustomized = false
                             },
                             label = { Text("$m Meses") },
                             colors = FilterChipDefaults.filterChipColors(
@@ -1536,25 +1762,122 @@ fun FidelizacaoDialog(
                         )
                     }
                 }
-                Text("Data de início", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0 to "Hoje", -1 to "-1 mês", 1 to "+1 mês").forEach { (off, lbl) ->
-                        FilterChip(
-                            selected = startOffsetMonths == off,
-                            onClick = { startOffsetMonths = off },
-                            label = { Text(lbl) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = NewShapeGold,
-                                selectedLabelColor = TextOnGold
-                            )
-                        )
+
+                Text("Datas do período", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        color = ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { showStartPicker = true }
+                            .testTag("fid_start_date_btn")
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text("Data de início", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                            Spacer(Modifier.height(2.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.CalendarToday, contentDescription = null, tint = NewShapeGold, modifier = Modifier.size(14.dp))
+                                Text(
+                                    text = formatShortDate(startMillis),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimaryDark
+                                )
+                            }
+                        }
+                    }
+
+                    Surface(
+                        color = ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (invalidRange) DangerRed else if (isSuperAdmin) NewShapeGold.copy(alpha = 0.5f) else HairlineBorder
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = isSuperAdmin) { showEndPicker = true }
+                            .testTag("fid_end_date_btn")
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text("Data de fim", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                            Spacer(Modifier.height(2.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Event,
+                                    contentDescription = null,
+                                    tint = if (isSuperAdmin) NewShapeGold else TextSecondaryDark,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = formatShortDate(endMillis),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (invalidRange) DangerRed else TextPrimaryDark
+                                )
+                            }
+                        }
                     }
                 }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
+                    listOf(0 to "Hoje", -1 to "-1 mês", 1 to "+1 mês").forEach { (off, lbl) ->
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                val nextStart = Calendar.getInstance().apply { add(Calendar.MONTH, off) }.timeInMillis
+                                startMillis = nextStart
+                                endMillis = computeAutoEndMillis(nextStart, durationMonths)
+                                endDateCustomized = false
+                            },
+                            label = { Text(lbl) }
+                        )
+                    }
+                    if (isSuperAdmin && endDateCustomized) {
+                        TextButton(
+                            onClick = {
+                                endMillis = computeAutoEndMillis(startMillis, durationMonths)
+                                endDateCustomized = false
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text("Auto (+${durationMonths}m)", color = NewShapeGoldBright, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
                 Text(
-                    text = "Início: ${formatShortDate(startMillis)} → Fim: ${formatShortDate(previewEndMillis)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = NewShapeGoldBright
+                    text = if (isSuperAdmin) {
+                        "Fim calculado automaticamente (+${durationMonths}m). Toca nas datas acima para adaptar início ou fim."
+                    } else {
+                        "Data de fim calculada automaticamente a partir da data de início."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondaryDark
                 )
+
+                if (invalidRange) {
+                    Text(
+                        text = "A data de fim deve ser posterior à data de início.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DangerRed
+                    )
+                }
+
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
@@ -1629,11 +1952,13 @@ fun FidelizacaoDialog(
         confirmButton = {
             GoldPrimaryButton(
                 text = "Guardar Fidelização",
+                enabled = !invalidRange,
                 onClick = {
+                    val safeEnd = if (isSuperAdmin && endMillis > startMillis) endMillis else computeAutoEndMillis(startMillis, durationMonths)
                     if (existing == null && isSuperAdmin && recordPaymentNow && numericTotalPaid > 0.0 && onSaveWithPayment != null) {
-                        onSaveWithPayment(durationMonths, startMillis, notes, numericTotalPaid, payMethod)
+                        onSaveWithPayment(durationMonths, startMillis, safeEnd, notes, numericTotalPaid, payMethod)
                     } else {
-                        onSave(durationMonths, startMillis, notes)
+                        onSave(durationMonths, startMillis, safeEnd, notes)
                     }
                 }
             )
@@ -1642,6 +1967,66 @@ fun FidelizacaoDialog(
             TextButton(onClick = onDismiss) { Text("Cancelar", color = TextSecondaryDark) }
         }
     )
+
+    if (showStartPicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = localMillisToUtcPickerMillis(startMillis)
+        )
+        DatePickerDialog(
+            onDismissRequest = { showStartPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { pickedUtc ->
+                            val nextStart = utcPickerMillisToLocalMillis(pickedUtc)
+                            startMillis = nextStart
+                            endMillis = computeAutoEndMillis(nextStart, durationMonths)
+                            endDateCustomized = false
+                        }
+                        showStartPicker = false
+                    }
+                ) {
+                    Text("Confirmar", color = NewShapeGold, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartPicker = false }) {
+                    Text("Cancelar", color = TextSecondaryDark)
+                }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+
+    if (showEndPicker && isSuperAdmin) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = localMillisToUtcPickerMillis(endMillis)
+        )
+        DatePickerDialog(
+            onDismissRequest = { showEndPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { pickedUtc ->
+                            endMillis = utcPickerMillisToLocalMillis(pickedUtc)
+                            endDateCustomized = true
+                        }
+                        showEndPicker = false
+                    }
+                ) {
+                    Text("Confirmar", color = NewShapeGold, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndPicker = false }) {
+                    Text("Cancelar", color = TextSecondaryDark)
+                }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
 }
 
 fun buildRecentMonthOptions(): List<Pair<String, String>> {

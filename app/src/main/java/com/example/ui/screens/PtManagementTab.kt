@@ -188,31 +188,56 @@ private fun FinancesSection(
         }
     }
 
-    val currentMonthRevenue = remember(paidPayments, state.currentMonthYear) {
-        paidPayments.filter { it.monthYear == state.currentMonthYear }.sumOf { it.amountEur }
+    val monthlyFeePayments = remember(paidPayments) {
+        paidPayments.filter { !SeedCatalog.isExtraFeePayment(it.note) }
     }
-    val currentMonthCount = remember(paidPayments, state.currentMonthYear) {
-        paidPayments.count { it.monthYear == state.currentMonthYear }
+    val extraFeePayments = remember(paidPayments) {
+        paidPayments.filter { SeedCatalog.isExtraFeePayment(it.note) }
     }
+    val extraFeeTotal = remember(extraFeePayments) {
+        extraFeePayments.sumOf { it.amountEur }
+    }
+
+    val currentMonthPayments = remember(paidPayments, state.currentMonthYear) {
+        paidPayments.filter { it.monthYear == state.currentMonthYear }
+    }
+    val currentMonthMonthlyPayments = remember(currentMonthPayments) {
+        currentMonthPayments.filter { !SeedCatalog.isExtraFeePayment(it.note) }
+    }
+    val currentMonthExtraTotal = remember(currentMonthPayments) {
+        currentMonthPayments.filter { SeedCatalog.isExtraFeePayment(it.note) }.sumOf { it.amountEur }
+    }
+
+    val currentMonthRevenue = remember(currentMonthPayments) {
+        currentMonthPayments.sumOf { it.amountEur }
+    }
+    val currentMonthMonthlyRevenue = remember(currentMonthMonthlyPayments) {
+        currentMonthMonthlyPayments.sumOf { it.amountEur }
+    }
+    val currentMonthMonthlyCount = currentMonthMonthlyPayments.size
     val totalRevenue = remember(paidPayments) { paidPayments.sumOf { it.amountEur } }
-    val monthlyAvg = remember(paidPayments, totalRevenue) {
-        if (paidPayments.isEmpty()) 0.0
-        else totalRevenue / paidPayments.map { it.monthYear }.distinct().size.coerceAtLeast(1)
+    val monthlyFeeTotal = remember(monthlyFeePayments) { monthlyFeePayments.sumOf { it.amountEur } }
+
+    val monthlyAvg = remember(monthlyFeePayments, monthlyFeeTotal) {
+        if (monthlyFeePayments.isEmpty()) 0.0
+        else monthlyFeeTotal / monthlyFeePayments.map { it.monthYear }.distinct().size.coerceAtLeast(1)
     }
-    val avgPerStudent = remember(paidPayments, totalRevenue) {
-        if (paidPayments.isEmpty()) 0.0
-        else totalRevenue / paidPayments.map { "${it.clientId}__${it.monthYear}" }.distinct().size.coerceAtLeast(1)
+    val avgPerStudent = remember(monthlyFeePayments, monthlyFeeTotal) {
+        if (monthlyFeePayments.isEmpty()) 0.0
+        else monthlyFeeTotal / monthlyFeePayments.map { "${it.clientId}__${it.monthYear}" }.distinct().size.coerceAtLeast(1)
     }
-    val curMonthUniqueStudents = remember(paidPayments, state.currentMonthYear) {
-        paidPayments.filter { it.monthYear == state.currentMonthYear }.map { it.clientId }.distinct().size
+    val curMonthUniqueStudents = remember(currentMonthMonthlyPayments) {
+        currentMonthMonthlyPayments.map { it.clientId }.distinct().size
     }
-    val curMonthAvgPerStudent = if (curMonthUniqueStudents > 0) currentMonthRevenue / curMonthUniqueStudents else 0.0
+    val curMonthAvgPerStudent = if (curMonthUniqueStudents > 0) currentMonthMonthlyRevenue / curMonthUniqueStudents else 0.0
 
     fun statsFor(list: List<PaymentRecord>): Triple<Double, Double, Double> {
         val total = list.sumOf { it.amountEur }
         val thisMonth = list.filter { it.monthYear == state.currentMonthYear }.sumOf { it.amountEur }
-        val pairs = list.map { "${it.clientId}__${it.monthYear}" }.distinct().size
-        val avg = if (pairs > 0) total / pairs else 0.0
+        val monthlyOnly = list.filter { !SeedCatalog.isExtraFeePayment(it.note) }
+        val monthlySum = monthlyOnly.sumOf { it.amountEur }
+        val pairs = monthlyOnly.map { "${it.clientId}__${it.monthYear}" }.distinct().size
+        val avg = if (pairs > 0) monthlySum / pairs else 0.0
         return Triple(total, thisMonth, avg)
     }
     val (persTotal, persMonth, persAvg) = remember(personalizadoPayments, state.currentMonthYear) { statsFor(personalizadoPayments) }
@@ -414,14 +439,18 @@ private fun FinancesSection(
                     FinanceMetricCard(
                         title = "Faturação (${state.currentMonthLabel})",
                         value = "€${String.format("%.2f", currentMonthRevenue)}",
-                        subtitle = "$currentMonthCount mensalidade(s)",
+                        subtitle = if (currentMonthExtraTotal > 0.0) {
+                            "$currentMonthMonthlyCount mens. + €${String.format("%.2f", currentMonthExtraTotal)} seguro/jóia"
+                        } else {
+                            "$currentMonthMonthlyCount mensalidade(s)"
+                        },
                         accent = NewShapeGoldBright,
                         modifier = Modifier.weight(1f)
                     )
                     FinanceMetricCard(
                         title = "Média Mensal",
                         value = "€${String.format("%.2f", monthlyAvg)}",
-                        subtitle = "por mês com registo",
+                        subtitle = "só mensalidades (excl. seguro/jóia)",
                         accent = InfoBlue,
                         modifier = Modifier.weight(1f)
                     )
@@ -430,9 +459,9 @@ private fun FinancesSection(
                     title = "Média Mensal / Aluno",
                     value = "€${String.format("%.2f", avgPerStudent)}",
                     subtitle = if (curMonthUniqueStudents > 0) {
-                        "${state.currentMonthLabel}: €${String.format("%.2f", curMonthAvgPerStudent)} ($curMonthUniqueStudents alunos)"
+                        "${state.currentMonthLabel}: €${String.format("%.2f", curMonthAvgPerStudent)} ($curMonthUniqueStudents alunos · excl. seguro/jóia)"
                     } else {
-                        "média por aluno / mês"
+                        "só mensalidades (excl. seguro/jóia)"
                     },
                     accent = NewShapeGoldBright,
                     modifier = Modifier.fillMaxWidth()
@@ -440,8 +469,12 @@ private fun FinancesSection(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     FinanceMetricCard(
                         title = "Mensalidades Pagas",
-                        value = paidPayments.size.toString(),
-                        subtitle = "1/mês na fidelização",
+                        value = monthlyFeePayments.size.toString(),
+                        subtitle = if (extraFeePayments.isNotEmpty()) {
+                            "+ ${extraFeePayments.size} seguro/jóia (€${String.format("%.2f", extraFeeTotal)})"
+                        } else {
+                            "1/mês na fidelização"
+                        },
                         accent = ConfirmedGreen,
                         modifier = Modifier.weight(1f)
                     )
@@ -452,7 +485,9 @@ private fun FinancesSection(
                             else -> "Total Realizado"
                         },
                         value = "€${String.format("%.2f", totalRevenue)}",
-                        subtitle = when (periodScope) {
+                        subtitle = if (extraFeeTotal > 0.0) {
+                            "inclui €${String.format("%.2f", extraFeeTotal)} seguro/jóia"
+                        } else when (periodScope) {
                             "CURRENT_MONTH" -> "apenas mês atual"
                             "ALL_FUTURE" -> "inclui pré-pagos"
                             else -> "até este mês (1/mês)"
@@ -611,6 +646,8 @@ private fun FinancesSection(
                         val clientObj = clientMap[payment.clientId]
                         val isFuture = payment.monthYear > state.currentMonthYear
                         val isFid = payment.note.contains("fideliza", ignoreCase = true)
+                        val category = SeedCatalog.getPaymentCategory(payment.note)
+                        val isExtra = category != "MENSALIDADE"
                         val fidDetail = if (isFid) payment.note.split("·").drop(1).joinToString("·").trim().ifBlank { null } else null
                         PaymentRowCard(
                             clientName = clientObj?.name ?: "Aluno",
@@ -619,8 +656,9 @@ private fun FinancesSection(
                             paidAtMillis = payment.paidAtMillis,
                             amountEur = payment.amountEur,
                             isFuture = isFuture,
+                            category = category,
                             fidelizacaoDetail = fidDetail,
-                            onSplit = if (!isFid && payment.amountEur > 0.0) { { splitTargetPayment = payment } } else null,
+                            onSplit = if (!isFid && !isExtra && payment.amountEur > 0.0) { { splitTargetPayment = payment } } else null,
                             onDelete = { viewModel.deletePayment(payment.id) }
                         )
                     }
@@ -640,6 +678,8 @@ private fun FinancesSection(
                     val clientObj = clientMap[payment.clientId]
                     val isFuture = payment.monthYear > state.currentMonthYear
                     val isFid = payment.note.contains("fideliza", ignoreCase = true)
+                    val category = SeedCatalog.getPaymentCategory(payment.note)
+                    val isExtra = category != "MENSALIDADE"
                     PaymentRowCard(
                         clientName = clientObj?.name ?: "Aluno",
                         trainingType = clientObj?.trainingType ?: "GRUPO",
@@ -647,8 +687,9 @@ private fun FinancesSection(
                         paidAtMillis = payment.paidAtMillis,
                         amountEur = payment.amountEur,
                         isFuture = isFuture,
+                        category = category,
                         fidelizacaoDetail = null,
-                        onSplit = if (!isFid && payment.amountEur > 0.0) { { splitTargetPayment = payment } } else null,
+                        onSplit = if (!isFid && !isExtra && payment.amountEur > 0.0) { { splitTargetPayment = payment } } else null,
                         onDelete = { viewModel.deletePayment(payment.id) }
                     )
                 }
@@ -712,8 +753,17 @@ private fun FinancesSection(
             defaultAmountEur = if (client.monthlyFeeEur > 0.0) client.monthlyFeeEur else 120.0,
             defaultDurationMonths = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, state.fidelizacoes),
             onDismiss = { chosenClient = null },
-            onConfirm = { my, ml, amt, method, durationMonths ->
-                viewModel.recordPayment(client.id, my, ml, amt, method, durationMonths)
+            onConfirm = { my, ml, amt, method, durationMonths, seguroEur, joiaEur ->
+                viewModel.recordPayment(
+                    clientId = client.id,
+                    monthYear = my,
+                    monthLabel = ml,
+                    amountEur = amt,
+                    note = method,
+                    durationMonths = durationMonths,
+                    seguroEur = seguroEur,
+                    joiaEur = joiaEur
+                )
                 chosenClient = null
             }
         )
@@ -742,6 +792,7 @@ private fun PaymentRowCard(
     paidAtMillis: Long,
     amountEur: Double,
     isFuture: Boolean = false,
+    category: String = "MENSALIDADE",
     fidelizacaoDetail: String? = null,
     onSplit: (() -> Unit)? = null,
     onDelete: () -> Unit
@@ -770,6 +821,11 @@ private fun PaymentRowCard(
                             textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
                             containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
                         )
+                        if (category == "SEGURO") {
+                            StatusPill("Seguro", InfoBlue, InfoBlueContainer)
+                        } else if (category == "JOIA") {
+                            StatusPill("Jóia", PendingAmber, PendingAmberContainer)
+                        }
                         if (isFuture) {
                             StatusPill("Futuro", PendingAmber, PendingAmberContainer)
                         }
@@ -1002,18 +1058,40 @@ private fun FidelizacoesSection(
                 targetClientForCreate = null
                 editingFid = null
             },
-            onSave = { months, startMillis, notes ->
-                viewModel.saveFidelizacao(dialogClient.id, months, startMillis, notes, editingFid?.id.orEmpty())
+            onSave = { months, startMillis, endMillis, notes ->
+                viewModel.saveFidelizacao(
+                    clientId = dialogClient.id,
+                    durationMonths = months,
+                    startDateMillis = startMillis,
+                    notes = notes,
+                    existingId = editingFid?.id.orEmpty(),
+                    customEndDateMillis = if (state.isSuperAdmin) endMillis else null
+                )
                 targetClientForCreate = null
                 editingFid = null
             },
-            onSaveWithPayment = { months, startMillis, notes, totalPaidEur, method ->
-                viewModel.saveFidelizacao(dialogClient.id, months, startMillis, notes, "")
+            onSaveWithPayment = { months, startMillis, endMillis, notes, totalPaidEur, method ->
+                viewModel.saveFidelizacao(
+                    clientId = dialogClient.id,
+                    durationMonths = months,
+                    startDateMillis = startMillis,
+                    notes = notes,
+                    existingId = "",
+                    customEndDateMillis = if (state.isSuperAdmin) endMillis else null
+                )
                 val startCal = java.util.Calendar.getInstance().apply { timeInMillis = startMillis }
                 val monthsPt = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
                 val my = String.format("%04d-%02d", startCal.get(java.util.Calendar.YEAR), startCal.get(java.util.Calendar.MONTH) + 1)
                 val ml = "${monthsPt[startCal.get(java.util.Calendar.MONTH)]} ${startCal.get(java.util.Calendar.YEAR)}"
-                viewModel.recordPayment(dialogClient.id, my, ml, totalPaidEur, method, months)
+                viewModel.recordPayment(
+                    clientId = dialogClient.id,
+                    monthYear = my,
+                    monthLabel = ml,
+                    amountEur = totalPaidEur,
+                    note = method,
+                    durationMonths = months,
+                    skipAutoFidelizacao = true
+                )
                 targetClientForCreate = null
                 editingFid = null
             }

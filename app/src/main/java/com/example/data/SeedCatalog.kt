@@ -229,6 +229,19 @@ object SeedCatalog {
         }
     }
 
+    const val DEFAULT_JOIA_EUR: Double = 30.0
+
+    fun getPaymentCategory(note: String): String {
+        val clean = note.trim().lowercase()
+        return when {
+            clean.contains("seguro") -> "SEGURO"
+            clean.contains("jóia") || clean.contains("joia") || clean.contains("inscri") -> "JOIA"
+            else -> "MENSALIDADE"
+        }
+    }
+
+    fun isExtraFeePayment(note: String): Boolean = getPaymentCategory(note) != "MENSALIDADE"
+
     fun formatRgpdConsentStamp(ts: Long = System.currentTimeMillis()): String {
         val c = Calendar.getInstance().apply { timeInMillis = ts }
         return String.format(

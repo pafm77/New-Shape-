@@ -215,7 +215,7 @@ export const FinanceChart: React.FC<FinanceChartProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <BarChart3 className="h-4 w-4 text-[#EAB308]" />
             <h3 className="text-sm sm:text-base font-bold text-[#F4F4F5]">
-              Mensalidades Recebidas — Últimos 6 Meses
+              Faturação Recebida — Últimos 6 Meses
             </h3>
             <StatusPill tone="gold">
               <span className="inline-flex items-center gap-1">
@@ -225,7 +225,7 @@ export const FinanceChart: React.FC<FinanceChartProps> = ({
             </StatusPill>
           </div>
           <p className="mt-0.5 text-xs text-[#A1A1AA]">
-            Comparação mensal entre Treino Personalizado e Treino em Grupo ({totalCount} mensalidade(s) paga(s))
+            Comparação mensal entre Treino Personalizado e Treino em Grupo ({totalCount} registo(s) pagos, inclui seguro/jóia)
           </p>
         </div>
 

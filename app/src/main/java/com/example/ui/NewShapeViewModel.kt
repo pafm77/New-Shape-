@@ -796,17 +796,37 @@ class NewShapeViewModel(
         monthLabel: String,
         amountEur: Double,
         note: String,
-        durationMonths: Int = 1
+        durationMonths: Int = 1,
+        seguroEur: Double = 0.0,
+        joiaEur: Double = 0.0,
+        skipAutoFidelizacao: Boolean = false
     ) {
         val months = if (durationMonths == 6 || durationMonths == 12) durationMonths else 1
         viewModelScope.launch {
-            repository.recordPayment(clientId, monthYear, monthLabel, amountEur, note, months)
+            repository.recordPayment(
+                clientId = clientId,
+                monthYear = monthYear,
+                monthLabel = monthLabel,
+                amountEur = amountEur,
+                note = note,
+                durationMonths = months,
+                seguroEur = seguroEur,
+                joiaEur = joiaEur,
+                skipAutoFidelizacao = skipAutoFidelizacao
+            )
                 .onSuccess {
-                    _statusBanner.value = if (months > 1) {
-                        val perMonth = amountEur / months
-                        "Pagamento de $months meses registado (€${String.format("%.2f", perMonth)}/mês)!"
-                    } else {
-                        "Mensalidade de €${String.format("%.2f", amountEur)} registada!"
+                    val extrasParts = buildList {
+                        if (seguroEur > 0.0) add("Seguro €${String.format("%.2f", seguroEur)}")
+                        if (joiaEur > 0.0) add("Jóia €${String.format("%.2f", joiaEur)}")
+                    }
+                    val extrasSuffix = if (extrasParts.isNotEmpty()) " + ${extrasParts.joinToString(" + ")}" else ""
+                    _statusBanner.value = when {
+                        amountEur > 0.0 && months > 1 -> {
+                            val perMonth = amountEur / months
+                            "Fidelização ${months}m registada (€${String.format("%.2f", perMonth)}/mês)$extrasSuffix!"
+                        }
+                        amountEur > 0.0 -> "Mensalidade €${String.format("%.2f", amountEur)}$extrasSuffix registada!"
+                        else -> "Pagamento (${extrasParts.joinToString(" + ")}) registado!"
                     }
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
@@ -826,16 +846,23 @@ class NewShapeViewModel(
             repository.splitPaymentIntoFidelizacao(payment, months)
                 .onSuccess {
                     val perMonth = payment.amountEur / months
-                    _statusBanner.value = "Pagamento dividido por $months meses (€${String.format("%.2f", perMonth)}/mês)!"
+                    _statusBanner.value = "Pagamento dividido por $months meses (€${String.format("%.2f", perMonth)}/mês) e adicionado em Fidelizações!"
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
 
     // --- Fidelizações ---
-    fun saveFidelizacao(clientId: String, durationMonths: Int, startDateMillis: Long, notes: String, existingId: String = "") {
+    fun saveFidelizacao(
+        clientId: String,
+        durationMonths: Int,
+        startDateMillis: Long,
+        notes: String,
+        existingId: String = "",
+        customEndDateMillis: Long? = null
+    ) {
         viewModelScope.launch {
-            repository.saveFidelizacao(clientId, durationMonths, startDateMillis, notes, existingId)
+            repository.saveFidelizacao(clientId, durationMonths, startDateMillis, notes, existingId, customEndDateMillis)
                 .onSuccess { _statusBanner.value = "Fidelização de $durationMonths meses guardada." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }

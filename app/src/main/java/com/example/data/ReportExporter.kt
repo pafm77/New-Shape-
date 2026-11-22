@@ -503,9 +503,11 @@ object ReportExporter {
 
         val sb = StringBuilder()
         sb.append('\uFEFF') // UTF-8 BOM for PT Excel
-        sb.appendLine("Mes;Data Pagamento;Aluno;Modalidade;Metodo;Valor (EUR);Estado")
+        sb.appendLine("Mes;Data Pagamento;Aluno;Modalidade;Tipo;Metodo;Valor (EUR);Estado")
 
         var totalAll = 0.0
+        var totalMensalidades = 0.0
+        var totalExtras = 0.0
         var totalPersonal = 0.0
         var totalGroup = 0.0
         val methodTotals = linkedMapOf("MbWay" to 0.0, "Dinheiro" to 0.0, "João" to 0.0, "Outro" to 0.0)
@@ -515,10 +517,17 @@ object ReportExporter {
             val clientName = client?.name ?: "Aluno"
             val isPersonal = client?.trainingType == "PERSONALIZADO"
             val modality = if (isPersonal) "Personalizado" else "Grupo"
+            val category = SeedCatalog.getPaymentCategory(p.note)
+            val tipoLabel = when (category) {
+                "SEGURO" -> "Seguro"
+                "JOIA" -> "Jóia de Inscrição"
+                else -> "Mensalidade"
+            }
             val method = SeedCatalog.normalizePaymentMethod(p.note) ?: p.note.ifBlank { "Outro" }
             val statusLabel = if (p.monthYear > currentMonthYear) "Pré-pago (Futuro)" else "Pago"
 
             totalAll += p.amountEur
+            if (category == "MENSALIDADE") totalMensalidades += p.amountEur else totalExtras += p.amountEur
             if (isPersonal) totalPersonal += p.amountEur else totalGroup += p.amountEur
             val methodKey = if (method in methodTotals) method else "Outro"
             methodTotals[methodKey] = (methodTotals[methodKey] ?: 0.0) + p.amountEur
@@ -529,6 +538,7 @@ object ReportExporter {
                     csvCell(formatDate(p.paidAtMillis)),
                     csvCell(clientName),
                     csvCell(modality),
+                    csvCell(tipoLabel),
                     csvCell(method),
                     String.format(Locale.US, "%.2f", p.amountEur).replace('.', ','),
                     statusLabel
@@ -537,13 +547,15 @@ object ReportExporter {
         }
 
         sb.appendLine()
-        sb.appendLine("RESUMO CONTABILIDADE;;;;;;")
-        sb.appendLine("Total Geral;;;;;${String.format(Locale.US, "%.2f", totalAll).replace('.', ',')};")
-        sb.appendLine("Total Treino Personalizado;;;;;${String.format(Locale.US, "%.2f", totalPersonal).replace('.', ',')};")
-        sb.appendLine("Total Treino em Grupo;;;;;${String.format(Locale.US, "%.2f", totalGroup).replace('.', ',')};")
+        sb.appendLine("RESUMO CONTABILIDADE;;;;;;;")
+        sb.appendLine("Total Geral;;;;;;${String.format(Locale.US, "%.2f", totalAll).replace('.', ',')};")
+        sb.appendLine("Total Mensalidades;;;;;;${String.format(Locale.US, "%.2f", totalMensalidades).replace('.', ',')};")
+        sb.appendLine("Total Seguro e Joia;;;;;;${String.format(Locale.US, "%.2f", totalExtras).replace('.', ',')};")
+        sb.appendLine("Total Treino Personalizado;;;;;;${String.format(Locale.US, "%.2f", totalPersonal).replace('.', ',')};")
+        sb.appendLine("Total Treino em Grupo;;;;;;${String.format(Locale.US, "%.2f", totalGroup).replace('.', ',')};")
         methodTotals.forEach { (method, amt) ->
             if (amt > 0.0 || method != "Outro") {
-                sb.appendLine("Total $method;;;;;${String.format(Locale.US, "%.2f", amt).replace('.', ',')};")
+                sb.appendLine("Total $method;;;;;;${String.format(Locale.US, "%.2f", amt).replace('.', ',')};")
             }
         }
 

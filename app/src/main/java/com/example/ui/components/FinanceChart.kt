@@ -138,12 +138,12 @@ fun FinanceChart(
                 )
                 Column {
                     Text(
-                        text = "Mensalidades — Últimos 6 Meses",
+                        text = "Faturação — Últimos 6 Meses",
                         style = MaterialTheme.typography.titleMedium,
                         color = TextPrimaryDark
                     )
                     Text(
-                        text = "Personalizado vs Grupo (recebidas)",
+                        text = "Personalizado vs Grupo (inclui seguro/jóia)",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondaryDark
                     )

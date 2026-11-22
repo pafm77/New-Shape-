@@ -143,6 +143,20 @@ export function normalizePaymentMethod(raw: string): PaymentMethod | null {
   return null;
 }
 
+export type PaymentCategory = 'MENSALIDADE' | 'SEGURO' | 'JOIA';
+export const DEFAULT_JOIA_EUR = 30;
+
+export function getPaymentCategory(note: string): PaymentCategory {
+  const clean = (note || '').trim().toLowerCase();
+  if (clean.includes('seguro')) return 'SEGURO';
+  if (clean.includes('jóia') || clean.includes('joia') || clean.includes('inscri')) return 'JOIA';
+  return 'MENSALIDADE';
+}
+
+export function isExtraFeePayment(note: string): boolean {
+  return getPaymentCategory(note) !== 'MENSALIDADE';
+}
+
 export function splitAmountAcrossMonths(totalAmount: number, months: number): number[] {
   const count = Math.max(1, Math.round(months));
   const clamped = Math.max(0, Math.min(100000, Number.isFinite(totalAmount) ? totalAmount : 0));

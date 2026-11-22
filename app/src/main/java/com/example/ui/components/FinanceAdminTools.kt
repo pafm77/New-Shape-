@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.AccountingExportPeriod
 import com.example.data.ReportExporter
+import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
 import com.example.data.model.FidelizacaoRecord
 import com.example.data.model.PaymentRecord
@@ -50,10 +51,14 @@ fun FinanceAdminTools(
     val context = LocalContext.current
     val activeClients = remember(clients) { clients.filter { it.active } }
 
-    // Ponto 2A: Active clients without paid monthly fee for currentMonthYear
+    // Ponto 2A: Active clients without paid monthly fee for currentMonthYear (excludes Seguro/Jóia)
     val overdueClients = remember(activeClients, payments, currentMonthYear) {
         val paidIds = payments
-            .filter { it.monthYear == currentMonthYear && it.paid }
+            .filter {
+                it.monthYear == currentMonthYear &&
+                    it.paid &&
+                    !SeedCatalog.isExtraFeePayment(it.note)
+            }
             .map { it.clientId }
             .toSet()
         activeClients

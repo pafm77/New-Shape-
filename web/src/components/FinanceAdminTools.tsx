@@ -13,6 +13,8 @@ import {
   buildRecentMonthOptions,
   buildWhatsAppUrl,
   formatShortDate,
+  getPaymentCategory,
+  isExtraFeePayment,
   normalizePaymentMethod,
 } from '../data/seedCatalog';
 import { BrandCard, GoldButton, StatusPill } from './UiPrimitives';
@@ -65,11 +67,11 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
 
-  // Ponto 2A: Active clients without a paid payment for current month
+  // Ponto 2A: Active clients without a paid monthly fee for current month (excludes Seguro/Jóia)
   const overdueClients = useMemo(() => {
     const paidThisMonthIds = new Set(
       payments
-        .filter((p) => p.paid && p.monthYear === currentMonthYear)
+        .filter((p) => p.paid && p.monthYear === currentMonthYear && !isExtraFeePayment(p.note))
         .map((p) => p.clientId)
     );
     return activeClients.filter((c) => !paidThisMonthIds.has(c.id));
@@ -128,19 +130,30 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
       .sort((a, b) => (b.monthYear.localeCompare(a.monthYear)) || (b.paidAtMillis - a.paidAtMillis));
 
     const lines: string[] = [];
-    lines.push('Mes;Data Pagamento;Aluno;Modalidade;Metodo;Valor (EUR);Estado');
+    lines.push('Mes;Data Pagamento;Aluno;Modalidade;Tipo;Metodo;Valor (EUR);Estado');
 
     let totalPers = 0;
     let totalGrupo = 0;
+    let totalMensalidades = 0;
+    let totalExtras = 0;
     const methodTotals: Record<string, number> = { MbWay: 0, Dinheiro: 0, João: 0, Outro: 0 };
 
     sorted.forEach((p) => {
       const client = clientMap.get(p.clientId);
       const modalidade =
         client?.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo';
+      const category = getPaymentCategory(p.note);
+      const tipoLabel =
+        category === 'SEGURO'
+          ? 'Seguro'
+          : category === 'JOIA'
+          ? 'Jóia de Inscrição'
+          : 'Mensalidade';
       const method = normalizePaymentMethod(p.note) || (p.note?.trim() || 'Outro');
       if (modalidade === 'Personalizado') totalPers += p.amountEur;
       else totalGrupo += p.amountEur;
+      if (category === 'MENSALIDADE') totalMensalidades += p.amountEur;
+      else totalExtras += p.amountEur;
       if (method in methodTotals) methodTotals[method] += p.amountEur;
       else methodTotals.Outro += p.amountEur;
 
@@ -156,6 +169,7 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
           csvEscape(p.paidAtMillis > 0 ? formatShortDate(p.paidAtMillis) : ''),
           csvEscape(client?.name || 'Aluno'),
           csvEscape(modalidade),
+          csvEscape(tipoLabel),
           csvEscape(method),
           csvEscape(p.amountEur.toFixed(2).replace('.', ',')),
           csvEscape(statusLabel),
@@ -166,6 +180,8 @@ export const FinanceAdminTools: React.FC<FinanceAdminToolsProps> = ({
     const grandTotal = totalPers + totalGrupo;
     lines.push('');
     lines.push('RESUMO CONTABILISTICO;Valor (EUR)');
+    lines.push(`Mensalidades;${totalMensalidades.toFixed(2).replace('.', ',')}`);
+    lines.push(`Seguro e Joia de Inscricao;${totalExtras.toFixed(2).replace('.', ',')}`);
     lines.push(`Treino Personalizado;${totalPers.toFixed(2).replace('.', ',')}`);
     lines.push(`Treino em Grupo;${totalGrupo.toFixed(2).replace('.', ',')}`);
     PAYMENT_METHODS.forEach((m) => {
