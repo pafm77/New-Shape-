@@ -552,12 +552,19 @@ class NewShapeViewModel(
         minute: Int,
         durationMinutes: Int,
         capacity: Int,
-        note: String
+        note: String,
+        ptPrivatePersonal: Boolean = false
     ) {
         if (selectedDays.isEmpty()) return
         viewModelScope.launch {
-            repository.createSessions(week, selectedDays, hour, minute, durationMinutes, capacity, note)
-                .onSuccess { _statusBanner.value = "Treino(s) criado(s) com sucesso." }
+            repository.createSessions(week, selectedDays, hour, minute, durationMinutes, capacity, note, ptPrivatePersonal)
+                .onSuccess {
+                    _statusBanner.value = if (ptPrivatePersonal) {
+                        "Horário(s) personalizado(s) (Só PT) criado(s) com sucesso."
+                    } else {
+                        "Treino(s) criado(s) com sucesso."
+                    }
+                }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }

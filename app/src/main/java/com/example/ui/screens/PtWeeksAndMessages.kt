@@ -50,11 +50,23 @@ fun SemanasSection(
     }
 
     var showNewSessionDialog by remember { mutableStateOf(false) }
+    var newSessionInitialPrivate by remember { mutableStateOf(false) }
+    var visibilityFilter by remember { mutableStateOf("ALL") } // ALL, PUBLIC, PRIVATE
     var showFixedManagerDialog by remember { mutableStateOf(false) }
     var fixedManagerInitialClientId by remember { mutableStateOf<String?>(null) }
     var selectedSessionDetail by remember { mutableStateOf<TrainingSessionRecord?>(null) }
     var sessionToEdit by remember { mutableStateOf<TrainingSessionRecord?>(null) }
     var sessionToDelete by remember { mutableStateOf<TrainingSessionRecord?>(null) }
+
+    val privateCount = remember(weekSessions) { weekSessions.count { it.ptPrivatePersonal } }
+    val publicCount = (weekSessions.size - privateCount).coerceAtLeast(0)
+    val filteredWeekSessions = remember(weekSessions, visibilityFilter) {
+        when (visibilityFilter) {
+            "PUBLIC" -> weekSessions.filter { !it.ptPrivatePersonal }
+            "PRIVATE" -> weekSessions.filter { it.ptPrivatePersonal }
+            else -> weekSessions
+        }
+    }
 
     val fixedClients = remember(state.clients) {
         state.clients
@@ -106,32 +118,44 @@ fun SemanasSection(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         GoldPrimaryButton(
                             text = "+ Novo treino",
-                            onClick = { showNewSessionDialog = true },
+                            onClick = {
+                                newSessionInitialPrivate = false
+                                showNewSessionDialog = true
+                            },
                             modifier = Modifier.weight(1f),
                             testTag = "new_session_button"
                         )
                         DarkSecondaryButton(
-                            text = if (activeWeek.published) "Despublicar" else "Publicar semana",
-                            onClick = { viewModel.toggleWeekPublished(activeWeek) },
-                            modifier = Modifier.weight(1f)
+                            text = "+ Pers. (Só PT)",
+                            icon = Icons.Default.VisibilityOff,
+                            onClick = {
+                                newSessionInitialPrivate = true
+                                showNewSessionDialog = true
+                            },
+                            modifier = Modifier.weight(1f).testTag("new_private_session_button")
                         )
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         DarkSecondaryButton(
-                            text = "Duplicar anterior",
+                            text = if (activeWeek.published) "Despublicar" else "Publicar",
+                            onClick = { viewModel.toggleWeekPublished(activeWeek) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        DarkSecondaryButton(
+                            text = "Duplicar",
                             icon = Icons.Default.ContentCopy,
                             onClick = { viewModel.duplicatePreviousWeek(activeWeek) },
                             modifier = Modifier.weight(1f)
                         )
                         DarkSecondaryButton(
-                            text = "Exportar CSV",
+                            text = "CSV",
                             icon = Icons.Default.Download,
                             onClick = {
                                 val csv = viewModel.buildWeekCsv(activeWeek)
                                 sharePlainText(context, "New Shape · Treinos ${activeWeek.label}", csv)
                             },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(0.85f)
                         )
                     }
                 }
@@ -276,19 +300,48 @@ fun SemanasSection(
         }
 
         item {
-            Text(
-                text = "Treinos (${weekSessions.size})",
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimaryDark
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Treinos (${filteredWeekSessions.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimaryDark
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "Todos (${weekSessions.size})",
+                        "PUBLIC" to "Visíveis ($publicCount)",
+                        "PRIVATE" to "Personalizado Só PT ($privateCount)"
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = visibilityFilter == key,
+                            onClick = { visibilityFilter = key },
+                            label = { Text(label, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            ),
+                            modifier = Modifier.testTag("weeks_filter_${key.lowercase()}")
+                        )
+                    }
+                }
+            }
         }
 
-        if (weekSessions.isEmpty()) {
+        if (filteredWeekSessions.isEmpty()) {
             item {
                 EmptyStateBox(
                     icon = Icons.Default.CalendarMonth,
-                    title = "Sem treinos nesta semana",
-                    subtitle = "Toca em '+ Novo treino' ou 'Duplicar anterior' para criar os horários."
+                    title = if (visibilityFilter == "PRIVATE") "Sem horários personalizados (Só PT)" else "Sem treinos nesta semana",
+                    subtitle = if (visibilityFilter == "PRIVATE") {
+                        "Toca em '+ Pers. (Só PT)' acima para criar horários ocultos dos alunos."
+                    } else {
+                        "Toca em '+ Novo treino' ou 'Duplicar' para criar os horários."
+                    }
                 )
             }
         } else {
@@ -296,7 +349,7 @@ fun SemanasSection(
             val todayYear = todayCal.get(Calendar.YEAR)
             val todayDay = todayCal.get(Calendar.DAY_OF_YEAR)
 
-            items(weekSessions, key = { it.id }) { session ->
+            items(filteredWeekSessions, key = { it.id }) { session ->
                 val sessionBookings = state.bookings.filter {
                     it.sessionId == session.id && it.status != BookingStatus.CANCELLED.name
                 }
@@ -315,11 +368,15 @@ fun SemanasSection(
                     }
                 }
                 Surface(
-                    color = CharcoalSurface,
+                    color = if (session.ptPrivatePersonal && !isToday) NewShapeGoldMuted.copy(alpha = 0.25f) else CharcoalSurface,
                     shape = MaterialTheme.shapes.medium,
                     border = BorderStroke(
                         width = if (isToday) 1.5.dp else 1.dp,
-                        color = if (isToday) NewShapeGold else HairlineBorder
+                        color = when {
+                            isToday -> NewShapeGold
+                            session.ptPrivatePersonal -> NewShapeGold.copy(alpha = 0.55f)
+                            else -> HairlineBorder
+                        }
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -342,6 +399,9 @@ fun SemanasSection(
                                     style = MaterialTheme.typography.titleSmall,
                                     color = TextPrimaryDark
                                 )
+                                if (session.ptPrivatePersonal) {
+                                    StatusPill("Só PT", NewShapeGoldBright, NewShapeGoldMuted)
+                                }
                                 if (isToday) {
                                     StatusPill("Hoje", NewShapeGoldBright, NewShapeGoldMuted)
                                 }
@@ -350,7 +410,9 @@ fun SemanasSection(
                                 }
                             }
                             Text(
-                                text = "${session.durationMinutes} min" + if (session.note.isNotBlank()) " · ${session.note}" else "",
+                                text = "${session.durationMinutes} min" +
+                                    (if (session.note.isNotBlank()) " · ${session.note}" else "") +
+                                    (if (session.ptPrivatePersonal) " · Oculto dos alunos" else ""),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondaryDark
                             )
@@ -401,9 +463,10 @@ fun SemanasSection(
 
     if (showNewSessionDialog && activeWeek != null) {
         NewSessionDialog(
+            initialPrivatePersonal = newSessionInitialPrivate,
             onDismiss = { showNewSessionDialog = false },
-            onCreate = { days, h, m, dur, cap, note ->
-                viewModel.createSessions(activeWeek, days, h, m, dur, cap, note)
+            onCreate = { days, h, m, dur, cap, note, ptPrivatePersonal ->
+                viewModel.createSessions(activeWeek, days, h, m, dur, cap, note, ptPrivatePersonal)
                 showNewSessionDialog = false
             }
         )
@@ -484,14 +547,16 @@ fun SemanasSection(
 
 @Composable
 private fun NewSessionDialog(
+    initialPrivatePersonal: Boolean = false,
     onDismiss: () -> Unit,
-    onCreate: (Set<Int>, Int, Int, Int, Int, String) -> Unit
+    onCreate: (Set<Int>, Int, Int, Int, Int, String, Boolean) -> Unit
 ) {
     var selectedDays by remember { mutableStateOf(setOf(1, 3)) }
     var hourText by remember { mutableStateOf("18") }
     var minuteText by remember { mutableStateOf("00") }
     var duration by remember { mutableIntStateOf(60) }
-    var capacityText by remember { mutableStateOf("6") }
+    var ptPrivatePersonal by remember(initialPrivatePersonal) { mutableStateOf(initialPrivatePersonal) }
+    var capacityText by remember(initialPrivatePersonal) { mutableStateOf(if (initialPrivatePersonal) "1" else "6") }
     var note by remember { mutableStateOf("") }
 
     val dayLabels = listOf(1 to "Seg", 2 to "Ter", 3 to "Qua", 4 to "Qui", 5 to "Sex", 6 to "Sáb", 7 to "Dom")
@@ -499,9 +564,59 @@ private fun NewSessionDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = CharcoalSurface,
-        title = { Text("Novo treino", color = TextPrimaryDark) },
+        title = {
+            Column {
+                Text(
+                    text = if (ptPrivatePersonal) "Novo Horário Personalizado" else "Novo treino",
+                    color = TextPrimaryDark
+                )
+                Text(
+                    text = if (ptPrivatePersonal) "Só PT · Oculto dos alunos" else "Visível para alunos quando publicado",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (ptPrivatePersonal) NewShapeGoldBright else TextSecondaryDark
+                )
+            }
+        },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Surface(
+                    color = if (ptPrivatePersonal) NewShapeGoldMuted.copy(alpha = 0.6f) else ElevatedCharcoal,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (ptPrivatePersonal) NewShapeGold else HairlineBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Personalizado · Só PT",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = NewShapeGoldBright
+                            )
+                            Text(
+                                text = if (ptPrivatePersonal) "Oculto no Portal do Aluno" else "Ativa para ocultar dos alunos",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                        Switch(
+                            checked = ptPrivatePersonal,
+                            onCheckedChange = { next ->
+                                ptPrivatePersonal = next
+                                if (next && capacityText == "6") capacityText = "1"
+                                if (!next && capacityText == "1") capacityText = "6"
+                            },
+                            modifier = Modifier.testTag("new_session_private_switch")
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 Text("Dias (podes escolher vários)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -561,8 +676,11 @@ private fun NewSessionDialog(
                 Spacer(Modifier.height(10.dp))
                 Text("Duração", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(45, 60, 75, 90).forEach { dur ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    listOf(30, 45, 60, 75, 90).forEach { dur ->
                         FilterChip(
                             selected = duration == dur,
                             onClick = { duration = dur },
@@ -578,7 +696,12 @@ private fun NewSessionDialog(
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
-                    label = { Text("Nota (opcional, ex: ao ar livre)") },
+                    label = {
+                        Text(
+                            if (ptPrivatePersonal) "Nota (opcional, ex: Treino Personalizado)"
+                            else "Nota (opcional, ex: ao ar livre)"
+                        )
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = darkFieldColors()
@@ -587,14 +710,15 @@ private fun NewSessionDialog(
         },
         confirmButton = {
             GoldPrimaryButton(
-                text = "Criar treino",
+                text = if (ptPrivatePersonal) "Criar (Só PT)" else "Criar treino",
                 enabled = selectedDays.isNotEmpty(),
                 onClick = {
                     val h = (hourText.toIntOrNull() ?: 18).coerceIn(0, 23)
                     val m = (minuteText.toIntOrNull() ?: 0).coerceIn(0, 59)
-                    val cap = (capacityText.toIntOrNull() ?: 6).coerceIn(1, 50)
-                    onCreate(selectedDays, h, m, duration, cap, note)
-                }
+                    val cap = (capacityText.toIntOrNull() ?: if (ptPrivatePersonal) 1 else 6).coerceIn(1, 50)
+                    onCreate(selectedDays, h, m, duration, cap, note, ptPrivatePersonal)
+                },
+                testTag = "confirm_create_session_btn"
             )
         },
         dismissButton = {
@@ -613,6 +737,7 @@ private fun EditSessionDialog(
     var capacityText by remember { mutableStateOf(session.capacity.toString()) }
     var durationText by remember { mutableStateOf(session.durationMinutes.toString()) }
     var note by remember { mutableStateOf(session.note) }
+    var ptPrivatePersonal by remember { mutableStateOf(session.ptPrivatePersonal) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -621,6 +746,39 @@ private fun EditSessionDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(session.dateLabel, style = MaterialTheme.typography.titleSmall, color = NewShapeGold)
+                Surface(
+                    color = if (ptPrivatePersonal) NewShapeGoldMuted.copy(alpha = 0.6f) else ElevatedCharcoal,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (ptPrivatePersonal) NewShapeGold else HairlineBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Personalizado · Só PT",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = NewShapeGoldBright
+                            )
+                            Text(
+                                text = "Oculto dos alunos",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                        Switch(
+                            checked = ptPrivatePersonal,
+                            onCheckedChange = { ptPrivatePersonal = it },
+                            modifier = Modifier.testTag("edit_session_private_switch")
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = timeLabel,
                     onValueChange = { timeLabel = it },
@@ -664,7 +822,8 @@ private fun EditSessionDialog(
                             timeLabel = timeLabel.ifBlank { session.timeLabel },
                             durationMinutes = durationText.toIntOrNull()?.coerceIn(15, 180) ?: session.durationMinutes,
                             capacity = capacityText.toIntOrNull()?.coerceIn(1, 50) ?: session.capacity,
-                            note = note.trim()
+                            note = note.trim(),
+                            ptPrivatePersonal = ptPrivatePersonal
                         )
                     )
                 }
@@ -693,8 +852,14 @@ private fun SessionDetailDialog(
 ) {
     val clientMap = clients.associateBy { it.id }
     val enrolledIds = bookings.map { it.clientId }.toSet()
-    val availableClients = clients.filter { it.active && it.id !in enrolledIds }
-    var selectedAddClient by remember { mutableStateOf(availableClients.firstOrNull()) }
+    val availableClients = clients
+        .filter { it.active && it.id !in enrolledIds }
+        .sortedWith(
+            compareBy<ClientRecord> {
+                if (session.ptPrivatePersonal && it.trainingType == "PERSONALIZADO") 0 else 1
+            }.thenBy { it.name.lowercase() }
+        )
+    var selectedAddClient by remember(availableClients) { mutableStateOf(availableClients.firstOrNull()) }
     var dropdownExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -713,6 +878,28 @@ private fun SessionDetailDialog(
         },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                if (session.ptPrivatePersonal) {
+                    Surface(
+                        color = NewShapeGoldMuted.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.6f)),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.VisibilityOff, contentDescription = "Oculto", tint = NewShapeGoldBright, modifier = Modifier.size(16.dp))
+                            Text(
+                                text = "Horário Personalizado (Só PT) · Oculto dos alunos",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = NewShapeGoldBright
+                            )
+                        }
+                    }
+                }
                 Text("Inscritos & Presenças", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                 Spacer(Modifier.height(8.dp))
                 if (bookings.isEmpty()) {

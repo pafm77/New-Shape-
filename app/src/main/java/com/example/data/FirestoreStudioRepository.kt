@@ -1139,7 +1139,8 @@ class FirestoreStudioRepository(
         minute: Int,
         durationMinutes: Int,
         capacity: Int,
-        note: String
+        note: String,
+        ptPrivatePersonal: Boolean = false
     ): Result<Unit> = try {
         val uid = requireUserId()
         val batch = db.batch()
@@ -1158,6 +1159,7 @@ class FirestoreStudioRepository(
                     "capacity" to s.capacity,
                     "note" to s.note,
                     "startMillis" to s.startMillis,
+                    "ptPrivatePersonal" to ptPrivatePersonal,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -1185,6 +1187,7 @@ class FirestoreStudioRepository(
                     "capacity" to session.capacity.coerceIn(1, 100),
                     "note" to session.note.trim().take(200),
                     "startMillis" to session.startMillis,
+                    "ptPrivatePersonal" to session.ptPrivatePersonal,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
@@ -1221,11 +1224,15 @@ class FirestoreStudioRepository(
         val uid = requireUserId()
         val batch = db.batch()
         val created = mutableListOf<TrainingSessionRecord>()
-        prevSessions.filter { !it.ptPrivatePersonal }.forEach { prev ->
+        prevSessions.forEach { prev ->
             val parts = prev.timeLabel.split(":")
             val h = parts.getOrNull(0)?.toIntOrNull() ?: 18
             val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
-            val exists = existingTargetSessions.any { it.dayOfWeek == prev.dayOfWeek && it.timeLabel == prev.timeLabel }
+            val exists = existingTargetSessions.any {
+                it.dayOfWeek == prev.dayOfWeek &&
+                    it.timeLabel == prev.timeLabel &&
+                    it.ptPrivatePersonal == prev.ptPrivatePersonal
+            }
             if (!exists) {
                 val s = SeedCatalog.createSession(uid, targetWeek.weekKey, targetWeek.startDateMillis, prev.dayOfWeek, h, m, prev.durationMinutes, prev.capacity, prev.note)
                 val ref = userDoc(uid).collection("sessions").document()
@@ -1241,11 +1248,12 @@ class FirestoreStudioRepository(
                         "capacity" to s.capacity,
                         "note" to s.note,
                         "startMillis" to s.startMillis,
+                        "ptPrivatePersonal" to prev.ptPrivatePersonal,
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 )
-                created.add(s.copy(id = ref.id))
+                created.add(s.copy(id = ref.id, ptPrivatePersonal = prev.ptPrivatePersonal))
             }
         }
         if (created.isNotEmpty()) batch.commit().await()

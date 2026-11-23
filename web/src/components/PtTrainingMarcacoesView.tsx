@@ -373,13 +373,18 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
     try {
       await repo.addManualBooking(uid, session.id, session.weekKey, effectiveClient.id);
       onBanner(`Treino marcado para ${effectiveClient.name} (${session.dateLabel} · ${session.timeLabel}) ✓`);
-      if (shouldPromptMessage(effectiveClient)) {
+      if (shouldPromptMessage(effectiveClient) && !session.ptPrivatePersonal) {
         const targetWeek = weekMap.get(session.weekKey) || activeWeek;
         const singleMsg = buildConfirmMessage(effectiveClient, [session], targetWeek);
 
         const allWeekConfirmed = [
           ...studentWeekBookings
-            .filter((x) => x.booking.status === 'CONFIRMED' && x.session.id !== session.id)
+            .filter(
+              (x) =>
+                x.booking.status === 'CONFIRMED' &&
+                x.session.id !== session.id &&
+                !x.session.ptPrivatePersonal
+            )
             .map((x) => x.session),
           session,
         ].sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
@@ -409,7 +414,7 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
     try {
       await repo.confirmClientBookings(uid, [booking]);
       onBanner(`Horário de ${effectiveClient.name} confirmado ✓`);
-      if (shouldPromptMessage(effectiveClient)) {
+      if (shouldPromptMessage(effectiveClient) && !session.ptPrivatePersonal) {
         const targetWeek = weekMap.get(session.weekKey) || activeWeek;
         const msg = buildConfirmMessage(effectiveClient, [session], targetWeek);
         setMessageModal({
@@ -437,7 +442,7 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
       onBanner(
         `Horário de ${effectiveClient.name} trocado para ${newSession.dateLabel} às ${newSession.timeLabel} ✓`
       );
-      if (shouldPromptMessage(effectiveClient)) {
+      if (shouldPromptMessage(effectiveClient) && !newSession.ptPrivatePersonal && !oldSession.ptPrivatePersonal) {
         const targetWeek = weekMap.get(newSession.weekKey) || activeWeek;
         const updatedWeekConfirmed = bookings
           .filter(
@@ -811,22 +816,20 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                               Confirmar
                             </button>
                           )}
-                          {!session.ptPrivatePersonal && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSwappingTarget(isSwappingThis ? null : { booking, session })
-                              }
-                              className={`inline-flex min-h-[36px] items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
-                                isSwappingThis
-                                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
-                                  : 'border-[#EAB308]/60 bg-[#1B1B1E] text-[#FACC15] hover:bg-[#3D3314]'
-                              }`}
-                            >
-                              <ArrowLeftRight className="h-3.5 w-3.5" />
-                              {isSwappingThis ? 'A trocar...' : 'Trocar horário'}
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSwappingTarget(isSwappingThis ? null : { booking, session })
+                            }
+                            className={`inline-flex min-h-[36px] items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                              isSwappingThis
+                                ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                                : 'border-[#EAB308]/60 bg-[#1B1B1E] text-[#FACC15] hover:bg-[#3D3314]'
+                            }`}
+                          >
+                            <ArrowLeftRight className="h-3.5 w-3.5" />
+                            {isSwappingThis ? 'A trocar...' : 'Trocar horário'}
+                          </button>
                           <button
                             type="button"
                             disabled={busyKey === booking.id}
@@ -834,8 +837,9 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                               if (session.ptPrivatePersonal) {
                                 setBusyKey(booking.id);
                                 try {
-                                  await repo.deleteSession(uid, session.id, [booking]);
-                                  onBanner('Treino personalizado oculto removido.');
+                                  await repo.removeBooking(uid, booking.id);
+                                  if (isSwappingThis) setSwappingTarget(null);
+                                  onBanner(`Treino personalizado desmarcado para ${effectiveClient.name}.`);
                                 } finally {
                                   setBusyKey(null);
                                 }

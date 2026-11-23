@@ -1435,7 +1435,8 @@ export async function createSessions(
   minute: number,
   durationMinutes: number,
   capacity: number,
-  note: string
+  note: string,
+  ptPrivatePersonal = false
 ): Promise<void> {
   const writes: Array<[DocumentReference, Record<string, unknown>]> = days
     .slice()
@@ -1456,6 +1457,7 @@ export async function createSessions(
         doc(subcol(uid, 'sessions')),
         {
           ...s,
+          ptPrivatePersonal: Boolean(ptPrivatePersonal),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         },
@@ -1471,6 +1473,7 @@ export async function updateSession(uid: string, session: TrainingSessionRecord)
     capacity: Math.max(1, Math.min(100, Math.round(session.capacity))),
     note: session.note.trim().slice(0, 200),
     startMillis: Math.round(session.startMillis),
+    ptPrivatePersonal: Boolean(session.ptPrivatePersonal),
     updatedAt: serverTimestamp(),
   });
 }
@@ -1496,14 +1499,16 @@ export async function duplicatePreviousWeek(
 ): Promise<{ added: number; createdSessions: TrainingSessionRecord[] }> {
   const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
   const createdSessions: TrainingSessionRecord[] = [];
-  prevSessions
-    .filter((prev) => !prev.ptPrivatePersonal)
-    .forEach((prev) => {
+  prevSessions.forEach((prev) => {
     const [hStr, mStr] = prev.timeLabel.split(':');
     const h = Number(hStr) || 18;
     const m = Number(mStr) || 0;
+    const isPrivate = Boolean(prev.ptPrivatePersonal);
     const exists = existingTargetSessions.some(
-      (s) => s.dayOfWeek === prev.dayOfWeek && s.timeLabel === prev.timeLabel
+      (s) =>
+        s.dayOfWeek === prev.dayOfWeek &&
+        s.timeLabel === prev.timeLabel &&
+        Boolean(s.ptPrivatePersonal) === isPrivate
     );
     if (!exists) {
       const s = createSessionModel(
@@ -1522,11 +1527,12 @@ export async function duplicatePreviousWeek(
         ref,
         {
           ...s,
+          ptPrivatePersonal: isPrivate,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         },
       ]);
-      createdSessions.push({ id: ref.id, ...s });
+      createdSessions.push({ id: ref.id, ...s, ptPrivatePersonal: isPrivate });
     }
   });
   if (writes.length > 0) await commitWrites(writes);

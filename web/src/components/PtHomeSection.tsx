@@ -8,6 +8,7 @@ import {
   Copy,
   Download,
   Edit3,
+  EyeOff,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -728,6 +729,8 @@ const SemanasView: React.FC<{
   onBanner,
 }) => {
   const [showNewSession, setShowNewSession] = useState(false);
+  const [newSessionInitialPrivate, setNewSessionInitialPrivate] = useState(false);
+  const [visibilityFilter, setVisibilityFilter] = useState<'ALL' | 'PUBLIC' | 'PRIVATE'>('ALL');
   const [showFixedManager, setShowFixedManager] = useState(false);
   const [fixedManagerInitialClientId, setFixedManagerInitialClientId] = useState<string>('');
   const [applyingFixed, setApplyingFixed] = useState(false);
@@ -750,6 +753,17 @@ const SemanasView: React.FC<{
         : [],
     [sessions, activeWeek]
   );
+
+  const privateSessionsCount = useMemo(
+    () => weekSessions.filter((s) => s.ptPrivatePersonal).length,
+    [weekSessions]
+  );
+  const publicSessionsCount = weekSessions.length - privateSessionsCount;
+  const filteredWeekSessions = useMemo(() => {
+    if (visibilityFilter === 'PUBLIC') return weekSessions.filter((s) => !s.ptPrivatePersonal);
+    if (visibilityFilter === 'PRIVATE') return weekSessions.filter((s) => Boolean(s.ptPrivatePersonal));
+    return weekSessions;
+  }, [weekSessions, visibilityFilter]);
 
   const detailSession = detailSessionId ? sessions.find((s) => s.id === detailSessionId) || null : null;
 
@@ -879,44 +893,64 @@ const SemanasView: React.FC<{
         </div>
 
         {activeWeek && (
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <GoldButton onClick={() => setShowNewSession(true)}>
-              <Plus className="h-4 w-4" />
-              Novo treino
-            </GoldButton>
-            <SecondaryButton
-              onClick={async () => {
-                const nextPublished = !activeWeek.published;
-                await repo.setWeekPublished(uid, activeWeek.weekKey, nextPublished);
-                if (nextPublished) {
-                  const fixedRes = await repo.applyFixedSchedulesForWeek(
-                    uid,
-                    activeWeek,
-                    clients,
-                    sessions,
-                    bookings,
-                    weekResponses
-                  );
-                  onBanner(
-                    fixedRes.createdBookings > 0
-                      ? `Semana publicada! ${fixedRes.createdBookings} horário(s) fixo(s) enviados para Por confirmar.`
-                      : 'Semana publicada!'
-                  );
-                } else {
-                  onBanner('Semana ocultada.');
-                }
-              }}
-            >
-              {activeWeek.published ? 'Despublicar' : 'Publicar semana'}
-            </SecondaryButton>
-            <SecondaryButton onClick={handleDuplicatePrev}>
-              <Copy className="h-4 w-4" />
-              Duplicar anterior
-            </SecondaryButton>
-            <SecondaryButton onClick={handleExportCsv}>
-              <Download className="h-4 w-4" />
-              Exportar CSV
-            </SecondaryButton>
+          <div className="mt-4 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <GoldButton
+                onClick={() => {
+                  setNewSessionInitialPrivate(false);
+                  setShowNewSession(true);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Novo treino
+              </GoldButton>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewSessionInitialPrivate(true);
+                  setShowNewSession(true);
+                }}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[#EAB308]/70 bg-[#3D3314]/70 px-3 py-2 text-xs font-extrabold text-[#FACC15] transition hover:bg-[#EAB308] hover:text-[#121214]"
+              >
+                <EyeOff className="h-4 w-4" />
+                Horário Personalizado (Só PT)
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <SecondaryButton
+                onClick={async () => {
+                  const nextPublished = !activeWeek.published;
+                  await repo.setWeekPublished(uid, activeWeek.weekKey, nextPublished);
+                  if (nextPublished) {
+                    const fixedRes = await repo.applyFixedSchedulesForWeek(
+                      uid,
+                      activeWeek,
+                      clients,
+                      sessions,
+                      bookings,
+                      weekResponses
+                    );
+                    onBanner(
+                      fixedRes.createdBookings > 0
+                        ? `Semana publicada! ${fixedRes.createdBookings} horário(s) fixo(s) enviados para Por confirmar.`
+                        : 'Semana publicada!'
+                    );
+                  } else {
+                    onBanner('Semana ocultada.');
+                  }
+                }}
+              >
+                {activeWeek.published ? 'Despublicar' : 'Publicar'}
+              </SecondaryButton>
+              <SecondaryButton onClick={handleDuplicatePrev}>
+                <Copy className="h-4 w-4" />
+                Duplicar
+              </SecondaryButton>
+              <SecondaryButton onClick={handleExportCsv}>
+                <Download className="h-4 w-4" />
+                CSV
+              </SecondaryButton>
+            </div>
           </div>
         )}
       </BrandCard>
@@ -1020,19 +1054,51 @@ const SemanasView: React.FC<{
         </BrandCard>
       )}
 
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-bold text-[#F4F4F5]">Treinos ({weekSessions.length})</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-base font-bold text-[#F4F4F5]">
+          Treinos ({filteredWeekSessions.length})
+        </h3>
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              { id: 'ALL' as const, label: `Todos (${weekSessions.length})` },
+              { id: 'PUBLIC' as const, label: `Visíveis (${publicSessionsCount})` },
+              { id: 'PRIVATE' as const, label: `Personalizado Só PT (${privateSessionsCount})` },
+            ] as const
+          ).map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setVisibilityFilter(f.id)}
+              className={`rounded-xl border px-2.5 py-1 text-xs font-bold transition ${
+                visibilityFilter === f.id
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {weekSessions.length === 0 ? (
+      {filteredWeekSessions.length === 0 ? (
         <EmptyState
           icon={<Calendar className="h-6 w-6" />}
-          title="Sem treinos nesta semana"
-          subtitle="Carrega em '+ Novo treino' ou 'Duplicar anterior' para criar os horários."
+          title={
+            visibilityFilter === 'PRIVATE'
+              ? 'Sem horários personalizados (Só PT) nesta semana'
+              : 'Sem treinos nesta semana'
+          }
+          subtitle={
+            visibilityFilter === 'PRIVATE'
+              ? "Carrega em 'Horário Personalizado (Só PT)' para criar horários ocultos dos alunos."
+              : "Carrega em '+ Novo treino' ou 'Duplicar' para criar os horários."
+          }
         />
       ) : (
         <div className="space-y-2.5">
-          {weekSessions.map((session) => {
+          {filteredWeekSessions.map((session) => {
             const sBookings = bookings.filter(
               (b) => b.sessionId === session.id && b.status !== 'CANCELLED'
             );
@@ -1066,6 +1132,8 @@ const SemanasView: React.FC<{
                 className={`flex cursor-pointer items-center justify-between gap-3 rounded-2xl border p-4 transition hover:border-[#EAB308]/60 ${
                   isToday
                     ? 'border-[#EAB308]/70 bg-[#3D3314]/35'
+                    : session.ptPrivatePersonal
+                    ? 'border-[#EAB308]/45 bg-[#231F14]/70'
                     : 'border-[#323238] bg-[#1B1B1E]'
                 }`}
               >
@@ -1074,6 +1142,9 @@ const SemanasView: React.FC<{
                     <p className="text-sm font-bold text-[#F4F4F5]">
                       {session.dateLabel} · {session.timeLabel.replace(':', 'h')}
                     </p>
+                    {session.ptPrivatePersonal && (
+                      <StatusPill tone="gold">Personalizado · Só PT</StatusPill>
+                    )}
                     {isToday && <StatusPill tone="gold">Hoje</StatusPill>}
                     {(presentCount > 0 || absentCount > 0) && (
                       <StatusPill tone="green">
@@ -1088,6 +1159,7 @@ const SemanasView: React.FC<{
                   </div>
                   <p className="text-xs text-[#A1A1AA]">
                     {session.durationMinutes} min{session.note ? ` · ${session.note}` : ''}
+                    {session.ptPrivatePersonal ? ' · Oculto dos alunos' : ''}
                     {isToday && confirmedCount > 0 ? ' · Toca para marcar presenças' : ''}
                   </p>
                   {pendingCount > 0 && (
@@ -1130,11 +1202,16 @@ const SemanasView: React.FC<{
       {/* New Session Modal */}
       {showNewSession && activeWeek && (
         <NewSessionModal
+          initialPrivatePersonal={newSessionInitialPrivate}
           onClose={() => setShowNewSession(false)}
-          onCreate={async (days, h, m, dur, cap, note) => {
-            await repo.createSessions(uid, activeWeek, days, h, m, dur, cap, note);
+          onCreate={async (days, h, m, dur, cap, note, ptPrivatePersonal) => {
+            await repo.createSessions(uid, activeWeek, days, h, m, dur, cap, note, ptPrivatePersonal);
             setShowNewSession(false);
-            onBanner('Treino(s) criado(s)!');
+            onBanner(
+              ptPrivatePersonal
+                ? 'Horário(s) de Treino Personalizado (Só PT) criado(s)!'
+                : 'Treino(s) criado(s)!'
+            );
           }}
         />
       )}
@@ -1261,13 +1338,23 @@ const SemanasView: React.FC<{
 };
 
 const NewSessionModal: React.FC<{
+  initialPrivatePersonal?: boolean;
   onClose: () => void;
-  onCreate: (days: number[], h: number, m: number, dur: number, cap: number, note: string) => Promise<void>;
-}> = ({ onClose, onCreate }) => {
+  onCreate: (
+    days: number[],
+    h: number,
+    m: number,
+    dur: number,
+    cap: number,
+    note: string,
+    ptPrivatePersonal: boolean
+  ) => Promise<void>;
+}> = ({ initialPrivatePersonal = false, onClose, onCreate }) => {
   const [days, setDays] = useState<number[]>([1, 3]);
   const [time, setTime] = useState('18:00');
   const [duration, setDuration] = useState(60);
-  const [capacity, setCapacity] = useState('6');
+  const [ptPrivatePersonal, setPtPrivatePersonal] = useState(initialPrivatePersonal);
+  const [capacity, setCapacity] = useState(initialPrivatePersonal ? '1' : '6');
   const [note, setNote] = useState('');
   const dayLabels = [
     [1, 'Seg'],
@@ -1282,9 +1369,51 @@ const NewSessionModal: React.FC<{
   const toggleDay = (d: number) =>
     setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 
+  const togglePrivate = (next: boolean) => {
+    setPtPrivatePersonal(next);
+    if (next && capacity === '6') setCapacity('1');
+    if (!next && capacity === '1') setCapacity('6');
+  };
+
   return (
-    <Modal open title="Novo treino" onClose={onClose}>
+    <Modal
+      open
+      title={ptPrivatePersonal ? 'Novo Horário Personalizado (Só PT)' : 'Novo treino'}
+      subtitle={
+        ptPrivatePersonal
+          ? 'Oculto dos alunos · Visível apenas no Portal PT'
+          : 'Visível para alunos quando a semana estiver publicada'
+      }
+      onClose={onClose}
+    >
       <div className="space-y-4">
+        {/* Visibility / Private Personal Toggle */}
+        <label
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${
+            ptPrivatePersonal
+              ? 'border-[#EAB308] bg-[#3D3314]/50'
+              : 'border-[#323238] bg-[#242429]'
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={ptPrivatePersonal}
+            onChange={(e) => togglePrivate(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-[#EAB308]"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#FACC15]">
+              <EyeOff className="h-3.5 w-3.5" />
+              Treino Personalizado · Só visível para o PT (oculto dos alunos)
+            </p>
+            <p className="mt-0.5 text-[11px] text-[#D4D4D8]">
+              {ptPrivatePersonal
+                ? 'Estes horários não aparecem no Portal do Aluno nem no convite da semana. Apenas o PT pode ver e marcar alunos.'
+                : 'Ativa esta opção para criar horários exclusivos de treino personalizado ocultos dos alunos.'}
+            </p>
+          </div>
+        </label>
+
         <div>
           <FieldLabel>Dias (podes escolher vários)</FieldLabel>
           <div className="grid grid-cols-7 gap-1.5">
@@ -1328,7 +1457,7 @@ const NewSessionModal: React.FC<{
         <div>
           <FieldLabel>Duração</FieldLabel>
           <div className="flex flex-wrap gap-2">
-            {[45, 60, 75, 90].map((d) => (
+            {[30, 45, 60, 75, 90].map((d) => (
               <button
                 key={d}
                 type="button"
@@ -1346,11 +1475,17 @@ const NewSessionModal: React.FC<{
         </div>
 
         <div>
-          <FieldLabel>Nota (opcional, ex: treino ao ar livre)</FieldLabel>
+          <FieldLabel>
+            {ptPrivatePersonal
+              ? 'Nota (opcional, ex: Treino Personalizado 1-a-1)'
+              : 'Nota (opcional, ex: treino ao ar livre)'}
+          </FieldLabel>
           <Input
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Ex: Treino ao ar livre"
+            placeholder={
+              ptPrivatePersonal ? 'Ex: Treino Personalizado (Só PT)' : 'Ex: Treino ao ar livre'
+            }
           />
         </div>
 
@@ -1365,12 +1500,13 @@ const NewSessionModal: React.FC<{
                 Number(hStr) || 18,
                 Number(mStr) || 0,
                 duration,
-                Math.max(1, Number(capacity) || 6),
-                note
+                Math.max(1, Number(capacity) || (ptPrivatePersonal ? 1 : 6)),
+                note,
+                ptPrivatePersonal
               );
             }}
           >
-            Criar treino
+            {ptPrivatePersonal ? 'Criar horário (Só PT)' : 'Criar treino'}
           </GoldButton>
         </div>
       </div>
@@ -1387,10 +1523,35 @@ const EditSessionModal: React.FC<{
   const [duration, setDuration] = useState(String(session.durationMinutes));
   const [capacity, setCapacity] = useState(String(session.capacity));
   const [note, setNote] = useState(session.note);
+  const [ptPrivatePersonal, setPtPrivatePersonal] = useState(Boolean(session.ptPrivatePersonal));
 
   return (
     <Modal open title="Editar treino" subtitle={session.dateLabel} onClose={onClose}>
       <div className="space-y-3">
+        <label
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${
+            ptPrivatePersonal
+              ? 'border-[#EAB308] bg-[#3D3314]/50'
+              : 'border-[#323238] bg-[#242429]'
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={ptPrivatePersonal}
+            onChange={(e) => setPtPrivatePersonal(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-[#EAB308]"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 text-xs font-extrabold text-[#FACC15]">
+              <EyeOff className="h-3.5 w-3.5" />
+              Treino Personalizado · Só visível para o PT (oculto dos alunos)
+            </p>
+            <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+              Quando ativo, este horário fica oculto no Portal do Aluno.
+            </p>
+          </div>
+        </label>
+
         <div>
           <FieldLabel>Hora (HH:mm)</FieldLabel>
           <Input type="time" value={timeLabel} onChange={(e) => setTimeLabel(e.target.value)} />
@@ -1419,6 +1580,7 @@ const EditSessionModal: React.FC<{
                 durationMinutes: Math.max(10, Number(duration) || session.durationMinutes),
                 capacity: Math.max(1, Number(capacity) || session.capacity),
                 note,
+                ptPrivatePersonal,
               })
             }
           >
@@ -1457,7 +1619,17 @@ const SessionDetailModal: React.FC<{
 }) => {
   const clientMap = new Map(clients.map((c) => [c.id, c]));
   const enrolledIds = new Set(bookings.map((b) => b.clientId));
-  const availableClients = clients.filter((c) => c.active && !enrolledIds.has(c.id));
+  const availableClients = clients
+    .filter((c) => c.active && !enrolledIds.has(c.id))
+    .slice()
+    .sort((a, b) => {
+      if (session.ptPrivatePersonal) {
+        const aPers = a.trainingType === 'PERSONALIZADO' ? 0 : 1;
+        const bPers = b.trainingType === 'PERSONALIZADO' ? 0 : 1;
+        if (aPers !== bPers) return aPers - bPers;
+      }
+      return a.name.localeCompare(b.name);
+    });
   const [selectedClientId, setSelectedClientId] = useState(availableClients[0]?.id || '');
 
   const confirmedCount = bookings.filter((b) => b.status === 'CONFIRMED').length;
@@ -1470,6 +1642,12 @@ const SessionDetailModal: React.FC<{
       onClose={onClose}
     >
       <div className="space-y-4">
+        {session.ptPrivatePersonal && (
+          <div className="flex items-center gap-2 rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/50 px-3 py-2 text-xs font-semibold text-[#FACC15]">
+            <EyeOff className="h-4 w-4 shrink-0" />
+            Horário Personalizado (Só PT) · Oculto dos alunos
+          </div>
+        )}
         <div>
           <FieldLabel>Inscritos & Confirmação de Presença</FieldLabel>
           {bookings.length === 0 ? (

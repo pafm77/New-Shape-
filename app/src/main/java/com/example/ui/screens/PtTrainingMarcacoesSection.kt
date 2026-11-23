@@ -832,54 +832,45 @@ internal fun PtTrainingMarcacoesSection(
                                                 }
                                             }
 
-                                            if (!session.ptPrivatePersonal) {
-                                                OutlinedButton(
-                                                    onClick = {
-                                                        swappingTarget = if (isSwappingThis) null else (booking to session)
-                                                    },
-                                                    border = BorderStroke(1.dp, NewShapeGold),
-                                                    colors = ButtonDefaults.outlinedButtonColors(
-                                                        containerColor = if (isSwappingThis) NewShapeGold else CharcoalSurface,
-                                                        contentColor = if (isSwappingThis) TextOnGold else NewShapeGoldBright
-                                                    ),
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .testTag("pt_training_swap_btn_${booking.id}")
-                                                ) {
-                                                    Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                    Spacer(Modifier.width(4.dp))
-                                                    Text(
-                                                        text = if (isSwappingThis) "A trocar..." else "Trocar horário",
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        fontWeight = FontWeight.Bold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            } else {
-                                                Spacer(Modifier.weight(1f))
+                                            OutlinedButton(
+                                                onClick = {
+                                                    swappingTarget = if (isSwappingThis) null else (booking to session)
+                                                },
+                                                border = BorderStroke(1.dp, NewShapeGold),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = if (isSwappingThis) NewShapeGold else CharcoalSurface,
+                                                    contentColor = if (isSwappingThis) TextOnGold else NewShapeGoldBright
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .testTag("pt_training_swap_btn_${booking.id}")
+                                            ) {
+                                                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (isSwappingThis) "A trocar..." else "Trocar horário",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                             }
 
                                             IconButton(
                                                 onClick = {
-                                                    if (session.ptPrivatePersonal) {
-                                                        viewModel.deleteSession(session.id)
-                                                        Toast.makeText(context, "Treino personalizado oculto removido.", Toast.LENGTH_SHORT).show()
+                                                    viewModel.removeBooking(booking.id)
+                                                    if (isSwappingThis) swappingTarget = null
+                                                    if (shouldPromptMessage(selectedClient) && !session.ptPrivatePersonal) {
+                                                        val first = selectedClient.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { selectedClient.name }
+                                                        messageDraft = PtMessageDraft(
+                                                            title = "Treino desmarcado · Avisar aluno",
+                                                            subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
+                                                            client = selectedClient,
+                                                            message = "Olá $first, o teu treino de ${session.dateLabel} às ${session.timeLabel.replace(":", "h")} foi desmarcado. Diz-me quando preferes reagendar! 💪 New Shape"
+                                                        )
                                                     } else {
-                                                        viewModel.removeBooking(booking.id)
-                                                        if (isSwappingThis) swappingTarget = null
-                                                        if (shouldPromptMessage(selectedClient)) {
-                                                            val first = selectedClient.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { selectedClient.name }
-                                                            messageDraft = PtMessageDraft(
-                                                                title = "Treino desmarcado · Avisar aluno",
-                                                                subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
-                                                                client = selectedClient,
-                                                                message = "Olá $first, o teu treino de ${session.dateLabel} às ${session.timeLabel.replace(":", "h")} foi desmarcado. Diz-me quando preferes reagendar! 💪 New Shape"
-                                                            )
-                                                        } else {
-                                                            Toast.makeText(context, "Treino desmarcado para ${selectedClient.name}.", Toast.LENGTH_SHORT).show()
-                                                        }
+                                                        Toast.makeText(context, "Treino desmarcado para ${selectedClient.name}.", Toast.LENGTH_SHORT).show()
                                                     }
                                                 },
                                                 modifier = Modifier.testTag("pt_training_remove_btn_${booking.id}")
@@ -1126,7 +1117,7 @@ internal fun PtTrainingMarcacoesSection(
                                                 val (oldBooking, oldSession) = activeSwap
                                                 viewModel.swapStudentBooking(oldBooking, session, selectedClient.name)
                                                 swappingTarget = null
-                                                if (shouldPromptMessage(selectedClient)) {
+                                                if (shouldPromptMessage(selectedClient) && !session.ptPrivatePersonal && !oldSession.ptPrivatePersonal) {
                                                     val targetWeek = weekMap[session.weekKey] ?: activeWeek
                                                     val otherConfirmed = state.bookings
                                                         .filter {
@@ -1136,6 +1127,7 @@ internal fun PtTrainingMarcacoesSection(
                                                                 it.id != oldBooking.id
                                                         }
                                                         .mapNotNull { sessionMap[it.sessionId] }
+                                                        .filter { !it.ptPrivatePersonal }
                                                     val allUpdated = (otherConfirmed.filter { it.id != session.id } + session)
                                                         .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
                                                     val singleMsg = buildSwapMessage(selectedClient, oldSession, session, listOf(session), targetWeek)
@@ -1185,11 +1177,11 @@ internal fun PtTrainingMarcacoesSection(
                                         Button(
                                             onClick = {
                                                 viewModel.addManualClientToSession(session.id, session.weekKey, selectedClient.id)
-                                                if (shouldPromptMessage(selectedClient)) {
+                                                if (shouldPromptMessage(selectedClient) && !session.ptPrivatePersonal) {
                                                     val targetWeek = weekMap[session.weekKey] ?: activeWeek
                                                     val singleMsg = buildConfirmMessage(selectedClient, listOf(session), targetWeek)
                                                     val allWeek = (studentWeekBookings
-                                                        .filter { it.first.status == BookingStatus.CONFIRMED.name && it.second.id != session.id }
+                                                        .filter { it.first.status == BookingStatus.CONFIRMED.name && it.second.id != session.id && !it.second.ptPrivatePersonal }
                                                         .map { it.second } + session)
                                                         .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
                                                     val weekMsg = if (allWeek.size > 1) {
