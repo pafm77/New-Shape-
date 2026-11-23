@@ -58,6 +58,7 @@ export interface ClientRecord {
   fidelizacaoStartMillis: number;
   trainingType: TrainingType;
   weeklySessionLimit?: number;
+  fixedSlots?: string[];
 }
 
 export interface TrainingWeekRecord {

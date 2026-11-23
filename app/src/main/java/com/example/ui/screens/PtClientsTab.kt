@@ -59,6 +59,7 @@ fun PtClientsTab(
     var showInactive by remember { mutableStateOf(false) }
     var typeFilter by remember { mutableStateOf("ALL") }
     var fidelizacaoFilter by remember { mutableStateOf("ALL") }
+    var fixedOnlyFilter by remember { mutableStateOf(false) }
     var showNewClientDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var paymentTargetClient by remember { mutableStateOf<ClientRecord?>(null) }
@@ -122,10 +123,13 @@ fun PtClientsTab(
     val fid12Count = remember(baseVisibleClients, clientFidMonthsMap) {
         baseVisibleClients.count { clientFidMonthsMap[it.id] == 12 }
     }
+    val fixedClientsCount = remember(baseVisibleClients) {
+        baseVisibleClients.count { it.fixedSlots.isNotEmpty() }
+    }
     val fidAnyCount = fid6Count + fid12Count
     val noFidCount = baseVisibleClients.size - fidAnyCount
 
-    val filteredClients = remember(baseVisibleClients, searchQuery, typeFilter, fidelizacaoFilter, clientFidMonthsMap) {
+    val filteredClients = remember(baseVisibleClients, searchQuery, typeFilter, fidelizacaoFilter, fixedOnlyFilter, clientFidMonthsMap) {
         baseVisibleClients.filter { client ->
             val isPersonal = client.trainingType == "PERSONALIZADO"
             val matchesType = when (typeFilter) {
@@ -133,6 +137,7 @@ fun PtClientsTab(
                 "GRUPO" -> !isPersonal
                 else -> true
             }
+            val matchesFixed = !fixedOnlyFilter || client.fixedSlots.isNotEmpty()
             val effFid = clientFidMonthsMap[client.id] ?: 0
             val matchesFid = when (fidelizacaoFilter) {
                 "ANY_FID" -> effFid == 6 || effFid == 12
@@ -142,6 +147,7 @@ fun PtClientsTab(
                 else -> true
             }
             matchesType &&
+                matchesFixed &&
                 matchesFid &&
                 (searchQuery.isBlank() ||
                     client.name.contains(searchQuery, ignoreCase = true) ||
@@ -197,7 +203,10 @@ fun PtClientsTab(
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
                     listOf(
                         "ALL" to "Todos (${baseVisibleClients.size})",
                         "PERSONALIZADO" to "Personalizado ($personalizadoCount)",
@@ -214,6 +223,16 @@ fun PtClientsTab(
                             )
                         )
                     }
+                    FilterChip(
+                        selected = fixedOnlyFilter,
+                        onClick = { fixedOnlyFilter = !fixedOnlyFilter },
+                        label = { Text("Dias fixos ($fixedClientsCount)", maxLines = 1) },
+                        modifier = Modifier.testTag("clients_filter_fixed"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold
+                        )
+                    )
                 }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -371,6 +390,15 @@ fun PtClientsTab(
                                         )
                                     }
                                 }
+                                if (client.fixedSlots.isNotEmpty()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "Fixo: ${SeedCatalog.formatFixedSlotsSummary(client.fixedSlots)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = NewShapeGoldBright
+                                    )
+                                }
                                 val effectiveFid = clientFidMonthsMap[client.id] ?: 0
                                 if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || effectiveFid > 0 || client.weeklySessionLimit > 0) {
                                     Spacer(Modifier.height(4.dp))
@@ -508,6 +536,12 @@ fun PtClientProfileScreen(
             if (client.fidelizacaoStartMillis > 0L) client.fidelizacaoStartMillis else System.currentTimeMillis()
         )
     }
+    var fixedSlotsDraft by remember(client.id, client.fixedSlots) {
+        mutableStateOf(SeedCatalog.normalizeFixedSlots(client.fixedSlots))
+    }
+    var newFixedDay by remember { mutableIntStateOf(1) }
+    var newFixedHour by remember { mutableStateOf("09") }
+    var newFixedMinute by remember { mutableStateOf("00") }
     var profileTab by remember(client.id) { mutableIntStateOf(0) }
     var showPayDialog by remember { mutableStateOf(false) }
     var splitTargetPayment by remember { mutableStateOf<PaymentRecord?>(null) }
@@ -731,6 +765,169 @@ fun PtClientProfileScreen(
                                                 containerColor = if (isConfirmed) ConfirmedGreenContainer else PendingAmberContainer
                                             )
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Admin Fixed Weekly Schedule Card
+                if (state.isSuperAdmin || client.fixedSlots.isNotEmpty()) {
+                    item {
+                        BrandCard(highlightBorder = client.fixedSlots.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Dias Fixos Semanais",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = NewShapeGoldBright
+                                )
+                                StatusPill(
+                                    text = if (fixedSlotsDraft.isNotEmpty()) "${fixedSlotsDraft.size} horário(s)" else "Sem dias fixos",
+                                    textColor = if (fixedSlotsDraft.isNotEmpty()) NewShapeGoldBright else TextSecondaryDark,
+                                    containerColor = if (fixedSlotsDraft.isNotEmpty()) NewShapeGoldMuted else ElevatedCharcoal
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "Marcações geradas automaticamente todas as semanas como Por confirmar para aprovação do PT.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                            Spacer(Modifier.height(8.dp))
+
+                            if (fixedSlotsDraft.isEmpty()) {
+                                Text(
+                                    text = "Este aluno ainda não tem dias fixos definidos.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    fixedSlotsDraft.forEach { slot ->
+                                        Surface(
+                                            color = NewShapeGoldMuted,
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.45f)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = SeedCatalog.formatFixedSlot(slot),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = NewShapeGoldBright
+                                                )
+                                                if (state.isSuperAdmin) {
+                                                    IconButton(
+                                                        onClick = { fixedSlotsDraft = fixedSlotsDraft.filterNot { it == slot } },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Close,
+                                                            contentDescription = "Remover ${SeedCatalog.formatFixedSlot(slot)}",
+                                                            tint = NewShapeGoldBright,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (state.isSuperAdmin) {
+                                Spacer(Modifier.height(10.dp))
+                                HorizontalDivider(color = HairlineBorder)
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                ) {
+                                    SeedCatalog.FIXED_DAY_OPTIONS.forEach { day ->
+                                        FilterChip(
+                                            selected = newFixedDay == day.dayOfWeek,
+                                            onClick = { newFixedDay = day.dayOfWeek },
+                                            label = { Text(day.shortLabel) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = NewShapeGold,
+                                                selectedLabelColor = TextOnGold
+                                            )
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedTextField(
+                                        value = newFixedHour,
+                                        onValueChange = { newFixedHour = it.filter(Char::isDigit).take(2) },
+                                        label = { Text("Hora") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f),
+                                        colors = darkFieldColors()
+                                    )
+                                    OutlinedTextField(
+                                        value = newFixedMinute,
+                                        onValueChange = { newFixedMinute = it.filter(Char::isDigit).take(2) },
+                                        label = { Text("Min") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f),
+                                        colors = darkFieldColors()
+                                    )
+                                    DarkSecondaryButton(
+                                        text = "+ Add",
+                                        onClick = {
+                                            val h = (newFixedHour.toIntOrNull() ?: 9).coerceIn(0, 23)
+                                            val m = (newFixedMinute.toIntOrNull() ?: 0).coerceIn(0, 59)
+                                            val slotKey = "$newFixedDay|${String.format("%02d:%02d", h, m)}"
+                                            fixedSlotsDraft = SeedCatalog.normalizeFixedSlots(fixedSlotsDraft + slotKey)
+                                        },
+                                        modifier = Modifier.testTag("profile_add_fixed_slot_btn")
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    GoldPrimaryButton(
+                                        text = "Guardar Dias Fixos",
+                                        icon = Icons.Default.Check,
+                                        onClick = {
+                                            viewModel.updateClientFixedSlots(
+                                                client = client,
+                                                fixedSlots = fixedSlotsDraft,
+                                                applyToActiveWeek = true
+                                            )
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "profile_save_fixed_slots_btn"
+                                    )
+                                    if (fixedSlotsDraft.isNotEmpty()) {
+                                        DarkSecondaryButton(
+                                            text = "Limpar",
+                                            onClick = { fixedSlotsDraft = emptyList() },
+                                            modifier = Modifier.testTag("profile_clear_fixed_slots_btn")
+                                        )
                                     }
                                 }
                             }

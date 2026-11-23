@@ -870,6 +870,147 @@ class FirestoreStudioRepository(
         return updateClient(client.copy(active = active))
     }
 
+    suspend fun updateClientFixedSlots(clientId: String, fixedSlots: List<String>): Result<Unit> {
+        var path = "users/unknown/clients/$clientId"
+        return try {
+            val uid = requireUserId()
+            require(clientId.isNotBlank())
+            val docRef = userDoc(uid).collection("clients").document(clientId)
+            path = docRef.path
+            docRef.update(
+                mapOf(
+                    "fixedSlots" to SeedCatalog.normalizeFixedSlots(fixedSlots),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun applyFixedSchedulesForWeek(
+        targetWeek: TrainingWeekRecord,
+        clients: List<ClientRecord>,
+        existingSessions: List<TrainingSessionRecord>,
+        existingBookings: List<BookingRecord>,
+        weekResponses: List<WeekResponseRecord>,
+        onlyClientId: String? = null
+    ): Result<Pair<Int, Int>> = try {
+        val uid = requireUserId()
+        val unavailableClientIds = weekResponses
+            .filter { it.weekKey == targetWeek.weekKey && it.status == "UNAVAILABLE" }
+            .map { it.clientId }
+            .toSet()
+
+        val targetClients = clients.filter { client ->
+            client.active &&
+                (onlyClientId == null || client.id == onlyClientId) &&
+                client.id !in unavailableClientIds &&
+                SeedCatalog.normalizeFixedSlots(client.fixedSlots).isNotEmpty()
+        }
+
+        if (targetClients.isEmpty()) {
+            Result.success(0 to 0)
+        } else {
+            val sessionIdBySlotKey = mutableMapOf<String, String>()
+            existingSessions
+                .filter { it.weekKey == targetWeek.weekKey }
+                .forEach { s ->
+                    val key = "${s.dayOfWeek}|${s.timeLabel}"
+                    if (!sessionIdBySlotKey.containsKey(key)) {
+                        sessionIdBySlotKey[key] = s.id
+                    }
+                }
+
+            val existingBookingKeys = existingBookings
+                .filter { it.weekKey == targetWeek.weekKey }
+                .map { "${it.clientId}|${it.sessionId}" }
+                .toMutableSet()
+
+            val pendingOps = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
+            val now = System.currentTimeMillis()
+            var createdSessions = 0
+            var createdBookings = 0
+
+            for (client in targetClients) {
+                val slots = SeedCatalog.normalizeFixedSlots(client.fixedSlots)
+                for (rawSlot in slots) {
+                    val parsed = SeedCatalog.parseFixedSlot(rawSlot) ?: continue
+                    var sessionId = sessionIdBySlotKey[parsed.key]
+                    if (sessionId == null) {
+                        val sessionRef = userDoc(uid).collection("sessions").document()
+                        val s = SeedCatalog.createSession(
+                            userId = uid,
+                            weekKey = targetWeek.weekKey,
+                            mondayMillis = targetWeek.startDateMillis,
+                            dayOfWeek = parsed.dayOfWeek,
+                            hour = parsed.hour,
+                            minute = parsed.minute,
+                            durationMinutes = 60,
+                            capacity = if (client.trainingType == "PERSONALIZADO") 1 else 6,
+                            note = "Horário Fixo"
+                        )
+                        pendingOps.add(
+                            sessionRef to mapOf(
+                                "userId" to uid,
+                                "weekKey" to s.weekKey,
+                                "dayOfWeek" to s.dayOfWeek,
+                                "dateLabel" to s.dateLabel,
+                                "timeLabel" to s.timeLabel,
+                                "durationMinutes" to s.durationMinutes,
+                                "capacity" to s.capacity,
+                                "note" to s.note,
+                                "startMillis" to s.startMillis,
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                        sessionId = sessionRef.id
+                        sessionIdBySlotKey[parsed.key] = sessionId
+                        createdSessions++
+                    }
+
+                    val bookingKey = "${client.id}|$sessionId"
+                    if (bookingKey in existingBookingKeys) continue
+                    existingBookingKeys.add(bookingKey)
+
+                    val bookingRef = userDoc(uid).collection("bookings").document()
+                    pendingOps.add(
+                        bookingRef to mapOf(
+                            "userId" to uid,
+                            "sessionId" to sessionId,
+                            "weekKey" to targetWeek.weekKey,
+                            "clientId" to client.id,
+                            "status" to BookingStatus.PENDING.name,
+                            "attendanceStatus" to "PENDING",
+                            "requestedAtMillis" to now,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    createdBookings++
+                }
+            }
+
+            pendingOps.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { (ref, payload) -> batch.set(ref, payload) }
+                batch.commit().await()
+            }
+
+            Result.success(createdBookings to createdSessions)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/bookings")
+        Result.failure(e)
+    }
+
     suspend fun importClientsCsv(rawText: String, existingClients: List<ClientRecord>): Result<ImportResult> = try {
         val uid = requireUserId()
         val existingPhones = existingClients.mapNotNull { it.phone.takeIf { p -> p.isNotBlank() } }.toMutableSet()
@@ -1076,10 +1217,10 @@ class FirestoreStudioRepository(
         targetWeek: TrainingWeekRecord,
         prevSessions: List<TrainingSessionRecord>,
         existingTargetSessions: List<TrainingSessionRecord>
-    ): Result<Int> = try {
+    ): Result<List<TrainingSessionRecord>> = try {
         val uid = requireUserId()
         val batch = db.batch()
-        var count = 0
+        val created = mutableListOf<TrainingSessionRecord>()
         prevSessions.forEach { prev ->
             val parts = prev.timeLabel.split(":")
             val h = parts.getOrNull(0)?.toIntOrNull() ?: 18
@@ -1104,11 +1245,11 @@ class FirestoreStudioRepository(
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 )
-                count++
+                created.add(s.copy(id = ref.id))
             }
         }
-        if (count > 0) batch.commit().await()
-        Result.success(count)
+        if (created.isNotEmpty()) batch.commit().await()
+        Result.success(created)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

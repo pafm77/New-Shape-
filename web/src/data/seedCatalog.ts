@@ -497,3 +497,70 @@ export const DEFAULT_TEMPLATES: Omit<MessageTemplateRecord, 'userId'>[] = [
     defaultBody: 'Olá {nome}, recebemos o teu cancelamento para a semana {semana}. Quando quiseres reagendar usa o link: {link} 💪 New Shape',
   },
 ];
+
+export const FIXED_DAY_OPTIONS: Array<{ dayOfWeek: number; short: string; full: string }> = [
+  { dayOfWeek: 1, short: 'Seg', full: 'Segunda' },
+  { dayOfWeek: 2, short: 'Ter', full: 'Terça' },
+  { dayOfWeek: 3, short: 'Qua', full: 'Quarta' },
+  { dayOfWeek: 4, short: 'Qui', full: 'Quinta' },
+  { dayOfWeek: 5, short: 'Sex', full: 'Sexta' },
+  { dayOfWeek: 6, short: 'Sáb', full: 'Sábado' },
+  { dayOfWeek: 7, short: 'Dom', full: 'Domingo' },
+];
+
+export interface ParsedFixedSlot {
+  dayOfWeek: number;
+  hour: number;
+  minute: number;
+  timeLabel: string;
+  key: string;
+}
+
+export function parseFixedSlot(raw: string): ParsedFixedSlot | null {
+  const parts = String(raw || '').trim().split('|');
+  if (parts.length !== 2) return null;
+  const dayOfWeek = Number(parts[0]);
+  if (!Number.isInteger(dayOfWeek) || dayOfWeek < 1 || dayOfWeek > 7) return null;
+  const timeMatch = parts[1].trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!timeMatch) return null;
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  const timeLabel = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return {
+    dayOfWeek,
+    hour,
+    minute,
+    timeLabel,
+    key: `${dayOfWeek}|${timeLabel}`,
+  };
+}
+
+export function normalizeFixedSlots(slots?: string[]): string[] {
+  if (!Array.isArray(slots)) return [];
+  const unique = new Map<string, ParsedFixedSlot>();
+  slots.forEach((raw) => {
+    const parsed = parseFixedSlot(raw);
+    if (parsed && !unique.has(parsed.key)) {
+      unique.set(parsed.key, parsed);
+    }
+  });
+  return Array.from(unique.values())
+    .sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.hour - b.hour || a.minute - b.minute)
+    .slice(0, 21)
+    .map((s) => s.key);
+}
+
+export function formatFixedSlot(slot: string): string {
+  const parsed = parseFixedSlot(slot);
+  if (!parsed) return slot;
+  const dayShort = FIXED_DAY_OPTIONS.find((d) => d.dayOfWeek === parsed.dayOfWeek)?.short ?? `Dia ${parsed.dayOfWeek}`;
+  return `${dayShort} ${parsed.timeLabel}`;
+}
+
+export function formatFixedSlotsSummary(slots?: string[]): string {
+  const normalized = normalizeFixedSlots(slots);
+  if (normalized.length === 0) return '';
+  return normalized.map(formatFixedSlot).join(' · ');
+}
+

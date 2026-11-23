@@ -1246,8 +1246,10 @@ export function App() {
               uid={studioUid}
               isSuperAdmin={isSuperAdmin}
               clients={clients}
+              activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
+              weekResponses={weekResponses}
               payments={payments}
               fidelizacoes={fidelizacoes}
               assessments={assessments}

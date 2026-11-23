@@ -24,6 +24,8 @@ import {
   PhysicalAssessmentRecord,
   TrainingSessionRecord,
   TrainingType,
+  TrainingWeekRecord,
+  WeekResponseRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
@@ -31,16 +33,20 @@ import {
 import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 import {
   DEFAULT_JOIA_EUR,
+  FIXED_DAY_OPTIONS,
   PAYMENT_METHODS,
   PaymentMethod,
   buildConsecutiveMonths,
   buildRecentMonthOptions,
+  formatFixedSlot,
+  formatFixedSlotsSummary,
   formatPhoneDisplay,
   formatRgpdConsentStamp,
   formatShortDate,
   getEffectiveClientFidelizacaoMonths,
   getPaymentCategory,
   isExtraFeePayment,
+  normalizeFixedSlots,
   splitAmountAcrossMonths,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
@@ -60,8 +66,10 @@ interface PtClientsSectionProps {
   uid: string;
   isSuperAdmin: boolean;
   clients: ClientRecord[];
+  activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  weekResponses: WeekResponseRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   assessments: PhysicalAssessmentRecord[];
@@ -78,8 +86,10 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   uid,
   isSuperAdmin,
   clients,
+  activeWeek,
   sessions,
   bookings,
+  weekResponses,
   payments,
   fidelizacoes,
   assessments,
@@ -96,6 +106,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   const [showInactive, setShowInactive] = useState(false);
   const [typeFilter, setTypeFilter] = useState<'ALL' | TrainingType>('ALL');
   const [fidelizacaoFilter, setFidelizacaoFilter] = useState<'ALL' | 'ANY_FID' | '6' | '12' | 'NONE'>('ALL');
+  const [fixedOnlyFilter, setFixedOnlyFilter] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [payTarget, setPayTarget] = useState<ClientRecord | null>(null);
@@ -150,8 +161,11 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
         uid={uid}
         isSuperAdmin={isSuperAdmin}
         client={selectedClient}
+        activeWeek={activeWeek}
         sessions={sessions}
+        allBookings={bookings}
         bookings={bookings.filter((b) => b.clientId === selectedClient.id)}
+        weekResponses={weekResponses}
         payments={payments.filter((p) => p.clientId === selectedClient.id)}
         fidelizacoes={fidelizacoes.filter((f) => f.clientId === selectedClient.id)}
         assessments={assessments.filter((a) => a.clientId === selectedClient.id)}
@@ -173,6 +187,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   const baseVisibleClients = showInactive ? clients : activeClientsList;
   const persCount = baseVisibleClients.filter((c) => c.trainingType === 'PERSONALIZADO').length;
   const grupoCount = baseVisibleClients.filter((c) => c.trainingType !== 'PERSONALIZADO').length;
+  const fixedClientsCount = baseVisibleClients.filter((c) => (c.fixedSlots?.length ?? 0) > 0).length;
 
   const fid6Count = baseVisibleClients.filter((c) => clientFidMonthsMap.get(c.id) === 6).length;
   const fid12Count = baseVisibleClients.filter((c) => clientFidMonthsMap.get(c.id) === 12).length;
@@ -182,6 +197,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   const filtered = baseVisibleClients.filter((c) => {
     if (typeFilter === 'PERSONALIZADO' && c.trainingType !== 'PERSONALIZADO') return false;
     if (typeFilter === 'GRUPO' && c.trainingType === 'PERSONALIZADO') return false;
+    if (fixedOnlyFilter && (c.fixedSlots?.length ?? 0) === 0) return false;
     const effFid = clientFidMonthsMap.get(c.id) || 0;
     if (fidelizacaoFilter === 'ANY_FID' && effFid !== 6 && effFid !== 12) return false;
     if (fidelizacaoFilter === '6' && effFid !== 6) return false;
@@ -257,6 +273,17 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
               {opt.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setFixedOnlyFilter((v) => !v)}
+            className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+              fixedOnlyFilter
+                ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                : 'border-[#EAB308]/40 bg-[#3D3314]/40 text-[#FACC15] hover:bg-[#3D3314]'
+            }`}
+          >
+            Dias fixos ({fixedClientsCount})
+          </button>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
@@ -342,6 +369,11 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       {c.phone ? formatPhoneDisplay(c.phone) : 'Sem telemóvel'}
                       {upcomingInfo?.nextLabel ? ` · Próx.: ${upcomingInfo.nextLabel}` : ''}
                     </p>
+                    {(c.fixedSlots?.length ?? 0) > 0 && (
+                      <p className="mt-1 text-xs font-semibold text-[#FACC15]">
+                        Fixo: {formatFixedSlotsSummary(c.fixedSlots)}
+                      </p>
+                    )}
                     {((isSuperAdmin && c.monthlyFeeEur > 0) || effectiveFid > 0) && (
                       <p className="mt-1 text-xs font-semibold text-[#EAB308]">
                         {[
@@ -448,8 +480,11 @@ const ClientProfileView: React.FC<{
   uid: string;
   isSuperAdmin: boolean;
   client: ClientRecord;
+  activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
+  allBookings: BookingRecord[];
   bookings: BookingRecord[];
+  weekResponses: WeekResponseRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   assessments: PhysicalAssessmentRecord[];
@@ -467,8 +502,11 @@ const ClientProfileView: React.FC<{
   uid,
   isSuperAdmin,
   client,
+  activeWeek,
   sessions,
+  allBookings,
   bookings,
+  weekResponses,
   payments,
   fidelizacoes,
   assessments,
@@ -500,6 +538,12 @@ const ClientProfileView: React.FC<{
   const [fidStart, setFidStart] = useState(
     client.fidelizacaoStartMillis > 0 ? client.fidelizacaoStartMillis : Date.now()
   );
+  const [fixedSlotsDraft, setFixedSlotsDraft] = useState<string[]>(
+    normalizeFixedSlots(client.fixedSlots)
+  );
+  const [newFixedDay, setNewFixedDay] = useState<number>(1);
+  const [newFixedTime, setNewFixedTime] = useState<string>('09:00');
+  const [savingFixed, setSavingFixed] = useState(false);
   const [showPay, setShowPay] = useState(false);
   const [splitTargetPayment, setSplitTargetPayment] = useState<PaymentRecord | null>(null);
 
@@ -822,6 +866,137 @@ const ClientProfileView: React.FC<{
           </div>
         )}
       </BrandCard>
+
+      {(isSuperAdmin || (client.fixedSlots?.length ?? 0) > 0) && (
+        <BrandCard highlight={(client.fixedSlots?.length ?? 0) > 0}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-[#FACC15]">Dias Fixos Semanais</h3>
+              <p className="text-xs text-[#A1A1AA]">
+                Marcações geradas automaticamente todas as semanas como{' '}
+                <strong className="text-[#F4F4F5]">Por confirmar</strong> para aprovação do PT.
+              </p>
+            </div>
+            <StatusPill tone={fixedSlotsDraft.length > 0 ? 'gold' : 'neutral'}>
+              {fixedSlotsDraft.length > 0
+                ? `${fixedSlotsDraft.length} horário${fixedSlotsDraft.length > 1 ? 's' : ''}`
+                : 'Sem dias fixos'}
+            </StatusPill>
+          </div>
+
+          {fixedSlotsDraft.length === 0 ? (
+            <p className="mt-2.5 text-xs text-[#A1A1AA]">
+              Este aluno ainda não tem dias fixos definidos.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {fixedSlotsDraft.map((slot) => (
+                <span
+                  key={slot}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/60 px-3 py-1.5 text-xs font-bold text-[#FACC15]"
+                >
+                  {formatFixedSlot(slot)}
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      aria-label={`Remover ${formatFixedSlot(slot)}`}
+                      onClick={() =>
+                        setFixedSlotsDraft((prev) => prev.filter((item) => item !== slot))
+                      }
+                      className="rounded-full p-0.5 text-[#FACC15] hover:bg-[#121214]/40"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {isSuperAdmin && (
+            <div className="mt-3 space-y-3 border-t border-[#323238] pt-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[130px] flex-1">
+                  <FieldLabel>Dia da semana</FieldLabel>
+                  <select
+                    value={newFixedDay}
+                    onChange={(e) => setNewFixedDay(Number(e.target.value))}
+                    className="min-h-[44px] w-full rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-sm text-[#F4F4F5] focus:border-[#EAB308] focus:outline-none"
+                  >
+                    {FIXED_DAY_OPTIONS.map((d) => (
+                      <option key={d.dayOfWeek} value={d.dayOfWeek}>
+                        {d.full}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-[120px]">
+                  <FieldLabel>Hora</FieldLabel>
+                  <Input
+                    type="time"
+                    value={newFixedTime}
+                    onChange={(e) => setNewFixedTime(e.target.value)}
+                  />
+                </div>
+                <SecondaryButton
+                  onClick={() => {
+                    if (!newFixedTime) return;
+                    const key = `${newFixedDay}|${newFixedTime}`;
+                    setFixedSlotsDraft((prev) => normalizeFixedSlots([...prev, key]));
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Adicionar
+                </SecondaryButton>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <GoldButton
+                  disabled={savingFixed}
+                  onClick={async () => {
+                    setSavingFixed(true);
+                    try {
+                      const normalized = normalizeFixedSlots(fixedSlotsDraft);
+                      await repo.updateClientFixedSlots(uid, client.id, normalized);
+                      let appliedCount = 0;
+                      if (activeWeek && normalized.length > 0 && client.active) {
+                        const res = await repo.applyFixedSchedulesForWeek(
+                          uid,
+                          activeWeek,
+                          [{ ...client, fixedSlots: normalized }],
+                          sessions,
+                          allBookings,
+                          weekResponses,
+                          client.id
+                        );
+                        appliedCount = res.createdBookings;
+                      }
+                      onBanner(
+                        appliedCount > 0
+                          ? `Dias fixos guardados! ${appliedCount} marcação(ões) enviada(s) para Por confirmar.`
+                          : 'Dias fixos guardados!'
+                      );
+                    } finally {
+                      setSavingFixed(false);
+                    }
+                  }}
+                >
+                  <Check className="h-4 w-4" />
+                  {savingFixed ? 'A guardar...' : 'Guardar Dias Fixos'}
+                </GoldButton>
+                {fixedSlotsDraft.length > 0 && (
+                  <SecondaryButton
+                    disabled={savingFixed}
+                    onClick={() => setFixedSlotsDraft([])}
+                  >
+                    Limpar lista
+                  </SecondaryButton>
+                )}
+              </div>
+            </div>
+          )}
+        </BrandCard>
+      )}
 
       <BrandCard>
         <h3 className="text-base font-bold text-[#FACC15]">Dados do Perfil & Plano</h3>

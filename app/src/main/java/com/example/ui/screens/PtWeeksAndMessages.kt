@@ -28,6 +28,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import com.example.data.SeedCatalog
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
 import com.example.ui.NewShapeViewModel
@@ -49,9 +50,17 @@ fun SemanasSection(
     }
 
     var showNewSessionDialog by remember { mutableStateOf(false) }
+    var showFixedManagerDialog by remember { mutableStateOf(false) }
+    var fixedManagerInitialClientId by remember { mutableStateOf<String?>(null) }
     var selectedSessionDetail by remember { mutableStateOf<TrainingSessionRecord?>(null) }
     var sessionToEdit by remember { mutableStateOf<TrainingSessionRecord?>(null) }
     var sessionToDelete by remember { mutableStateOf<TrainingSessionRecord?>(null) }
+
+    val fixedClients = remember(state.clients) {
+        state.clients
+            .filter { it.active && it.fixedSlots.isNotEmpty() }
+            .sortedBy { it.name.lowercase() }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -124,6 +133,104 @@ fun SemanasSection(
                             },
                             modifier = Modifier.weight(1f)
                         )
+                    }
+                }
+            }
+        }
+
+        if (state.isSuperAdmin || fixedClients.isNotEmpty()) {
+            item {
+                BrandCard(highlightBorder = fixedClients.isNotEmpty()) {
+                    Text(
+                        text = "Pessoas com Dias Fixos (${fixedClients.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = NewShapeGoldBright
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Marcações geradas automaticamente todas as semanas em Por confirmar para aprovação do PT.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (state.isSuperAdmin) {
+                            GoldPrimaryButton(
+                                text = "Gerir Dias Fixos",
+                                icon = Icons.Default.Add,
+                                onClick = {
+                                    fixedManagerInitialClientId = null
+                                    showFixedManagerDialog = true
+                                },
+                                modifier = Modifier.weight(1f),
+                                testTag = "weeks_manage_fixed_btn"
+                            )
+                        }
+                        if (activeWeek != null && fixedClients.isNotEmpty()) {
+                            DarkSecondaryButton(
+                                text = "Aplicar à semana",
+                                icon = Icons.Default.Refresh,
+                                onClick = { viewModel.applyFixedSchedulesToWeek(activeWeek) },
+                                modifier = Modifier.weight(1f).testTag("weeks_apply_fixed_btn")
+                            )
+                        }
+                    }
+
+                    if (fixedClients.isEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Ainda não existem alunos com dias fixos. Toca em 'Gerir Dias Fixos' para definir.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    } else {
+                        Spacer(Modifier.height(10.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            fixedClients.forEach { fixedClient ->
+                                Surface(
+                                    color = ElevatedCharcoal,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, HairlineBorder),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = fixedClient.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimaryDark
+                                            )
+                                            Text(
+                                                text = SeedCatalog.formatFixedSlotsSummary(fixedClient.fixedSlots),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = NewShapeGoldBright
+                                            )
+                                        }
+                                        if (state.isSuperAdmin) {
+                                            TextButton(
+                                                onClick = {
+                                                    fixedManagerInitialClientId = fixedClient.id
+                                                    showFixedManagerDialog = true
+                                                },
+                                                modifier = Modifier.testTag("weeks_edit_fixed_${fixedClient.id}")
+                                            ) {
+                                                Text("Editar", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -298,6 +405,17 @@ fun SemanasSection(
             onCreate = { days, h, m, dur, cap, note ->
                 viewModel.createSessions(activeWeek, days, h, m, dur, cap, note)
                 showNewSessionDialog = false
+            }
+        )
+    }
+
+    if (showFixedManagerDialog && state.isSuperAdmin) {
+        FixedScheduleManagerDialog(
+            clients = state.clients,
+            initialClientId = fixedManagerInitialClientId,
+            onDismiss = { showFixedManagerDialog = false },
+            onSaveClient = { client, slots ->
+                viewModel.updateClientFixedSlots(client, slots, applyToActiveWeek = true)
             }
         )
     }
@@ -1312,3 +1430,221 @@ fun MensagensSettingsSection(
         }
     }
 }
+
+@Composable
+private fun FixedScheduleManagerDialog(
+    clients: List<ClientRecord>,
+    initialClientId: String?,
+    onDismiss: () -> Unit,
+    onSaveClient: (ClientRecord, List<String>) -> Unit
+) {
+    val activeClients = remember(clients) {
+        clients.filter { it.active }.sortedBy { it.name.lowercase() }
+    }
+    var selectedClientId by remember(initialClientId, activeClients) {
+        mutableStateOf(
+            initialClientId?.takeIf { id -> activeClients.any { it.id == id } }
+                ?: activeClients.firstOrNull()?.id
+                ?: ""
+        )
+    }
+    val selectedClient = activeClients.find { it.id == selectedClientId }
+    var draftSlots by remember(selectedClient?.id, selectedClient?.fixedSlots) {
+        mutableStateOf(SeedCatalog.normalizeFixedSlots(selectedClient?.fixedSlots.orEmpty()))
+    }
+    var selectedDay by remember { mutableIntStateOf(1) }
+    var hourText by remember { mutableStateOf("09") }
+    var minuteText by remember { mutableStateOf("00") }
+    var clientMenuExpanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        title = { Text("Gerir Dias Fixos", color = NewShapeGoldBright, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Define os dias e horas fixas de cada aluno. As marcações entram automaticamente em Por confirmar para o PT aprovar.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+                if (activeClients.isEmpty()) {
+                    Text("Sem alunos ativos.", style = MaterialTheme.typography.bodyMedium, color = TextSecondaryDark)
+                } else {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            color = ElevatedCharcoal,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, HairlineBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { clientMenuExpanded = true }
+                                .testTag("fixed_mgr_client_picker")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = selectedClient?.name ?: "Escolher aluno",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimaryDark
+                                )
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = "Escolher aluno", tint = NewShapeGold)
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = clientMenuExpanded,
+                            onDismissRequest = { clientMenuExpanded = false }
+                        ) {
+                            activeClients.forEach { c ->
+                                val countSuffix = if (c.fixedSlots.isNotEmpty()) " (${c.fixedSlots.size} fixo)" else ""
+                                DropdownMenuItem(
+                                    text = { Text("${c.name}$countSuffix") },
+                                    onClick = {
+                                        selectedClientId = c.id
+                                        clientMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Horários fixos (${draftSlots.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NewShapeGoldBright
+                    )
+                    if (draftSlots.isEmpty()) {
+                        Text(
+                            text = "Nenhum horário fixo definido para este aluno.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            draftSlots.forEach { slot ->
+                                Surface(
+                                    color = NewShapeGoldMuted,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.45f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = SeedCatalog.formatFixedSlot(slot),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NewShapeGoldBright
+                                        )
+                                        IconButton(
+                                            onClick = { draftSlots = draftSlots.filterNot { it == slot } },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Remover ${SeedCatalog.formatFixedSlot(slot)}",
+                                                tint = NewShapeGoldBright,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text("Dia da semana", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        SeedCatalog.FIXED_DAY_OPTIONS.forEach { day ->
+                            FilterChip(
+                                selected = selectedDay == day.dayOfWeek,
+                                onClick = { selectedDay = day.dayOfWeek },
+                                label = { Text(day.shortLabel) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = NewShapeGold,
+                                    selectedLabelColor = TextOnGold
+                                )
+                            )
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = hourText,
+                            onValueChange = { hourText = it.filter(Char::isDigit).take(2) },
+                            label = { Text("Hora") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            colors = darkFieldColors()
+                        )
+                        OutlinedTextField(
+                            value = minuteText,
+                            onValueChange = { minuteText = it.filter(Char::isDigit).take(2) },
+                            label = { Text("Min") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            colors = darkFieldColors()
+                        )
+                        DarkSecondaryButton(
+                            text = "+ Add",
+                            onClick = {
+                                val h = (hourText.toIntOrNull() ?: 9).coerceIn(0, 23)
+                                val m = (minuteText.toIntOrNull() ?: 0).coerceIn(0, 59)
+                                val slotKey = "$selectedDay|${String.format("%02d:%02d", h, m)}"
+                                draftSlots = SeedCatalog.normalizeFixedSlots(draftSlots + slotKey)
+                            },
+                            modifier = Modifier.testTag("fixed_mgr_add_slot_btn")
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            GoldPrimaryButton(
+                text = "Guardar Dias Fixos",
+                enabled = selectedClient != null,
+                onClick = {
+                    selectedClient?.let {
+                        onSaveClient(it, draftSlots)
+                        onDismiss()
+                    }
+                },
+                testTag = "fixed_mgr_save_btn"
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Fechar", color = TextSecondaryDark)
+            }
+        }
+    )
+}
+

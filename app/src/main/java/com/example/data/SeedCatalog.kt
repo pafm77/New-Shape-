@@ -300,4 +300,64 @@ object SeedCatalog {
         if (client.fidelizacaoMonths == 6 || client.fidelizacaoMonths == 12) return client.fidelizacaoMonths
         return 1
     }
+
+    data class FixedDayOption(val dayOfWeek: Int, val shortLabel: String, val fullLabel: String)
+
+    data class ParsedFixedSlot(
+        val dayOfWeek: Int,
+        val hour: Int,
+        val minute: Int,
+        val timeLabel: String,
+        val key: String
+    )
+
+    val FIXED_DAY_OPTIONS: List<FixedDayOption> = listOf(
+        FixedDayOption(1, "Seg", "Segunda"),
+        FixedDayOption(2, "Ter", "Terça"),
+        FixedDayOption(3, "Qua", "Quarta"),
+        FixedDayOption(4, "Qui", "Quinta"),
+        FixedDayOption(5, "Sex", "Sexta"),
+        FixedDayOption(6, "Sáb", "Sábado"),
+        FixedDayOption(7, "Dom", "Domingo")
+    )
+
+    fun parseFixedSlot(raw: String): ParsedFixedSlot? {
+        val parts = raw.trim().split("|")
+        if (parts.size != 2) return null
+        val day = parts[0].toIntOrNull() ?: return null
+        if (day !in 1..7) return null
+        val timeParts = parts[1].trim().split(":")
+        if (timeParts.size != 2) return null
+        val hour = timeParts[0].toIntOrNull() ?: return null
+        val minute = timeParts[1].toIntOrNull() ?: return null
+        if (hour !in 0..23 || minute !in 0..59) return null
+        val timeLabel = String.format("%02d:%02d", hour, minute)
+        return ParsedFixedSlot(day, hour, minute, timeLabel, "$day|$timeLabel")
+    }
+
+    fun normalizeFixedSlots(slots: List<String>): List<String> {
+        val unique = LinkedHashMap<String, ParsedFixedSlot>()
+        slots.forEach { raw ->
+            val parsed = parseFixedSlot(raw)
+            if (parsed != null && !unique.containsKey(parsed.key)) {
+                unique[parsed.key] = parsed
+            }
+        }
+        return unique.values
+            .sortedWith(compareBy<ParsedFixedSlot> { it.dayOfWeek }.thenBy { it.hour }.thenBy { it.minute })
+            .take(21)
+            .map { it.key }
+    }
+
+    fun formatFixedSlot(slot: String): String {
+        val parsed = parseFixedSlot(slot) ?: return slot
+        val dayShort = FIXED_DAY_OPTIONS.firstOrNull { it.dayOfWeek == parsed.dayOfWeek }?.shortLabel ?: "Dia ${parsed.dayOfWeek}"
+        return "$dayShort ${parsed.timeLabel}"
+    }
+
+    fun formatFixedSlotsSummary(slots: List<String>): String {
+        val normalized = normalizeFixedSlots(slots)
+        if (normalized.isEmpty()) return ""
+        return normalized.joinToString(" · ") { formatFixedSlot(it) }
+    }
 }

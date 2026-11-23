@@ -41,11 +41,15 @@ import {
   buildStudentPortalLink,
   buildWhatsAppUrl,
   DEFAULT_WEB_BASE_URL,
+  FIXED_DAY_OPTIONS,
   formatCutoffLabel,
+  formatFixedSlot,
+  formatFixedSlotsSummary,
   formatPhoneDisplay,
   formatTimeAgo,
   getEffectiveCutoffMinutes,
   getEffectiveReminderLeadMinutes,
+  normalizeFixedSlots,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
 import {
@@ -192,11 +196,13 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
       {subTab === 'weeks' && (
         <SemanasView
           uid={uid}
+          isSuperAdmin={isSuperAdmin}
           clients={clients}
           activeWeek={activeWeek}
           sessions={sessions}
           bookings={bookings}
           waitlistEntries={waitlistEntries}
+          weekResponses={weekResponses}
           templates={templates}
           settings={settings}
           onShiftWeek={onShiftWeek}
@@ -530,6 +536,9 @@ const PendingCardItem: React.FC<{
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-lg font-bold text-[#F4F4F5]">{card.client.name}</h3>
+            {(card.client.fixedSlots?.length ?? 0) > 0 && (
+              <StatusPill tone="gold">Horário Fixo</StatusPill>
+            )}
             {card.isAltered && <StatusPill tone="amber">Alterado</StatusPill>}
             {card.isCancelledAll && <StatusPill tone="red">Cancelou</StatusPill>}
             {card.client.newClient && <StatusPill tone="blue">Novo</StatusPill>}
@@ -691,11 +700,13 @@ const PendingCardItem: React.FC<{
 // ---------------- Semanas ----------------
 const SemanasView: React.FC<{
   uid: string;
+  isSuperAdmin: boolean;
   clients: ClientRecord[];
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
   waitlistEntries: WaitlistEntryRecord[];
+  weekResponses: WeekResponseRecord[];
   templates: MessageTemplateRecord[];
   settings: StudioSettingsRecord;
   onShiftWeek: (delta: number) => void;
@@ -703,11 +714,13 @@ const SemanasView: React.FC<{
   onBanner: (msg: string) => void;
 }> = ({
   uid,
+  isSuperAdmin,
   clients,
   activeWeek,
   sessions,
   bookings,
   waitlistEntries,
+  weekResponses,
   templates,
   settings,
   onShiftWeek,
@@ -715,9 +728,20 @@ const SemanasView: React.FC<{
   onBanner,
 }) => {
   const [showNewSession, setShowNewSession] = useState(false);
+  const [showFixedManager, setShowFixedManager] = useState(false);
+  const [fixedManagerInitialClientId, setFixedManagerInitialClientId] = useState<string>('');
+  const [applyingFixed, setApplyingFixed] = useState(false);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   const [editSession, setEditSession] = useState<TrainingSessionRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TrainingSessionRecord | null>(null);
+
+  const fixedClients = useMemo(
+    () =>
+      clients
+        .filter((c) => c.active && (c.fixedSlots?.length ?? 0) > 0)
+        .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
+    [clients]
+  );
 
   const weekSessions = useMemo(
     () =>
@@ -737,6 +761,28 @@ const SemanasView: React.FC<{
       })
     : '';
 
+  const handleApplyFixedToActiveWeek = async () => {
+    if (!activeWeek) return;
+    setApplyingFixed(true);
+    try {
+      const res = await repo.applyFixedSchedulesForWeek(
+        uid,
+        activeWeek,
+        clients,
+        sessions,
+        bookings,
+        weekResponses
+      );
+      onBanner(
+        res.createdBookings > 0
+          ? `${res.createdBookings} marcação(ões) de horário fixo criada(s) em Por confirmar!`
+          : 'Todos os horários fixos já estão aplicados nesta semana.'
+      );
+    } finally {
+      setApplyingFixed(false);
+    }
+  };
+
   const handleDuplicatePrev = async () => {
     if (!activeWeek) return;
     const prevMonday = new Date(activeWeek.startDateMillis);
@@ -747,8 +793,26 @@ const SemanasView: React.FC<{
       onBanner('A semana anterior não tem treinos para duplicar.');
       return;
     }
-    const added = await repo.duplicatePreviousWeek(uid, activeWeek, prevSessions, weekSessions);
-    onBanner(`${added} treino(s) copiado(s) da semana anterior.`);
+    const { added, createdSessions } = await repo.duplicatePreviousWeek(
+      uid,
+      activeWeek,
+      prevSessions,
+      weekSessions
+    );
+    const mergedSessions = [...sessions, ...createdSessions];
+    const fixedRes = await repo.applyFixedSchedulesForWeek(
+      uid,
+      activeWeek,
+      clients,
+      mergedSessions,
+      bookings,
+      weekResponses
+    );
+    const extraFixedMsg =
+      fixedRes.createdBookings > 0
+        ? ` · ${fixedRes.createdBookings} horário(s) fixo(s) enviados para Por confirmar.`
+        : '';
+    onBanner(`${added} treino(s) copiado(s) da semana anterior.${extraFixedMsg}`);
   };
 
   const handleExportCsv = () => {
@@ -822,8 +886,25 @@ const SemanasView: React.FC<{
             </GoldButton>
             <SecondaryButton
               onClick={async () => {
-                await repo.setWeekPublished(uid, activeWeek.weekKey, !activeWeek.published);
-                onBanner(!activeWeek.published ? 'Semana publicada!' : 'Semana ocultada.');
+                const nextPublished = !activeWeek.published;
+                await repo.setWeekPublished(uid, activeWeek.weekKey, nextPublished);
+                if (nextPublished) {
+                  const fixedRes = await repo.applyFixedSchedulesForWeek(
+                    uid,
+                    activeWeek,
+                    clients,
+                    sessions,
+                    bookings,
+                    weekResponses
+                  );
+                  onBanner(
+                    fixedRes.createdBookings > 0
+                      ? `Semana publicada! ${fixedRes.createdBookings} horário(s) fixo(s) enviados para Por confirmar.`
+                      : 'Semana publicada!'
+                  );
+                } else {
+                  onBanner('Semana ocultada.');
+                }
               }}
             >
               {activeWeek.published ? 'Despublicar' : 'Publicar semana'}
@@ -839,6 +920,81 @@ const SemanasView: React.FC<{
           </div>
         )}
       </BrandCard>
+
+      {(isSuperAdmin || fixedClients.length > 0) && (
+        <BrandCard highlight={fixedClients.length > 0}>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[#FACC15]">
+                  Pessoas com Dias Fixos ({fixedClients.length})
+                </h3>
+              </div>
+              <p className="mt-0.5 text-xs text-[#A1A1AA]">
+                Marcações geradas automaticamente todas as semanas em{' '}
+                <strong className="text-[#F4F4F5]">Por confirmar</strong> para aprovação do PT.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {isSuperAdmin && (
+                <GoldButton
+                  onClick={() => {
+                    setFixedManagerInitialClientId('');
+                    setShowFixedManager(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Gerir Dias Fixos
+                </GoldButton>
+              )}
+              {activeWeek && fixedClients.length > 0 && (
+                <SecondaryButton
+                  disabled={applyingFixed}
+                  onClick={handleApplyFixedToActiveWeek}
+                >
+                  <RefreshCw className={`h-4 w-4 ${applyingFixed ? 'animate-spin' : ''}`} />
+                  {applyingFixed ? 'A aplicar...' : 'Aplicar à semana (Por confirmar)'}
+                </SecondaryButton>
+              )}
+            </div>
+          </div>
+
+          {fixedClients.length === 0 ? (
+            <p className="mt-3 text-xs text-[#A1A1AA]">
+              Ainda não existem alunos com dias fixos. Carrega em &quot;Gerir Dias Fixos&quot; para
+              definir quem tem horário semanal fixo.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {fixedClients.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#323238] bg-[#242429] px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-[#F4F4F5]">{c.name}</p>
+                    <p className="text-xs font-semibold text-[#FACC15]">
+                      {formatFixedSlotsSummary(c.fixedSlots)}
+                    </p>
+                  </div>
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFixedManagerInitialClientId(c.id);
+                        setShowFixedManager(true);
+                      }}
+                      className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1.5 text-xs font-bold text-[#FACC15] hover:border-[#EAB308]"
+                    >
+                      Editar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </BrandCard>
+      )}
 
       {activeWeek?.published && (
         <BrandCard highlight>
@@ -979,6 +1135,37 @@ const SemanasView: React.FC<{
             await repo.createSessions(uid, activeWeek, days, h, m, dur, cap, note);
             setShowNewSession(false);
             onBanner('Treino(s) criado(s)!');
+          }}
+        />
+      )}
+
+      {/* Admin Fixed Schedule Manager Modal */}
+      {showFixedManager && isSuperAdmin && (
+        <FixedScheduleManagerModal
+          clients={clients}
+          initialClientId={fixedManagerInitialClientId}
+          onClose={() => setShowFixedManager(false)}
+          onSaveClient={async (client, slots) => {
+            const normalized = normalizeFixedSlots(slots);
+            await repo.updateClientFixedSlots(uid, client.id, normalized);
+            let appliedCount = 0;
+            if (activeWeek && normalized.length > 0 && client.active) {
+              const res = await repo.applyFixedSchedulesForWeek(
+                uid,
+                activeWeek,
+                [{ ...client, fixedSlots: normalized }],
+                sessions,
+                bookings,
+                weekResponses,
+                client.id
+              );
+              appliedCount = res.createdBookings;
+            }
+            onBanner(
+              appliedCount > 0
+                ? `Dias fixos de ${client.name} guardados! ${appliedCount} marcação(ões) enviada(s) para Por confirmar.`
+                : `Dias fixos de ${client.name} atualizados!`
+            );
           }}
         />
       )}
@@ -2100,3 +2287,154 @@ const TemplateEditorCard: React.FC<{
     </BrandCard>
   );
 };
+
+const FixedScheduleManagerModal: React.FC<{
+  clients: ClientRecord[];
+  initialClientId?: string;
+  onClose: () => void;
+  onSaveClient: (client: ClientRecord, slots: string[]) => Promise<void>;
+}> = ({ clients, initialClientId, onClose, onSaveClient }) => {
+  const activeClients = useMemo(
+    () =>
+      clients
+        .filter((c) => c.active)
+        .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
+    [clients]
+  );
+
+  const [selectedClientId, setSelectedClientId] = useState<string>(
+    initialClientId || activeClients[0]?.id || ''
+  );
+  const selectedClient = activeClients.find((c) => c.id === selectedClientId) || null;
+  const [draftSlots, setDraftSlots] = useState<string[]>(
+    normalizeFixedSlots(selectedClient?.fixedSlots)
+  );
+  const [dayOfWeek, setDayOfWeek] = useState<number>(1);
+  const [timeStr, setTimeStr] = useState<string>('09:00');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const c = activeClients.find((x) => x.id === selectedClientId);
+    setDraftSlots(normalizeFixedSlots(c?.fixedSlots));
+  }, [selectedClientId, activeClients]);
+
+  return (
+    <Modal open title="Gerir Pessoas com Dias Fixos" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-xs text-[#A1A1AA]">
+          Escolhe o aluno e define os seus dias e horas fixas. As marcações serão criadas
+          automaticamente todas as semanas como{' '}
+          <strong className="text-[#F4F4F5]">Por confirmar</strong> para o PT confirmar.
+        </p>
+
+        {activeClients.length === 0 ? (
+          <p className="text-sm text-[#A1A1AA]">Sem alunos ativos para configurar.</p>
+        ) : (
+          <>
+            <div>
+              <FieldLabel>Aluno</FieldLabel>
+              <select
+                value={selectedClientId}
+                onChange={(e) => setSelectedClientId(e.target.value)}
+                className="min-h-[44px] w-full rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-sm text-[#F4F4F5] focus:border-[#EAB308] focus:outline-none"
+              >
+                {activeClients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {(c.fixedSlots?.length ?? 0) > 0
+                      ? ` (${c.fixedSlots!.length} fixo${c.fixedSlots!.length > 1 ? 's' : ''})`
+                      : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <FieldLabel>Horários fixos definidos ({draftSlots.length})</FieldLabel>
+              {draftSlots.length === 0 ? (
+                <p className="text-xs text-[#A1A1AA]">
+                  Nenhum dia fixo adicionado para este aluno.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {draftSlots.map((slot) => (
+                    <span
+                      key={slot}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/60 px-3 py-1.5 text-xs font-bold text-[#FACC15]"
+                    >
+                      {formatFixedSlot(slot)}
+                      <button
+                        type="button"
+                        aria-label={`Remover ${formatFixedSlot(slot)}`}
+                        onClick={() =>
+                          setDraftSlots((prev) => prev.filter((item) => item !== slot))
+                        }
+                        className="rounded-full p-0.5 text-[#FACC15] hover:bg-[#121214]/40"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[130px] flex-1">
+                <FieldLabel>Dia da semana</FieldLabel>
+                <select
+                  value={dayOfWeek}
+                  onChange={(e) => setDayOfWeek(Number(e.target.value))}
+                  className="min-h-[44px] w-full rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-sm text-[#F4F4F5] focus:border-[#EAB308] focus:outline-none"
+                >
+                  {FIXED_DAY_OPTIONS.map((d) => (
+                    <option key={d.dayOfWeek} value={d.dayOfWeek}>
+                      {d.full}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="w-[120px]">
+                <FieldLabel>Hora</FieldLabel>
+                <Input
+                  type="time"
+                  value={timeStr}
+                  onChange={(e) => setTimeStr(e.target.value)}
+                />
+              </div>
+              <SecondaryButton
+                onClick={() => {
+                  if (!timeStr) return;
+                  setDraftSlots((prev) => normalizeFixedSlots([...prev, `${dayOfWeek}|${timeStr}`]));
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Adicionar
+              </SecondaryButton>
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <SecondaryButton onClick={onClose}>Fechar</SecondaryButton>
+              <GoldButton
+                disabled={!selectedClient || saving}
+                onClick={async () => {
+                  if (!selectedClient) return;
+                  setSaving(true);
+                  try {
+                    await onSaveClient(selectedClient, draftSlots);
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                <Check className="h-4 w-4" />
+                {saving ? 'A guardar...' : 'Guardar Dias Fixos'}
+              </GoldButton>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+};
+

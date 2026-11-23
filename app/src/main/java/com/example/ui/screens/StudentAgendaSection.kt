@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.SeedCatalog
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
 import com.example.ui.NewShapeViewModel
@@ -355,6 +356,40 @@ internal fun StudentAgendaSection(
 
         if (subTab == 0) {
             // ================= SUB-TAB 1: HORÁRIOS (DIA A DIA / HORA A HORA) =================
+            if (student.fixedSlots.isNotEmpty()) {
+                val fixedSummary = SeedCatalog.formatFixedSlotsSummary(student.fixedSlots)
+                item {
+                    Surface(
+                        color = NewShapeGoldMuted,
+                        shape = MaterialTheme.shapes.medium,
+                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                StatusPill("Horário Fixo", NewShapeGoldBright, ElevatedCharcoal)
+                                Text(
+                                    text = fixedSummary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NewShapeGoldBright
+                                )
+                            }
+                            Text(
+                                text = "Os teus dias fixos são marcados automaticamente todas as semanas e ficam a aguardar confirmação do teu PT. Podes sempre alterar ou cancelar se precisares.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark
+                            )
+                        }
+                    }
+                }
+            }
             if (publishedWeeks.isEmpty()) {
                 item {
                     EmptyStateBox(

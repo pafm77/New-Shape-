@@ -58,6 +58,8 @@ import {
   generatePortalCode,
   getEffectiveCutoffMinutes,
   getEffectiveReminderLeadMinutes,
+  normalizeFixedSlots,
+  parseFixedSlot,
   getMondayOfWeek,
   isValidPortuguesePhone,
   normalizePaymentMethod,
@@ -193,6 +195,9 @@ export function subscribeStudioData(
       fidelizacaoStartMillis: Number(d.fidelizacaoStartMillis ?? 0),
       trainingType: d.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO',
       weeklySessionLimit: Number(d.weeklySessionLimit ?? 0),
+      fixedSlots: Array.isArray(d.fixedSlots)
+        ? normalizeFixedSlots(d.fixedSlots.map(String))
+        : [],
     }),
     (list) =>
       list.sort((a, b) => {
@@ -1179,6 +1184,138 @@ export async function updateClient(uid: string, client: ClientRecord): Promise<v
   });
 }
 
+export async function updateClientFixedSlots(
+  uid: string,
+  clientId: string,
+  fixedSlots: string[]
+): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'clients'), clientId), {
+    fixedSlots: normalizeFixedSlots(fixedSlots),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function applyFixedSchedulesForWeek(
+  uid: string,
+  targetWeek: TrainingWeekRecord,
+  clients: ClientRecord[],
+  existingSessions: TrainingSessionRecord[],
+  existingBookings: BookingRecord[],
+  weekResponses: WeekResponseRecord[],
+  onlyClientId?: string
+): Promise<{ createdBookings: number; createdSessions: number; affectedClients: number }> {
+  const unavailableClientIds = new Set(
+    weekResponses
+      .filter((r) => r.weekKey === targetWeek.weekKey && r.status === 'UNAVAILABLE')
+      .map((r) => r.clientId)
+  );
+
+  const targetClients = clients.filter(
+    (c) =>
+      c.active &&
+      (!onlyClientId || c.id === onlyClientId) &&
+      !unavailableClientIds.has(c.id) &&
+      normalizeFixedSlots(c.fixedSlots).length > 0
+  );
+
+  if (targetClients.length === 0) {
+    return { createdBookings: 0, createdSessions: 0, affectedClients: 0 };
+  }
+
+  const sessionMap = new Map<string, { id: string }>();
+  existingSessions
+    .filter((s) => s.weekKey === targetWeek.weekKey)
+    .forEach((s) => {
+      const key = `${s.dayOfWeek}|${s.timeLabel}`;
+      if (!sessionMap.has(key)) {
+        sessionMap.set(key, { id: s.id });
+      }
+    });
+
+  const existingClientSessionKeys = new Set(
+    existingBookings
+      .filter((b) => b.weekKey === targetWeek.weekKey)
+      .map((b) => `${b.clientId}|${b.sessionId}`)
+  );
+
+  const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
+  const now = Date.now();
+  let createdSessions = 0;
+  let createdBookings = 0;
+  const affectedClientIds = new Set<string>();
+
+  for (const client of targetClients) {
+    const slots = normalizeFixedSlots(client.fixedSlots);
+    let clientHadNewBooking = false;
+
+    for (const rawSlot of slots) {
+      const parsed = parseFixedSlot(rawSlot);
+      if (!parsed) continue;
+      let sessionEntry = sessionMap.get(parsed.key);
+      if (!sessionEntry) {
+        const sessionRef = doc(subcol(uid, 'sessions'));
+        const sessionData = createSessionModel(
+          uid,
+          targetWeek.weekKey,
+          targetWeek.startDateMillis,
+          parsed.dayOfWeek,
+          parsed.hour,
+          parsed.minute,
+          60,
+          client.trainingType === 'PERSONALIZADO' ? 1 : 6,
+          'Horário Fixo'
+        );
+        writes.push([
+          sessionRef,
+          {
+            ...sessionData,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+        ]);
+        sessionEntry = { id: sessionRef.id };
+        sessionMap.set(parsed.key, sessionEntry);
+        createdSessions += 1;
+      }
+
+      const bookingKey = `${client.id}|${sessionEntry.id}`;
+      if (existingClientSessionKeys.has(bookingKey)) continue;
+
+      existingClientSessionKeys.add(bookingKey);
+      const bookingRef = doc(subcol(uid, 'bookings'));
+      writes.push([
+        bookingRef,
+        {
+          userId: uid,
+          sessionId: sessionEntry.id,
+          weekKey: targetWeek.weekKey,
+          clientId: client.id,
+          status: 'PENDING',
+          attendanceStatus: 'PENDING',
+          requestedAtMillis: now,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+      ]);
+      createdBookings += 1;
+      clientHadNewBooking = true;
+    }
+
+    if (clientHadNewBooking) {
+      affectedClientIds.add(client.id);
+    }
+  }
+
+  if (writes.length > 0) {
+    await commitWrites(writes);
+  }
+  return {
+    createdBookings,
+    createdSessions,
+    affectedClients: affectedClientIds.size,
+  };
+}
+
 export async function importClientsCsv(
   uid: string,
   rawText: string,
@@ -1355,8 +1492,9 @@ export async function duplicatePreviousWeek(
   targetWeek: TrainingWeekRecord,
   prevSessions: TrainingSessionRecord[],
   existingTargetSessions: TrainingSessionRecord[]
-): Promise<number> {
+): Promise<{ added: number; createdSessions: TrainingSessionRecord[] }> {
   const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
+  const createdSessions: TrainingSessionRecord[] = [];
   prevSessions.forEach((prev) => {
     const [hStr, mStr] = prev.timeLabel.split(':');
     const h = Number(hStr) || 18;
@@ -1376,18 +1514,20 @@ export async function duplicatePreviousWeek(
         prev.capacity,
         prev.note
       );
+      const ref = doc(subcol(uid, 'sessions'));
       writes.push([
-        doc(subcol(uid, 'sessions')),
+        ref,
         {
           ...s,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         },
       ]);
+      createdSessions.push({ id: ref.id, ...s });
     }
   });
   if (writes.length > 0) await commitWrites(writes);
-  return writes.length;
+  return { added: writes.length, createdSessions };
 }
 
 // --- Bookings & Confirmations ---

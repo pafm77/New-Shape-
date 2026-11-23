@@ -57,7 +57,8 @@ service cloud.firestore {
              (!('fidelizacaoMonths' in data) || (data.fidelizacaoMonths in [0, 6, 12])) &&
              (!('fidelizacaoStartMillis' in data) || (data.fidelizacaoStartMillis is int && data.fidelizacaoStartMillis >= 0)) &&
              (!('trainingType' in data) || (data.trainingType in ['PERSONALIZADO', 'GRUPO'])) &&
-             (!('weeklySessionLimit' in data) || (data.weeklySessionLimit is int && data.weeklySessionLimit >= 0 && data.weeklySessionLimit <= 21));
+             (!('weeklySessionLimit' in data) || (data.weeklySessionLimit is int && data.weeklySessionLimit >= 0 && data.weeklySessionLimit <= 21)) &&
+             (!('fixedSlots' in data) || (data.fixedSlots is list && data.fixedSlots.size() <= 21));
     }
 
     function isValidWeek(data) {
@@ -298,7 +299,8 @@ service cloud.firestore {
         allow create: if canAccessStudio(userId) && isValidId(clientId) &&
                          incoming().userId == userId &&
                          incoming().keys().hasAll(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'weeklySessionLimit', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'weeklySessionLimit', 'fixedSlots', 'createdAt', 'updatedAt']) &&
+                         (!('fixedSlots' in incoming()) || incoming().fixedSlots.size() == 0 || isSuperAdmin()) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidClient(incoming());
         allow update: if isOwner(userId) && isValidId(clientId) &&
@@ -306,7 +308,8 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'weeklySessionLimit', 'updatedAt']);
+                         (!('fixedSlots' in incoming().diff(existing()).affectedKeys()) || isSuperAdmin()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'notes', 'active', 'newClient', 'monthlyFeeEur', 'fidelizacaoMonths', 'fidelizacaoStartMillis', 'trainingType', 'weeklySessionLimit', 'fixedSlots', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(clientId);
       }
 

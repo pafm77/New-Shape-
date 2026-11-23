@@ -365,6 +365,9 @@ private fun PendingConfirmationCardView(
                         style = MaterialTheme.typography.titleLarge,
                         color = TextPrimaryDark
                     )
+                    if (card.client.fixedSlots.isNotEmpty()) {
+                        StatusPill("Horário Fixo", NewShapeGoldBright, NewShapeGoldMuted)
+                    }
                     if (card.isAltered) {
                         StatusPill("Alterado", PendingAmber, PendingAmberContainer)
                     }

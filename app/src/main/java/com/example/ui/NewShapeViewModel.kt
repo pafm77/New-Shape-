@@ -467,12 +467,81 @@ class NewShapeViewModel(
     }
 
     fun toggleWeekPublished(week: TrainingWeekRecord) {
+        val data = currentData
+        val nextPublished = !week.published
         viewModelScope.launch {
-            repository.setWeekPublished(week, !week.published)
+            repository.setWeekPublished(week, nextPublished)
                 .onSuccess {
-                    _statusBanner.value = if (!week.published) "Semana publicada para os alunos!" else "Semana despublicada."
+                    if (nextPublished && data != null) {
+                        val fixedCount = repository.applyFixedSchedulesForWeek(
+                            targetWeek = week,
+                            clients = data.clients,
+                            existingSessions = data.sessions,
+                            existingBookings = data.bookings,
+                            weekResponses = data.weekResponses
+                        ).getOrNull()?.first ?: 0
+                        _statusBanner.value = if (fixedCount > 0) {
+                            "Semana publicada! $fixedCount horário(s) fixo(s) enviados para Por confirmar."
+                        } else {
+                            "Semana publicada para os alunos!"
+                        }
+                    } else {
+                        _statusBanner.value = if (nextPublished) "Semana publicada para os alunos!" else "Semana despublicada."
+                    }
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun updateClientFixedSlots(
+        client: ClientRecord,
+        fixedSlots: List<String>,
+        applyToActiveWeek: Boolean = true
+    ) {
+        val data = currentData
+        val activeWeek = data?.weeks?.find { it.weekKey == _selectedWeekKey.value }
+            ?: data?.weeks?.firstOrNull()
+        val normalized = SeedCatalog.normalizeFixedSlots(fixedSlots)
+        viewModelScope.launch {
+            repository.updateClientFixedSlots(client.id, normalized)
+                .onSuccess {
+                    var createdBookings = 0
+                    if (applyToActiveWeek && activeWeek != null && normalized.isNotEmpty() && client.active && data != null) {
+                        createdBookings = repository.applyFixedSchedulesForWeek(
+                            targetWeek = activeWeek,
+                            clients = listOf(client.copy(fixedSlots = normalized)),
+                            existingSessions = data.sessions,
+                            existingBookings = data.bookings,
+                            weekResponses = data.weekResponses,
+                            onlyClientId = client.id
+                        ).getOrNull()?.first ?: 0
+                    }
+                    _statusBanner.value = if (createdBookings > 0) {
+                        "Dias fixos de ${client.name} guardados! $createdBookings marcação(ões) enviada(s) para Por confirmar."
+                    } else {
+                        "Dias fixos de ${client.name} guardados!"
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun applyFixedSchedulesToWeek(targetWeek: TrainingWeekRecord) {
+        val data = currentData ?: return
+        viewModelScope.launch {
+            repository.applyFixedSchedulesForWeek(
+                targetWeek = targetWeek,
+                clients = data.clients,
+                existingSessions = data.sessions,
+                existingBookings = data.bookings,
+                weekResponses = data.weekResponses
+            ).onSuccess { (createdBookings, _) ->
+                _statusBanner.value = if (createdBookings > 0) {
+                    "$createdBookings marcação(ões) de horário fixo criada(s) em Por confirmar!"
+                } else {
+                    "Todos os horários fixos já estão aplicados nesta semana."
+                }
+            }.onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
 
@@ -521,8 +590,19 @@ class NewShapeViewModel(
             val prevSessions = data.sessions.filter { it.weekKey == prevKey }
             val existingTarget = data.sessions.filter { it.weekKey == targetWeek.weekKey }
             repository.duplicatePreviousWeek(targetWeek, prevSessions, existingTarget)
-                .onSuccess { count ->
-                    _statusBanner.value = if (count > 0) "$count treinos copiados da semana anterior." else "Sem novos treinos para copiar."
+                .onSuccess { createdSessions ->
+                    val count = createdSessions.size
+                    val mergedSessions = data.sessions + createdSessions
+                    val fixedCount = repository.applyFixedSchedulesForWeek(
+                        targetWeek = targetWeek,
+                        clients = data.clients,
+                        existingSessions = mergedSessions,
+                        existingBookings = data.bookings,
+                        weekResponses = data.weekResponses
+                    ).getOrNull()?.first ?: 0
+                    val baseMsg = if (count > 0) "$count treinos copiados da semana anterior." else "Sem novos treinos para copiar."
+                    val fixedMsg = if (fixedCount > 0) " · $fixedCount horário(s) fixo(s) enviados para Por confirmar." else ""
+                    _statusBanner.value = "$baseMsg$fixedMsg"
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }

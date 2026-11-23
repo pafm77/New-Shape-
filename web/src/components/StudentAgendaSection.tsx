@@ -23,6 +23,7 @@ import {
 import {
   DAYS_PT,
   formatCutoffLabel,
+  formatFixedSlotsSummary,
   getEffectiveCutoffMinutes,
   MONTHS_PT,
 } from '../data/seedCatalog';
@@ -309,6 +310,20 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
       {/* ==================== SUB-TAB 1: HORÁRIOS (DIA A DIA / HORA A HORA) ==================== */}
       {subTab === 'marcar' && (
         <>
+          {(client.fixedSlots?.length ?? 0) > 0 && (
+            <div className="rounded-2xl border border-[#EAB308]/45 bg-[#3D3314]/55 p-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill tone="gold">Horário Fixo</StatusPill>
+                <span className="text-xs font-bold text-[#FACC15]">
+                  {formatFixedSlotsSummary(client.fixedSlots)}
+                </span>
+              </div>
+              <p className="mt-1.5 text-xs text-[#E4E4E7]">
+                Os teus dias fixos são marcados automaticamente todas as semanas e ficam a aguardar
+                confirmação do teu PT. Podes sempre alterar ou cancelar se precisares.
+              </p>
+            </div>
+          )}
           {publishedWeeks.length === 0 ? (
             <EmptyState
               icon={<Calendar className="h-6 w-6" />}
