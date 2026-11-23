@@ -18,6 +18,7 @@ import {
   LogOut,
   RotateCcw,
   Scale,
+  Settings,
   ShieldCheck,
   Trash2,
   UserCheck,
@@ -62,16 +63,21 @@ import {
 import * as repo from './services/firestoreRepository';
 import {
   dispatchLocalPushNotification,
+  getNotificationPermission,
   getPtAlertsPreference,
   registerNotificationServiceWorker,
+  requestNotificationPermission,
+  savePtAlertsPreference,
 } from './services/notificationService';
 import {
+  isIosDevice,
+  isStandalonePwa,
   syncPtPwaManifest,
   syncStudentPwaUrlAndManifest,
 } from './services/pwaInstall';
 import { NewShapeLogo } from './components/NewShapeLogo';
 import { AuthRoleScreen, PtEmailSignInScreen } from './components/AuthScreens';
-import { PtHomeSection } from './components/PtHomeSection';
+import { PtHomeSection, PtHomeSubTab } from './components/PtHomeSection';
 import { PtClientsSection } from './components/PtClientsSection';
 import { PtTrainingSection } from './components/PtTrainingSection';
 import { PtNutritionSection } from './components/PtNutritionSection';
@@ -253,9 +259,15 @@ export function App() {
 
   // UI state
   const [ptTab, setPtTab] = useState<PtMainTab>('home');
+  const [requestedHomeSubTab, setRequestedHomeSubTab] = useState<{
+    tab: PtHomeSubTab;
+    nonce: number;
+  } | null>(null);
   const [jumpClientId, setJumpClientId] = useState<string | undefined>(undefined);
   const [mgmtSubTab, setMgmtSubTab] = useState<ManagementSubTab>('finance');
   const [showNotifModal, setShowNotifModal] = useState(false);
+  const [ptNotifPerm, setPtNotifPerm] = useState(() => getNotificationPermission());
+  const [ptPushAlertsEnabled, setPtPushAlertsEnabled] = useState(() => getPtAlertsPreference());
   const seenNotifIdsRef = useRef<Set<string> | null>(null);
   const [activeMondayMs, setActiveMondayMs] = useState<number>(() =>
     getMondayOfWeek(new Date()).getTime()
@@ -1176,7 +1188,11 @@ export function App() {
         <div className="mt-4 space-y-2 border-t border-[#323238] pt-4">
           <button
             type="button"
-            onClick={() => setShowNotifModal(true)}
+            onClick={() => {
+              setPtNotifPerm(getNotificationPermission());
+              setPtPushAlertsEnabled(getPtAlertsPreference());
+              setShowNotifModal(true);
+            }}
             className="flex w-full items-center justify-between rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
           >
             <span className="flex items-center gap-2">
@@ -1188,6 +1204,17 @@ export function App() {
                 {unreadNotifCount}
               </span>
             )}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPtTab('home');
+              setRequestedHomeSubTab({ tab: 'settings', nonce: Date.now() });
+            }}
+            className="flex w-full items-center gap-2 rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
+          >
+            <Settings className="h-4 w-4 text-[#EAB308]" />
+            Definições
           </button>
           <button
             type="button"
@@ -1216,7 +1243,11 @@ export function App() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setShowNotifModal(true)}
+              onClick={() => {
+                setPtNotifPerm(getNotificationPermission());
+                setPtPushAlertsEnabled(getPtAlertsPreference());
+                setShowNotifModal(true);
+              }}
               aria-label="Notificações"
               className="relative rounded-xl border border-[#323238] bg-[#1B1B1E] p-1.5 text-[#FACC15]"
             >
@@ -1226,6 +1257,18 @@ export function App() {
                   {unreadNotifCount}
                 </span>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPtTab('home');
+                setRequestedHomeSubTab({ tab: 'settings', nonce: Date.now() });
+              }}
+              aria-label="Definições"
+              title="Definições"
+              className="rounded-xl border border-[#323238] bg-[#1B1B1E] p-1.5 text-[#FACC15]"
+            >
+              <Settings className="h-4 w-4" />
             </button>
             <button
               type="button"
@@ -1317,6 +1360,7 @@ export function App() {
               settings={effectiveSettings}
               pendingQueue={pendingQueue}
               lockedByWhatsApp={lockedByWhatsApp}
+              requestedSubTab={requestedHomeSubTab}
               onShiftWeek={(delta) => {
                 const d = new Date(activeMondayMs);
                 d.setDate(d.getDate() + delta * 7);
@@ -1465,6 +1509,87 @@ export function App() {
           onClose={() => setShowNotifModal(false)}
         >
           <div className="space-y-3">
+            {/* 1-tap Phone Notification Bar Control */}
+            <div className="rounded-xl border border-[#EAB308]/40 bg-[#242429] p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-[#F4F4F5]">
+                  Alertas na barra do telemóvel
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNotifModal(false);
+                    setPtTab('home');
+                    setRequestedHomeSubTab({ tab: 'settings', nonce: Date.now() });
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-[#FACC15] hover:underline"
+                >
+                  <Settings className="h-3 w-3" />
+                  Definições
+                </button>
+              </div>
+              {isIosDevice() && !isStandalonePwa() && (
+                <p className="text-[11px] text-[#FDE68A]">
+                  No iPhone, adiciona primeiro a app ao ecrã principal e abre pelo ícone.
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {ptNotifPerm !== 'granted' ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await requestNotificationPermission();
+                      setPtNotifPerm(res);
+                      if (res === 'granted') {
+                        setPtPushAlertsEnabled(true);
+                        savePtAlertsPreference(true);
+                        showBanner('Notificações na barra do telemóvel ativadas!');
+                      } else {
+                        showBanner('Permissão de notificações não autorizada neste browser.');
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#EAB308] px-3 py-1.5 text-xs font-bold text-[#121214]"
+                  >
+                    <Bell className="h-3.5 w-3.5" />
+                    {ptNotifPerm === 'unsupported'
+                      ? 'Não suportado neste browser'
+                      : 'Ativar notificações'}
+                  </button>
+                ) : (
+                  <>
+                    <StatusPill tone={ptPushAlertsEnabled ? 'green' : 'amber'}>
+                      {ptPushAlertsEnabled ? 'Ativas ✓' : 'Em pausa'}
+                    </StatusPill>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !ptPushAlertsEnabled;
+                        setPtPushAlertsEnabled(next);
+                        savePtAlertsPreference(next);
+                        showBanner(next ? 'Alertas ativados.' : 'Alertas em pausa.');
+                      }}
+                      className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1 text-[11px] font-bold text-[#F4F4F5] hover:border-[#EAB308]"
+                    >
+                      {ptPushAlertsEnabled ? 'Pausar' : 'Retomar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await dispatchLocalPushNotification(
+                          'New Shape · Teste de Alerta PT',
+                          'As notificações na barra do telemóvel estão a funcionar!'
+                        );
+                        showBanner('Notificação de teste enviada.');
+                      }}
+                      className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1 text-[11px] font-bold text-[#FACC15] hover:border-[#EAB308]"
+                    >
+                      Testar
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
             {unreadNotifCount > 0 && (
               <div className="flex justify-end">
                 <button

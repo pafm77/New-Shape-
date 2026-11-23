@@ -1227,30 +1227,11 @@ fun RespostasSection(
 }
 
 @Composable
-fun MensagensSettingsSection(
+fun MensagensOnlySection(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
     val context = LocalContext.current
-    var clientsCanEdit by remember(state.settings) { mutableStateOf(state.settings.clientsCanEdit) }
-    var cutoffMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveCutoffMinutes().toString()) }
-    var reminderLeadMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveReminderLeadMinutes().toString()) }
-    var whatsappWeb by remember(state.settings) { mutableStateOf(state.settings.whatsappWebMode) }
-    var siteBaseUrl by remember(state.settings) { mutableStateOf(state.settings.siteBaseUrl) }
-    var ptWhatsappPhone by remember(state.settings) { mutableStateOf(state.settings.ptWhatsappPhone) }
-
-    var hasNotifPermission by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
-    var ptAlertsEnabled by remember { mutableStateOf(WorkoutNotificationHelper.isPtAlertsEnabled(context)) }
-    val ptNotifPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        hasNotifPermission = granted
-        if (granted) {
-            ptAlertsEnabled = true
-            WorkoutNotificationHelper.setPtAlertsEnabled(context, true)
-        }
-    }
-
     val cleanBaseUrl = state.settings.siteBaseUrl.trimEnd('/').ifBlank { "https://newshape.vercel.app" }
     val ptLink = "$cleanBaseUrl/painel"
     val studentLink = remember(state.settings, state.currentUserId) {
@@ -1268,48 +1249,13 @@ fun MensagensSettingsSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            BrandCard(highlightBorder = true) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "Links de Acesso (PT e Aluno)",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = NewShapeGoldBright,
-                        fontWeight = FontWeight.Bold
-                    )
-                    TextButton(onClick = { viewModel.regenerateStudentPortalCode() }) {
-                        Text("Renovar código", color = TextSecondaryDark, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text("Link do PT (Painel Web)", style = MaterialTheme.typography.labelMedium, color = TextPrimaryDark)
-                Text(ptLink, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
-                Spacer(Modifier.height(6.dp))
-                DarkSecondaryButton(
-                    text = "Copiar Link do PT",
-                    onClick = { copyToClipboard(context, ptLink, "Link do PT copiado!") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(12.dp))
-                Text("Link do Aluno (só telemóvel)", style = MaterialTheme.typography.labelMedium, color = NewShapeGoldBright)
-                Text(studentLink, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DarkSecondaryButton(
-                        text = "Copiar Aluno",
-                        onClick = { copyToClipboard(context, studentLink, "Link do Aluno copiado!") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    GoldPrimaryButton(
-                        text = "WhatsApp",
-                        onClick = { openWhatsApp(context, null, studentInviteText, state.settings.whatsappWebMode) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
+            PortalLinksCardAndroid(
+                ptLink = ptLink,
+                studentLink = studentLink,
+                studentInviteText = studentInviteText,
+                whatsappWebMode = state.settings.whatsappWebMode,
+                onRegenerateCode = { viewModel.regenerateStudentPortalCode() }
+            )
         }
 
         item {
@@ -1376,10 +1322,117 @@ fun MensagensSettingsSection(
                 }
             }
         }
+    }
+}
 
+@Composable
+fun PtSettingsSection(
+    state: StudioUiState,
+    viewModel: NewShapeViewModel
+) {
+    val context = LocalContext.current
+    var clientsCanEdit by remember(state.settings) { mutableStateOf(state.settings.clientsCanEdit) }
+    var cutoffMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveCutoffMinutes().toString()) }
+    var reminderLeadMinutesText by remember(state.settings) { mutableStateOf(state.settings.effectiveReminderLeadMinutes().toString()) }
+    var whatsappWeb by remember(state.settings) { mutableStateOf(state.settings.whatsappWebMode) }
+    var siteBaseUrl by remember(state.settings) { mutableStateOf(state.settings.siteBaseUrl) }
+    var ptWhatsappPhone by remember(state.settings) { mutableStateOf(state.settings.ptWhatsappPhone) }
+
+    var hasNotifPermission by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
+    var ptAlertsEnabled by remember { mutableStateOf(WorkoutNotificationHelper.isPtAlertsEnabled(context)) }
+    val ptNotifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasNotifPermission = granted
+        if (granted) {
+            ptAlertsEnabled = true
+            WorkoutNotificationHelper.setPtAlertsEnabled(context, true)
+        }
+    }
+
+    val cleanBaseUrl = state.settings.siteBaseUrl.trimEnd('/').ifBlank { "https://newshape.vercel.app" }
+    val ptLink = "$cleanBaseUrl/painel"
+    val studentLink = remember(state.settings, state.currentUserId) {
+        val ptUid = state.settings.userId.ifBlank { state.currentUserId }
+        val code = state.settings.studentPortalCode
+        if (ptUid.isNotBlank() && code.isNotBlank()) "$cleanBaseUrl/aluno?pt=$ptUid&code=$code"
+        else if (ptUid.isNotBlank()) "$cleanBaseUrl/aluno?pt=$ptUid"
+        else "$cleanBaseUrl/aluno"
+    }
+    val studentInviteText = "Olá! 💪 Já podes aceder ao teu Portal de Aluno New Shape (marcações, treinos, nutrição e avaliações) através deste link:\n$studentLink\n\nEntras apenas com o teu número de telemóvel!"
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
         item {
-            Spacer(Modifier.height(8.dp))
-            Text("Definições", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+            Text("Definições do Estúdio", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+            Text(
+                "Notificações na barra do telemóvel, regras de marcação, WhatsApp e links de acesso.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondaryDark
+            )
+        }
+
+        // Notificações na barra do telemóvel em destaque no topo
+        item {
+            BrandCard(highlightBorder = true) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Notificações na barra do telemóvel (PT)", style = MaterialTheme.typography.titleMedium, color = NewShapeGoldBright)
+                        Text(
+                            "Recebe um alerta imediato na barra do telemóvel sempre que um aluno enviar mensagem no chat, cancelar ou alterar o horário.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    }
+                    Switch(
+                        checked = ptAlertsEnabled && hasNotifPermission,
+                        onCheckedChange = { enable ->
+                            if (enable && !hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                ptNotifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                ptAlertsEnabled = enable
+                                WorkoutNotificationHelper.setPtAlertsEnabled(context, enable)
+                            }
+                        },
+                        modifier = Modifier.testTag("pt_push_alerts_switch"),
+                        colors = SwitchDefaults.colors(checkedThumbColor = TextOnGold, checkedTrackColor = NewShapeGold)
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        GoldPrimaryButton(
+                            text = "Ativar notificações no telemóvel",
+                            icon = Icons.Default.NotificationsActive,
+                            onClick = { ptNotifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "pt_request_notif_perm_btn"
+                        )
+                    } else {
+                        DarkSecondaryButton(
+                            text = "Testar notificação",
+                            icon = Icons.Default.NotificationsActive,
+                            onClick = {
+                                WorkoutNotificationHelper.showImmediateNotification(
+                                    context = context,
+                                    channelId = WorkoutNotificationHelper.CHANNEL_PT_ALERTS,
+                                    title = "New Shape · Alertas ativos",
+                                    body = "Vais ser notificado sempre que um aluno enviar mensagem, cancelar ou mudar de horário.",
+                                    notificationId = 9001
+                                )
+                            },
+                            modifier = Modifier.weight(1f).testTag("pt_test_notif_btn")
+                        )
+                    }
+                }
+            }
         }
 
         item {
@@ -1454,7 +1507,7 @@ fun MensagensSettingsSection(
                 OutlinedTextField(
                     value = reminderLeadMinutesText,
                     onValueChange = { reminderLeadMinutesText = it.filter { c -> c.isDigit() }.take(4) },
-                    label = { Text("Antecedência dos lembretes push de treino (minutos)") },
+                    label = { Text("Antecedência padrão dos lembretes de treino dos alunos (minutos)") },
                     supportingText = {
                         Text(
                             "Atual: $reminderPreviewLabel antes do treino (entre 5 min e 24h)",
@@ -1558,62 +1611,66 @@ fun MensagensSettingsSection(
         }
 
         item {
-            BrandCard {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Notificações Push (PT)", style = MaterialTheme.typography.titleMedium, color = NewShapeGoldBright)
-                        Text(
-                            "Recebe um alerta imediato no telemóvel sempre que um aluno cancelar ou alterar o horário.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondaryDark
-                        )
-                    }
-                    Switch(
-                        checked = ptAlertsEnabled && hasNotifPermission,
-                        onCheckedChange = { enable ->
-                            if (enable && !hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                ptNotifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                ptAlertsEnabled = enable
-                                WorkoutNotificationHelper.setPtAlertsEnabled(context, enable)
-                            }
-                        },
-                        modifier = Modifier.testTag("pt_push_alerts_switch"),
-                        colors = SwitchDefaults.colors(checkedThumbColor = TextOnGold, checkedTrackColor = NewShapeGold)
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        GoldPrimaryButton(
-                            text = "Permitir notificações",
-                            icon = Icons.Default.NotificationsActive,
-                            onClick = { ptNotifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "pt_request_notif_perm_btn"
-                        )
-                    } else {
-                        DarkSecondaryButton(
-                            text = "Testar notificação",
-                            icon = Icons.Default.NotificationsActive,
-                            onClick = {
-                                WorkoutNotificationHelper.showImmediateNotification(
-                                    context = context,
-                                    channelId = WorkoutNotificationHelper.CHANNEL_PT_ALERTS,
-                                    title = "New Shape · Alertas ativos",
-                                    body = "Vais ser notificado sempre que um aluno cancelar ou mudar de horário.",
-                                    notificationId = 9001
-                                )
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
+            PortalLinksCardAndroid(
+                ptLink = ptLink,
+                studentLink = studentLink,
+                studentInviteText = studentInviteText,
+                whatsappWebMode = state.settings.whatsappWebMode,
+                onRegenerateCode = { viewModel.regenerateStudentPortalCode() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun PortalLinksCardAndroid(
+    ptLink: String,
+    studentLink: String,
+    studentInviteText: String,
+    whatsappWebMode: Boolean,
+    onRegenerateCode: () -> Unit
+) {
+    val context = LocalContext.current
+    BrandCard(highlightBorder = true) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                "Links de Acesso (PT e Aluno)",
+                style = MaterialTheme.typography.titleMedium,
+                color = NewShapeGoldBright,
+                fontWeight = FontWeight.Bold
+            )
+            TextButton(onClick = onRegenerateCode) {
+                Text("Renovar código", color = TextSecondaryDark, style = MaterialTheme.typography.labelSmall)
             }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("Link do PT (Painel Web)", style = MaterialTheme.typography.labelMedium, color = TextPrimaryDark)
+        Text(ptLink, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+        Spacer(Modifier.height(6.dp))
+        DarkSecondaryButton(
+            text = "Copiar Link do PT",
+            onClick = { copyToClipboard(context, ptLink, "Link do PT copiado!") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(12.dp))
+        Text("Link do Aluno (só telemóvel)", style = MaterialTheme.typography.labelMedium, color = NewShapeGoldBright)
+        Text(studentLink, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DarkSecondaryButton(
+                text = "Copiar Aluno",
+                onClick = { copyToClipboard(context, studentLink, "Link do Aluno copiado!") },
+                modifier = Modifier.weight(1f)
+            )
+            GoldPrimaryButton(
+                text = "WhatsApp",
+                onClick = { openWhatsApp(context, null, studentInviteText, whatsappWebMode) },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }

@@ -29,10 +29,17 @@ import com.example.ui.theme.*
 fun PtHomeTab(
     state: StudioUiState,
     viewModel: NewShapeViewModel,
+    requestedSubTab: Pair<Int, Int>? = null,
     onJumpToPtApprovals: () -> Unit = {}
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) }
-    val subTabs = listOf("Por confirmar", "Marcações", "Semanas", "Respostas", "Mensagens")
+    val subTabs = listOf("Por confirmar", "Marcações", "Semanas", "Respostas", "Mensagens", "Definições")
+
+    LaunchedEffect(requestedSubTab) {
+        requestedSubTab?.let { (tabIdx, _) ->
+            selectedSubTab = tabIdx.coerceIn(0, subTabs.lastIndex)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScrollableTabRow(
@@ -69,7 +76,8 @@ fun PtHomeTab(
             1 -> PtMarcacoesSection(state = state, viewModel = viewModel)
             2 -> SemanasSection(state = state, viewModel = viewModel)
             3 -> RespostasSection(state = state, viewModel = viewModel)
-            4 -> MensagensSettingsSection(state = state, viewModel = viewModel)
+            4 -> MensagensOnlySection(state = state, viewModel = viewModel)
+            5 -> PtSettingsSection(state = state, viewModel = viewModel)
         }
     }
 }

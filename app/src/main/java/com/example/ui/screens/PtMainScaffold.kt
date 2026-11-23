@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -38,10 +42,18 @@ fun PtMainScaffold(
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
+    var requestedHomeSubTab by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var homeSubTabNonce by remember { mutableIntStateOf(0) }
     var mgmtInitialSubTab by remember { mutableIntStateOf(0) }
     var mgmtChatClientId by remember { mutableStateOf<String?>(null) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
     var seenNotificationIds by remember { mutableStateOf<Set<String>?>(null) }
+
+    val openPtSettings: () -> Unit = {
+        selectedTab = 0
+        homeSubTabNonce += 1
+        requestedHomeSubTab = 5 to homeSubTabNonce
+    }
 
     LaunchedEffect(state.chatMessages) {
         val undeliveredIds = state.chatMessages
@@ -149,6 +161,16 @@ fun PtMainScaffold(
                                             tint = if (state.unreadPtNotificationsCount > 0) NewShapeGoldBright else TextSecondaryDark
                                         )
                                     }
+                                }
+                                IconButton(
+                                    onClick = openPtSettings,
+                                    modifier = Modifier.testTag("pt_settings_btn")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Settings,
+                                        contentDescription = "Definições do estúdio",
+                                        tint = NewShapeGoldBright
+                                    )
                                 }
                                 TextButton(
                                     onClick = { viewModel.enterStudentMode() },
@@ -368,6 +390,7 @@ fun PtMainScaffold(
                             0 -> PtHomeTab(
                                 state = state,
                                 viewModel = viewModel,
+                                requestedSubTab = requestedHomeSubTab,
                                 onJumpToPtApprovals = {
                                     if (state.isSuperAdmin) {
                                         mgmtInitialSubTab = 3
@@ -409,6 +432,10 @@ fun PtMainScaffold(
             onMarkRead = { id -> viewModel.markPtNotificationRead(id) },
             onMarkAllRead = { viewModel.markAllPtNotificationsRead() },
             onDelete = { id -> viewModel.deletePtNotification(id) },
+            onOpenSettings = {
+                showNotificationsDialog = false
+                openPtSettings()
+            },
             onOpenAssessment = {
                 showNotificationsDialog = false
                 selectedTab = 4
@@ -430,9 +457,23 @@ private fun PtNotificationsDialog(
     onMarkRead: (String) -> Unit,
     onMarkAllRead: () -> Unit,
     onDelete: (String) -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenAssessment: () -> Unit,
     onOpenChat: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    var hasNotifPermission by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
+    var ptAlertsEnabled by remember { mutableStateOf(WorkoutNotificationHelper.isPtAlertsEnabled(context)) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasNotifPermission = granted
+        if (granted) {
+            ptAlertsEnabled = true
+            WorkoutNotificationHelper.setPtAlertsEnabled(context, true)
+        }
+    }
+
     val sortedNotifs = remember(notifications) {
         notifications.sortedWith(
             compareBy<PtNotificationRecord> { it.read }
@@ -461,17 +502,89 @@ private fun PtNotificationsDialog(
             }
         },
         text = {
-            if (sortedNotifs.isEmpty()) {
-                Text(
-                    "Sem notificações de mensagens, avaliações, cancelamentos ou alterações.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondaryDark
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 360.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Alertas na barra do telemóvel",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimaryDark
+                            )
+                            TextButton(
+                                onClick = onOpenSettings,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.testTag("pt_notifs_open_settings_btn")
+                            ) {
+                                Text("Definições", color = NewShapeGoldBright, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                GoldPrimaryButton(
+                                    text = "Ativar notificações",
+                                    onClick = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "pt_notifs_enable_push_btn"
+                                )
+                            } else {
+                                StatusPill(
+                                    text = if (ptAlertsEnabled) "Ativas ✓" else "Em pausa",
+                                    textColor = if (ptAlertsEnabled) ConfirmedGreen else PendingAmber,
+                                    containerColor = if (ptAlertsEnabled) ConfirmedGreenContainer else PendingAmberContainer
+                                )
+                                TextButton(
+                                    onClick = {
+                                        val next = !ptAlertsEnabled
+                                        ptAlertsEnabled = next
+                                        WorkoutNotificationHelper.setPtAlertsEnabled(context, next)
+                                    }
+                                ) {
+                                    Text(if (ptAlertsEnabled) "Pausar" else "Ativar", color = TextPrimaryDark, style = MaterialTheme.typography.labelSmall)
+                                }
+                                TextButton(
+                                    onClick = {
+                                        WorkoutNotificationHelper.showImmediateNotification(
+                                            context = context,
+                                            channelId = WorkoutNotificationHelper.CHANNEL_PT_ALERTS,
+                                            title = "New Shape · Teste de Alerta PT",
+                                            body = "As notificações na barra do telemóvel estão ativas!",
+                                            notificationId = 9002
+                                        )
+                                    }
+                                ) {
+                                    Text("Testar", color = NewShapeGoldBright, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (sortedNotifs.isEmpty()) {
+                    Text(
+                        "Sem notificações de mensagens, avaliações, cancelamentos ou alterações.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 300.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                     items(sortedNotifs, key = { it.id }) { notif ->
                         val isCancel = notif.type == "CANCELLED" || notif.type == "UNAVAILABLE"
                         val isAssessment = notif.type == "ASSESSMENT"
@@ -572,6 +685,7 @@ private fun PtNotificationsDialog(
                         }
                     }
                 }
+            }
             }
         },
         confirmButton = {

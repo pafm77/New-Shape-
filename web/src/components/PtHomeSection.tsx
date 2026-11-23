@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Settings,
   Share2,
   ShieldCheck,
   Trash2,
@@ -61,6 +62,7 @@ import {
   requestNotificationPermission,
   savePtAlertsPreference,
 } from '../services/notificationService';
+import { isIosDevice, isStandalonePwa } from '../services/pwaInstall';
 import {
   BrandCard,
   EmptyState,
@@ -73,6 +75,8 @@ import {
   Textarea,
 } from './UiPrimitives';
 import { PtMarcacoesView } from './PtMarcacoesView';
+
+export type PtHomeSubTab = 'confirm' | 'marcacoes' | 'weeks' | 'responses' | 'messages' | 'settings';
 
 interface PtHomeSectionProps {
   uid: string;
@@ -90,6 +94,7 @@ interface PtHomeSectionProps {
   settings: StudioSettingsRecord;
   pendingQueue: PendingConfirmationCard[];
   lockedByWhatsApp: boolean;
+  requestedSubTab?: { tab: PtHomeSubTab; nonce: number } | null;
   onShiftWeek: (delta: number) => void;
   onWhatsAppOpened: () => void;
   onConfirmCard: (card: PendingConfirmationCard) => Promise<void>;
@@ -112,13 +117,20 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   settings,
   pendingQueue,
   lockedByWhatsApp,
+  requestedSubTab,
   onShiftWeek,
   onWhatsAppOpened,
   onConfirmCard,
   onJumpToTeamApprovals,
   onBanner,
 }) => {
-  const [subTab, setSubTab] = useState<'confirm' | 'marcacoes' | 'weeks' | 'responses' | 'messages'>('confirm');
+  const [subTab, setSubTab] = useState<PtHomeSubTab>('confirm');
+
+  useEffect(() => {
+    if (requestedSubTab) {
+      setSubTab(requestedSubTab.tab);
+    }
+  }, [requestedSubTab]);
 
   const openWa = (phone: string | null, message: string, lock: boolean) => {
     const url = buildWhatsAppUrl(phone, message, settings.whatsappWebMode);
@@ -128,7 +140,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Sub-navigation: Por confirmar / Marcações / Semanas / Respostas / Mensagens */}
+      {/* Sub-navigation: Por confirmar / Marcações / Semanas / Respostas / Mensagens / Definições */}
       <div className="flex gap-1.5 overflow-x-auto rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
         {[
           {
@@ -139,6 +151,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
           { id: 'weeks' as const, label: 'Semanas' },
           { id: 'responses' as const, label: 'Respostas' },
           { id: 'messages' as const, label: 'Mensagens' },
+          { id: 'settings' as const, label: 'Definições' },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -227,10 +240,18 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
       )}
 
       {subTab === 'messages' && (
-        <MensagensSettingsView
+        <MensagensView
           uid={uid}
           activeWeek={activeWeek}
           templates={templates}
+          settings={settings}
+          onBanner={onBanner}
+        />
+      )}
+
+      {subTab === 'settings' && (
+        <PtSettingsView
+          uid={uid}
           settings={settings}
           onBanner={onBanner}
         />
@@ -1959,46 +1980,14 @@ const RespostasView: React.FC<{
   );
 };
 
-// ---------------- Mensagens & Definições ----------------
-const MensagensSettingsView: React.FC<{
+// ---------------- Mensagens ----------------
+const MensagensView: React.FC<{
   uid: string;
   activeWeek: TrainingWeekRecord | null;
   templates: MessageTemplateRecord[];
   settings: StudioSettingsRecord;
   onBanner: (msg: string) => void;
 }> = ({ uid, activeWeek, templates, settings, onBanner }) => {
-  const [clientsCanEdit, setClientsCanEdit] = useState(settings.clientsCanEdit);
-  const [cutoffMinutes, setCutoffMinutes] = useState(
-    String(getEffectiveCutoffMinutes(settings))
-  );
-  const [reminderLeadMinutes, setReminderLeadMinutes] = useState(
-    String(getEffectiveReminderLeadMinutes(settings))
-  );
-  const [whatsappWebMode, setWhatsappWebMode] = useState(settings.whatsappWebMode);
-  const [siteBaseUrl, setSiteBaseUrl] = useState(settings.siteBaseUrl);
-  const [ptWhatsappPhone, setPtWhatsappPhone] = useState(settings.ptWhatsappPhone || '');
-  const [notifPerm, setNotifPerm] = useState(() => getNotificationPermission());
-  const [ptAlertsEnabled, setPtAlertsEnabled] = useState(() => getPtAlertsPreference());
-
-  useEffect(() => {
-    setClientsCanEdit(settings.clientsCanEdit);
-    setCutoffMinutes(String(getEffectiveCutoffMinutes(settings)));
-    setReminderLeadMinutes(String(getEffectiveReminderLeadMinutes(settings)));
-    setWhatsappWebMode(settings.whatsappWebMode);
-    setSiteBaseUrl(settings.siteBaseUrl);
-    setPtWhatsappPhone(settings.ptWhatsappPhone || '');
-  }, [settings]);
-
-  const parsedMinutes =
-    cutoffMinutes.trim() === '' || Number.isNaN(Number(cutoffMinutes))
-      ? 15
-      : Math.max(0, Math.min(4320, Math.round(Number(cutoffMinutes))));
-
-  const parsedReminderMinutes =
-    reminderLeadMinutes.trim() === '' || Number.isNaN(Number(reminderLeadMinutes))
-      ? 60
-      : Math.max(5, Math.min(1440, Math.round(Number(reminderLeadMinutes))));
-
   return (
     <div className="space-y-4">
       <PortalLinksCard
@@ -2039,8 +2028,161 @@ const MensagensSettingsView: React.FC<{
           />
         ))}
       </div>
+    </div>
+  );
+};
 
-      <h2 className="pt-2 text-xl font-bold text-[#F4F4F5]">Definições</h2>
+// ---------------- Definições (PT) ----------------
+const PtSettingsView: React.FC<{
+  uid: string;
+  settings: StudioSettingsRecord;
+  onBanner: (msg: string) => void;
+}> = ({ uid, settings, onBanner }) => {
+  const [clientsCanEdit, setClientsCanEdit] = useState(settings.clientsCanEdit);
+  const [cutoffMinutes, setCutoffMinutes] = useState(
+    String(getEffectiveCutoffMinutes(settings))
+  );
+  const [reminderLeadMinutes, setReminderLeadMinutes] = useState(
+    String(getEffectiveReminderLeadMinutes(settings))
+  );
+  const [whatsappWebMode, setWhatsappWebMode] = useState(settings.whatsappWebMode);
+  const [siteBaseUrl, setSiteBaseUrl] = useState(settings.siteBaseUrl);
+  const [ptWhatsappPhone, setPtWhatsappPhone] = useState(settings.ptWhatsappPhone || '');
+  const [notifPerm, setNotifPerm] = useState(() => getNotificationPermission());
+  const [ptAlertsEnabled, setPtAlertsEnabled] = useState(() => getPtAlertsPreference());
+  const needsIosHomeScreen = isIosDevice() && !isStandalonePwa();
+
+  useEffect(() => {
+    setClientsCanEdit(settings.clientsCanEdit);
+    setCutoffMinutes(String(getEffectiveCutoffMinutes(settings)));
+    setReminderLeadMinutes(String(getEffectiveReminderLeadMinutes(settings)));
+    setWhatsappWebMode(settings.whatsappWebMode);
+    setSiteBaseUrl(settings.siteBaseUrl);
+    setPtWhatsappPhone(settings.ptWhatsappPhone || '');
+  }, [settings]);
+
+  const parsedMinutes =
+    cutoffMinutes.trim() === '' || Number.isNaN(Number(cutoffMinutes))
+      ? 15
+      : Math.max(0, Math.min(4320, Math.round(Number(cutoffMinutes))));
+
+  const parsedReminderMinutes =
+    reminderLeadMinutes.trim() === '' || Number.isNaN(Number(reminderLeadMinutes))
+      ? 60
+      : Math.max(5, Math.min(1440, Math.round(Number(reminderLeadMinutes))));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Settings className="h-5 w-5 text-[#EAB308]" />
+        <div>
+          <h2 className="text-xl font-bold text-[#F4F4F5]">Definições do Estúdio</h2>
+          <p className="text-xs text-[#A1A1AA]">
+            Notificações na barra do telemóvel, regras de marcação, WhatsApp e links de acesso.
+          </p>
+        </div>
+      </div>
+
+      {/* Notificações na barra do telemóvel em destaque no topo */}
+      <BrandCard highlight>
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <div className="mt-0.5 rounded-xl bg-[#3D3314] p-2 text-[#FACC15]">
+                <Bell className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#F4F4F5]">
+                  Notificações na Barra do Telemóvel (PT)
+                </p>
+                <p className="text-xs text-[#A1A1AA]">
+                  Recebe um alerta imediato no telemóvel sempre que um aluno enviar mensagem no
+                  chat, cancelar ou alterar o horário.
+                </p>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              aria-label="Ativar alertas push do PT"
+              checked={ptAlertsEnabled && notifPerm === 'granted'}
+              onChange={async (e) => {
+                const next = e.target.checked;
+                if (next && notifPerm !== 'granted') {
+                  const res = await requestNotificationPermission();
+                  setNotifPerm(res);
+                  if (res === 'granted') {
+                    setPtAlertsEnabled(true);
+                    savePtAlertsPreference(true);
+                    onBanner('Notificações na barra do telemóvel ativadas!');
+                  } else {
+                    onBanner('Permissão de notificações não autorizada neste browser.');
+                  }
+                } else {
+                  setPtAlertsEnabled(next);
+                  savePtAlertsPreference(next);
+                  onBanner(next ? 'Alertas do PT ativados.' : 'Alertas do PT desativados.');
+                }
+              }}
+              className="mt-1 h-5 w-5 shrink-0 accent-[#EAB308]"
+            />
+          </div>
+
+          {needsIosHomeScreen && (
+            <p className="rounded-xl border border-[#EAB308]/40 bg-[#3D3314]/50 px-3 py-2 text-[11px] text-[#FDE68A]">
+              No iPhone, para receber notificações na barra do telemóvel, adiciona primeiro a app ao
+              ecrã principal (Partilhar → Adicionar ao ecrã principal) e abre-a pelo ícone.
+            </p>
+          )}
+
+          {notifPerm === 'denied' && (
+            <p className="rounded-xl border border-[#EF4444]/40 bg-[#3B1518]/50 px-3 py-2 text-[11px] text-[#FCA5A5]">
+              As notificações estão bloqueadas nas definições deste browser. Toca no ícone do
+              cadeado junto ao endereço do site e ativa &ldquo;Notificações&rdquo;.
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {notifPerm !== 'granted' ? (
+              <GoldButton
+                onClick={async () => {
+                  const res = await requestNotificationPermission();
+                  setNotifPerm(res);
+                  if (res === 'granted') {
+                    setPtAlertsEnabled(true);
+                    savePtAlertsPreference(true);
+                    onBanner('Notificações na barra do telemóvel ativadas!');
+                  } else {
+                    onBanner('Permissão de notificações não autorizada neste browser.');
+                  }
+                }}
+              >
+                <Bell className="h-4 w-4" />
+                {notifPerm === 'unsupported'
+                  ? 'Não suportado neste browser'
+                  : 'Ativar notificações no telemóvel'}
+              </GoldButton>
+            ) : (
+              <>
+                <StatusPill tone={ptAlertsEnabled ? 'green' : 'amber'}>
+                  {ptAlertsEnabled ? 'Notificações ativas ✓' : 'Em pausa'}
+                </StatusPill>
+                <SecondaryButton
+                  onClick={async () => {
+                    await dispatchLocalPushNotification(
+                      'New Shape · Teste de Alerta PT',
+                      'As notificações na barra do telemóvel estão ativas!'
+                    );
+                    onBanner('Notificação de teste enviada para a barra do telemóvel.');
+                  }}
+                >
+                  Testar notificação
+                </SecondaryButton>
+              </>
+            )}
+          </div>
+        </div>
+      </BrandCard>
+
       <BrandCard>
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-4">
@@ -2096,7 +2238,7 @@ const MensagensSettingsView: React.FC<{
           </div>
 
           <div>
-            <FieldLabel>Antecedência dos lembretes push de treino (minutos)</FieldLabel>
+            <FieldLabel>Antecedência padrão dos lembretes de treino dos alunos (minutos)</FieldLabel>
             <Input
               type="number"
               min={5}
@@ -2164,64 +2306,6 @@ const MensagensSettingsView: React.FC<{
             </p>
           </div>
 
-          <div className="rounded-xl border border-[#323238] bg-[#242429]/70 p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-bold text-[#F4F4F5]">Notificações Push no Browser (PT)</p>
-                <p className="text-xs text-[#A1A1AA]">
-                  Recebe um alerta imediato sempre que um aluno cancelar ou alterar o horário.
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                checked={ptAlertsEnabled}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setPtAlertsEnabled(next);
-                  savePtAlertsPreference(next);
-                }}
-                className="h-5 w-5 accent-[#EAB308]"
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {notifPerm !== 'granted' ? (
-                <SecondaryButton
-                  onClick={async () => {
-                    const res = await requestNotificationPermission();
-                    setNotifPerm(res);
-                    if (res === 'granted') {
-                      setPtAlertsEnabled(true);
-                      savePtAlertsPreference(true);
-                      onBanner('Notificações push ativadas!');
-                    } else {
-                      onBanner('Permissão de notificações não autorizada neste browser.');
-                    }
-                  }}
-                >
-                  <Bell className="h-4 w-4 text-[#EAB308]" />
-                  {notifPerm === 'unsupported'
-                    ? 'Não suportado neste browser'
-                    : 'Ativar notificações push'}
-                </SecondaryButton>
-              ) : (
-                <>
-                  <StatusPill tone="green">Push ativo ✓</StatusPill>
-                  <SecondaryButton
-                    onClick={async () => {
-                      await dispatchLocalPushNotification(
-                        'New Shape · Teste de Alerta PT',
-                        'As notificações de cancelamento e alteração de horário estão ativas!'
-                      );
-                      onBanner('Notificação de teste enviada.');
-                    }}
-                  >
-                    Testar notificação
-                  </SecondaryButton>
-                </>
-              )}
-            </div>
-          </div>
-
           <div>
             <FieldLabel>Endereço do site nos links</FieldLabel>
             <Input
@@ -2252,6 +2336,17 @@ const MensagensSettingsView: React.FC<{
           </GoldButton>
         </div>
       </BrandCard>
+
+      <PortalLinksCard
+        uid={uid}
+        settings={settings}
+        showRegenerate
+        onOpenWhatsApp={(phone, msg) => {
+          const url = buildWhatsAppUrl(phone, msg, settings.whatsappWebMode);
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }}
+        onBanner={onBanner}
+      />
     </div>
   );
 };

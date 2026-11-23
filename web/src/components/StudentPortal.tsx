@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Bell,
   Calendar,
   Check,
   Clock,
@@ -13,6 +14,7 @@ import {
   Plus,
   Scale,
   Send,
+  Settings,
   Square,
   Timer,
   UserCheck,
@@ -42,6 +44,8 @@ import {
 import {
   buildRecentMonthOptions,
   buildWhatsAppUrl,
+  formatFixedSlotsSummary,
+  formatPhoneDisplay,
   formatShortDate,
   getEffectiveReminderLeadMinutes,
   MEAL_TYPES,
@@ -49,10 +53,14 @@ import {
 import * as repo from '../services/firestoreRepository';
 import {
   dispatchLocalPushNotification,
+  formatLeadMinutesLabel,
   getNotificationPermission,
   getReminderPreferences,
+  requestNotificationPermission,
+  saveReminderPreferences,
   scheduleConfirmedWorkoutReminders,
 } from '../services/notificationService';
+import { isIosDevice, isStandalonePwa } from '../services/pwaInstall';
 import { StudentAgendaSection } from './StudentAgendaSection';
 import { NewShapeLogo } from './NewShapeLogo';
 import {
@@ -133,6 +141,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     label: string;
   } | null>(null);
   const [showNewAssessmentModal, setShowNewAssessmentModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [historyTarget, setHistoryTarget] = useState<{
     exerciseId: string;
     exerciseName: string;
@@ -454,6 +463,22 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         <div className="mt-4 space-y-2 border-t border-[#323238] pt-4">
           <button
             type="button"
+            onClick={() => {
+              setNotifPerm(getNotificationPermission());
+              setShowSettingsModal(true);
+            }}
+            className="flex w-full items-center justify-between rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
+          >
+            <span className="flex items-center gap-2">
+              <Settings className="h-4 w-4 text-[#EAB308]" />
+              Definições
+            </span>
+            {notifPerm === 'granted' && reminderEnabled && (
+              <span className="h-2 w-2 rounded-full bg-[#22C55E]" />
+            )}
+          </button>
+          <button
+            type="button"
             onClick={onSwitchStudent}
             className="flex w-full items-center gap-2 rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs font-bold text-[#F4F4F5] hover:border-[#EAB308]"
           >
@@ -487,6 +512,21 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-[#323238] bg-[#121214]/95 px-4 py-3 backdrop-blur-md lg:hidden">
           <NewShapeLogo compact />
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setNotifPerm(getNotificationPermission());
+                setShowSettingsModal(true);
+              }}
+              aria-label="Definições"
+              title="Definições"
+              className="relative rounded-xl border border-[#323238] bg-[#1B1B1E] p-1.5 text-[#FACC15]"
+            >
+              <Settings className="h-4 w-4" />
+              {notifPerm === 'granted' && reminderEnabled && (
+                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#22C55E]" />
+              )}
+            </button>
             <button
               type="button"
               onClick={onSwitchStudent}
@@ -1002,6 +1042,212 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           </button>
         ))}
       </nav>
+
+      {/* Student Definições Modal */}
+      {showSettingsModal && (
+        <Modal
+          open
+          title="Definições"
+          subtitle="Notificações na barra do telemóvel e informações da tua conta"
+          onClose={() => setShowSettingsModal(false)}
+        >
+          <div className="space-y-4">
+            {/* Notificações na barra do telemóvel */}
+            <div className="rounded-2xl border border-[#EAB308]/40 bg-[#242429] p-3.5 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="mt-0.5 rounded-xl bg-[#3D3314] p-2 text-[#FACC15]">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-[#F4F4F5]">
+                      Notificações na Barra do Telemóvel
+                    </p>
+                    <p className="text-xs text-[#A1A1AA]">
+                      Recebe lembretes automáticos antes de cada treino confirmado e no fim do
+                      temporizador de descanso.
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  aria-label="Ativar lembretes de treino"
+                  checked={reminderEnabled && notifPerm === 'granted'}
+                  onChange={async (e) => {
+                    const next = e.target.checked;
+                    if (next && notifPerm !== 'granted') {
+                      const res = await requestNotificationPermission();
+                      setNotifPerm(res);
+                      if (res === 'granted') {
+                        setReminderEnabled(true);
+                        saveReminderPreferences(true, hasCustomLead ? reminderLeadMins : null);
+                        onBanner('Notificações na barra do telemóvel ativadas!');
+                      } else {
+                        onBanner('Permissão de notificações não autorizada neste browser.');
+                      }
+                    } else {
+                      setReminderEnabled(next);
+                      saveReminderPreferences(next, hasCustomLead ? reminderLeadMins : null);
+                      onBanner(next ? 'Lembretes ativados.' : 'Lembretes desativados.');
+                    }
+                  }}
+                  className="mt-1 h-5 w-5 shrink-0 accent-[#EAB308]"
+                />
+              </div>
+
+              {isIosDevice() && !isStandalonePwa() && (
+                <p className="rounded-xl border border-[#EAB308]/40 bg-[#3D3314]/50 px-3 py-2 text-[11px] text-[#FDE68A]">
+                  No iPhone, adiciona primeiro a app ao ecrã principal (Partilhar → Adicionar ao
+                  ecrã principal) e abre pelo ícone para ativar notificações.
+                </p>
+              )}
+
+              {notifPerm === 'denied' && (
+                <p className="rounded-xl border border-[#EF4444]/40 bg-[#3B1518]/50 px-3 py-2 text-[11px] text-[#FCA5A5]">
+                  As notificações estão bloqueadas nas definições deste browser. Toca no cadeado
+                  junto ao endereço do site e ativa &ldquo;Notificações&rdquo;.
+                </p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                {notifPerm !== 'granted' ? (
+                  <GoldButton
+                    onClick={async () => {
+                      const res = await requestNotificationPermission();
+                      setNotifPerm(res);
+                      if (res === 'granted') {
+                        setReminderEnabled(true);
+                        saveReminderPreferences(true, hasCustomLead ? reminderLeadMins : null);
+                        onBanner('Notificações na barra do telemóvel ativadas!');
+                      } else {
+                        onBanner('Permissão de notificações não autorizada neste browser.');
+                      }
+                    }}
+                  >
+                    <Bell className="h-4 w-4" />
+                    {notifPerm === 'unsupported'
+                      ? 'Não suportado neste browser'
+                      : 'Ativar notificações no telemóvel'}
+                  </GoldButton>
+                ) : (
+                  <>
+                    <StatusPill tone={reminderEnabled ? 'green' : 'amber'}>
+                      {reminderEnabled ? 'Notificações ativas ✓' : 'Em pausa'}
+                    </StatusPill>
+                    <SecondaryButton
+                      onClick={async () => {
+                        await dispatchLocalPushNotification(
+                          'New Shape · Lembrete de Treino',
+                          `Tudo pronto, ${firstName}! Vais receber avisos ${formatLeadMinutesLabel(reminderLeadMins)} antes do treino.`
+                        );
+                        onBanner('Notificação de teste enviada para a barra do telemóvel.');
+                      }}
+                    >
+                      Testar notificação
+                    </SecondaryButton>
+                  </>
+                )}
+              </div>
+
+              {/* Antecedência do lembrete */}
+              <div className="border-t border-[#323238] pt-3">
+                <p className="text-xs font-semibold text-[#D4D4D8]">
+                  Avisar antes do treino:{' '}
+                  <strong className="text-[#FACC15]">
+                    {formatLeadMinutesLabel(reminderLeadMins)}
+                  </strong>
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasCustomLead(false);
+                      setReminderLeadMins(studioDefaultLeadMins);
+                      saveReminderPreferences(reminderEnabled, null);
+                      onBanner(
+                        `Lembrete reposto para o padrão do PT (${formatLeadMinutesLabel(studioDefaultLeadMins)}).`
+                      );
+                    }}
+                    className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                      !hasCustomLead
+                        ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                        : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#EAB308] hover:text-white'
+                    }`}
+                  >
+                    Padrão PT ({formatLeadMinutesLabel(studioDefaultLeadMins)})
+                  </button>
+                  {[
+                    { mins: 15, label: '15 min' },
+                    { mins: 30, label: '30 min' },
+                    { mins: 45, label: '45 min' },
+                    { mins: 60, label: '1h' },
+                    { mins: 120, label: '2h' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.mins}
+                      type="button"
+                      onClick={() => {
+                        setHasCustomLead(true);
+                        setReminderLeadMins(preset.mins);
+                        saveReminderPreferences(reminderEnabled, preset.mins);
+                        onBanner(`Lembrete definido para ${preset.label} antes do treino.`);
+                      }}
+                      className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                        hasCustomLead && reminderLeadMins === preset.mins
+                          ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                          : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#EAB308] hover:text-white'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Atalho no Ecrã Principal */}
+            {showInstallPrompt && !isStandalonePwa() && (
+              <StudentInstallBanner
+                compact
+                onInstalled={() => onBanner('App do Aluno adicionada ao ecrã principal!')}
+              />
+            )}
+
+            {/* A Tua Conta */}
+            <div className="rounded-2xl border border-[#323238] bg-[#1B1B1E] p-3.5 space-y-2 text-xs">
+              <p className="font-bold text-[#FACC15]">A Tua Conta</p>
+              <div className="flex justify-between gap-2">
+                <span className="text-[#A1A1AA]">Nome</span>
+                <span className="font-semibold text-[#F4F4F5]">{client.name}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-[#A1A1AA]">Telemóvel</span>
+                <span className="font-semibold text-[#F4F4F5]">
+                  {client.phone ? formatPhoneDisplay(client.phone) : 'Não registado'}
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-[#A1A1AA]">Plano semanal</span>
+                <span className="font-semibold text-[#F4F4F5]">
+                  {weeklyLimit > 0 ? `${weeklyLimit} treinos / semana` : 'Sem limite semanal'}
+                </span>
+              </div>
+              {client.fixedSlots && client.fixedSlots.length > 0 && (
+                <div className="flex justify-between gap-2">
+                  <span className="text-[#A1A1AA]">Dias fixos</span>
+                  <span className="text-right font-semibold text-[#FACC15]">
+                    {formatFixedSlotsSummary(client.fixedSlots)}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <SecondaryButton onClick={() => setShowSettingsModal(false)}>Fechar</SecondaryButton>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* WhatsApp Handoff Modal on Cancel / Schedule Change */}
       {whatsAppAlertModal && (

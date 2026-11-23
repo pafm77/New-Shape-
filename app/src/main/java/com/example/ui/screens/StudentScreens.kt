@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.ReportExporter
+import com.example.data.SeedCatalog
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
 import com.example.ui.NewShapeViewModel
@@ -63,6 +65,7 @@ fun StudentMainScaffold(
     }
 
     var selectedTab by remember { mutableIntStateOf(0) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
     val firstName = student.name.trim().split(" ").firstOrNull().orEmpty()
     val unreadChatCount = remember(state.chatMessages, student.id) {
         state.unreadStudentChatCount(student.id)
@@ -114,8 +117,18 @@ fun StudentMainScaffold(
                             NewShapeLogo(compact = true)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
+                                IconButton(
+                                    onClick = { showSettingsDialog = true },
+                                    modifier = Modifier.testTag("student_settings_btn")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Settings,
+                                        contentDescription = "Definições e notificações",
+                                        tint = NewShapeGoldBright
+                                    )
+                                }
                                 TextButton(
                                     onClick = { viewModel.enterPtMode() },
                                     modifier = Modifier.testTag("switch_to_pt_btn")
@@ -266,6 +279,268 @@ fun StudentMainScaffold(
             }
         }
     }
+
+    if (showSettingsDialog) {
+        StudentSettingsDialog(
+            student = student,
+            state = state,
+            onDismiss = { showSettingsDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun StudentSettingsDialog(
+    student: ClientRecord,
+    state: StudioUiState,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val firstName = student.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { student.name }
+    val studioDefaultLead = state.settings.effectiveReminderLeadMinutes()
+    val visibleSessions = remember(state.sessions) { state.sessions.filter { !it.ptPrivatePersonal } }
+
+    var hasNotifPermission by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
+    var remindersEnabled by remember { mutableStateOf(WorkoutNotificationHelper.isStudentRemindersEnabled(context)) }
+    var hasCustomLead by remember { mutableStateOf(WorkoutNotificationHelper.hasStudentCustomReminderLead(context)) }
+    var reminderLeadMins by remember(studioDefaultLead) {
+        mutableIntStateOf(WorkoutNotificationHelper.getStudentReminderLeadMinutes(context, studioDefaultLead))
+    }
+
+    val rescheduleReminders = { enabled: Boolean, lead: Int ->
+        if (enabled && WorkoutNotificationHelper.hasNotificationPermission(context)) {
+            WorkoutNotificationHelper.scheduleConfirmedWorkoutReminders(
+                context = context,
+                clientId = student.id,
+                bookings = state.bookings,
+                sessions = visibleSessions,
+                leadMinutes = lead
+            )
+        } else {
+            WorkoutNotificationHelper.cancelScheduledReminders(context)
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasNotifPermission = granted
+        if (granted) {
+            remindersEnabled = true
+            WorkoutNotificationHelper.setStudentRemindersEnabled(context, true)
+            rescheduleReminders(true, reminderLeadMins)
+            Toast.makeText(context, "Notificações na barra do telemóvel ativadas!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Permissão de notificações recusada.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = null, tint = NewShapeGoldBright)
+                Text("Definições", color = TextPrimaryDark, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Notificações na barra do telemóvel",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = NewShapeGoldBright,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "Recebe lembretes antes de cada treino confirmado.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark
+                                )
+                            }
+                            Switch(
+                                checked = remindersEnabled && hasNotifPermission,
+                                onCheckedChange = { enable ->
+                                    if (enable && !hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    } else {
+                                        remindersEnabled = enable
+                                        WorkoutNotificationHelper.setStudentRemindersEnabled(context, enable)
+                                        rescheduleReminders(enable, reminderLeadMins)
+                                    }
+                                },
+                                modifier = Modifier.testTag("student_settings_notif_switch"),
+                                colors = SwitchDefaults.colors(checkedThumbColor = TextOnGold, checkedTrackColor = NewShapeGold)
+                            )
+                        }
+
+                        if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            GoldPrimaryButton(
+                                text = "Ativar notificações no telemóvel",
+                                icon = Icons.Default.NotificationsActive,
+                                onClick = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                                modifier = Modifier.fillMaxWidth(),
+                                testTag = "student_settings_enable_notif_btn"
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                StatusPill(
+                                    text = if (remindersEnabled) "Ativas ✓" else "Desativadas",
+                                    textColor = if (remindersEnabled) ConfirmedGreen else PendingAmber,
+                                    containerColor = if (remindersEnabled) ConfirmedGreenContainer else PendingAmberContainer
+                                )
+                                Spacer(Modifier.weight(1f))
+                                DarkSecondaryButton(
+                                    text = "Testar",
+                                    icon = Icons.Default.NotificationsActive,
+                                    onClick = {
+                                        WorkoutNotificationHelper.showImmediateNotification(
+                                            context = context,
+                                            channelId = WorkoutNotificationHelper.CHANNEL_REMINDERS,
+                                            title = "New Shape · Lembrete de Treino",
+                                            body = "Tudo pronto, $firstName! Vais receber avisos ${formatReminderLeadLabel(reminderLeadMins)} antes do treino.",
+                                            notificationId = 9010
+                                        )
+                                    },
+                                    modifier = Modifier.testTag("student_settings_test_notif_btn")
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = HairlineBorder)
+                        Text(
+                            "Avisar antes do treino: ${formatReminderLeadLabel(reminderLeadMins)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextPrimaryDark,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            FilterChip(
+                                selected = !hasCustomLead,
+                                onClick = {
+                                    hasCustomLead = false
+                                    reminderLeadMins = studioDefaultLead
+                                    WorkoutNotificationHelper.clearStudentCustomReminderLead(context)
+                                    rescheduleReminders(remindersEnabled, studioDefaultLead)
+                                },
+                                label = { Text("Padrão PT (${formatReminderLeadLabel(studioDefaultLead)})") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = NewShapeGold,
+                                    selectedLabelColor = TextOnGold
+                                )
+                            )
+                            listOf(
+                                15 to "15 min",
+                                30 to "30 min",
+                                45 to "45 min",
+                                60 to "1h",
+                                120 to "2h"
+                            ).forEach { (mins, label) ->
+                                FilterChip(
+                                    selected = hasCustomLead && reminderLeadMins == mins,
+                                    onClick = {
+                                        hasCustomLead = true
+                                        reminderLeadMins = mins
+                                        WorkoutNotificationHelper.setStudentReminderLeadMinutes(context, mins)
+                                        rescheduleReminders(remindersEnabled, mins)
+                                    },
+                                    label = { Text(label) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NewShapeGold,
+                                        selectedLabelColor = TextOnGold
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Surface(
+                    color = ObsidianBg,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, HairlineBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "A Tua Conta",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = NewShapeGoldBright,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Nome", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                            Text(student.name, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark, fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Telemóvel", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                            Text(
+                                student.phone.ifBlank { "Não registado" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Plano semanal", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                            Text(
+                                if (student.weeklySessionLimit > 0) "${student.weeklySessionLimit} treinos / semana" else "Sem limite semanal",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        if (student.fixedSlots.isNotEmpty()) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Dias fixos", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                                Text(
+                                    SeedCatalog.formatFixedSlotsSummary(student.fixedSlots),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = NewShapeGoldBright,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Fechar", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }
 
 @Composable
