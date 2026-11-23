@@ -250,6 +250,24 @@ internal fun StudentAgendaSection(
             .reversed()
     }
     var showPastConfirmed by remember { mutableStateOf(false) }
+    var cancelTarget by remember { mutableStateOf<Pair<BookingRecord, TrainingSessionRecord>?>(null) }
+    var swapTarget by remember { mutableStateOf<Pair<BookingRecord, TrainingSessionRecord>?>(null) }
+
+    val totalManageableCount = upcomingConfirmed.size + myPendingAll.size
+
+    fun bookingEditLockReason(booking: BookingRecord, session: TrainingSessionRecord): String? {
+        val now = System.currentTimeMillis()
+        if (session.startMillis > 0L && now >= session.startMillis) {
+            return "Este treino já começou ou terminou."
+        }
+        if (cutoffMs > 0L && session.startMillis > 0L && now > session.startMillis - cutoffMs) {
+            return "Prazo de alteração (${state.settings.formatCutoffLabel()} antes) encerrado."
+        }
+        if (booking.status == BookingStatus.CONFIRMED.name && !state.settings.clientsCanEdit) {
+            return "Alterações bloqueadas pelo PT."
+        }
+        return null
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -343,14 +361,14 @@ internal fun StudentAgendaSection(
                                 color = if (isMarcacoes) TextOnGold else TextSecondaryDark,
                                 maxLines = 1
                             )
-                            if (upcomingConfirmed.isNotEmpty()) {
+                            if (totalManageableCount > 0) {
                                 Spacer(Modifier.width(6.dp))
                                 Surface(
                                     color = if (isMarcacoes) ObsidianBg else ConfirmedGreenContainer,
                                     shape = CircleShape
                                 ) {
                                     Text(
-                                        text = "${upcomingConfirmed.size}",
+                                        text = "$totalManageableCount",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = ConfirmedGreen,
@@ -599,24 +617,19 @@ internal fun StudentAgendaSection(
                                     color = if (anyPending) PendingAmber else ConfirmedGreen
                                 )
                                 Text(
-                                    text = if (anyPending) "Vais receber a confirmação do PT no WhatsApp."
-                                    else "Consulta os teus horários na subaba Marcações.",
+                                    text = "Podes trocar o horário ou desmarcar diretamente em cada treino ou em Marcações.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextPrimaryDark
                                 )
                             }
-                            if (!anyPending) {
-                                TextButton(
-                                    onClick = { subTab = 1 },
-                                    modifier = Modifier.testTag("student_jump_to_marcacoes_btn")
-                                ) {
-                                    Text("Ver →", color = ConfirmedGreen, fontWeight = FontWeight.Bold)
-                                }
-                            } else {
-                                StatusPill(
-                                    text = "Por confirmar",
-                                    textColor = PendingAmber,
-                                    containerColor = ObsidianBg.copy(alpha = 0.5f)
+                            TextButton(
+                                onClick = { subTab = 1 },
+                                modifier = Modifier.testTag("student_jump_to_marcacoes_btn")
+                            ) {
+                                Text(
+                                    text = "Gerir →",
+                                    color = if (anyPending) PendingAmber else ConfirmedGreen,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -834,6 +847,68 @@ internal fun StudentAgendaSection(
                                 }
                             }
 
+                            if (existingForSession != null) {
+                                val lockReason = bookingEditLockReason(existingForSession, session)
+                                Spacer(Modifier.height(10.dp))
+                                HorizontalDivider(color = HairlineBorder.copy(alpha = 0.6f))
+                                Spacer(Modifier.height(8.dp))
+                                if (lockReason == null) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { swapTarget = existingForSession to session },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 42.dp)
+                                                .testTag("student_horarios_swap_${existingForSession.id}"),
+                                            border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.7f)),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = NewShapeGoldMuted.copy(alpha = 0.7f),
+                                                contentColor = NewShapeGoldBright
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.SwapHoriz,
+                                                contentDescription = "Trocar horário",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Trocar", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { cancelTarget = existingForSession to session },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 42.dp)
+                                                .testTag("student_horarios_cancel_${existingForSession.id}"),
+                                            border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.7f)),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = DangerRedContainer.copy(alpha = 0.85f),
+                                                contentColor = DangerRed
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Cancel,
+                                                contentDescription = "Desmarcar treino",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Desmarcar", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                        }
+                                    }
+                                } else {
+                                    Text(
+                                        text = lockReason,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = PendingAmber
+                                    )
+                                }
+                            }
+
                             if (isFullForNew && !isPastCutoff && canEditExisting && currentWeek != null) {
                                 Spacer(Modifier.height(10.dp))
                                 HorizontalDivider(color = HairlineBorder.copy(alpha = 0.6f))
@@ -1029,105 +1104,166 @@ internal fun StudentAgendaSection(
                             .fillMaxWidth()
                             .testTag("student_confirmed_booking_${booking.id}")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Surface(
-                                color = ConfirmedGreenContainer,
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, ConfirmedGreen.copy(alpha = 0.65f))
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .widthIn(min = 70.dp)
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
+                                Surface(
+                                    color = ConfirmedGreenContainer,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, ConfirmedGreen.copy(alpha = 0.65f))
                                 ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .widthIn(min = 70.dp)
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = session.timeLabel,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = ConfirmedGreen
+                                        )
+                                        if (endTime.isNotBlank()) {
+                                            Text(
+                                                text = endTime,
+                                                fontSize = 10.sp,
+                                                color = ConfirmedGreen.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        if (isNextUp) {
+                                            StatusPill(
+                                                text = "Próximo",
+                                                textColor = TextOnGold,
+                                                containerColor = NewShapeGold
+                                            )
+                                        }
+                                        if (relTag != null) {
+                                            StatusPill(
+                                                text = relTag,
+                                                textColor = NewShapeGoldBright,
+                                                containerColor = NewShapeGoldMuted
+                                            )
+                                        }
+                                    }
+                                    if (isNextUp || relTag != null) Spacer(Modifier.height(4.dp))
                                     Text(
-                                        text = session.timeLabel,
+                                        text = session.dateLabel,
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = ConfirmedGreen
+                                        color = TextPrimaryDark
                                     )
-                                    if (endTime.isNotBlank()) {
-                                        Text(
-                                            text = endTime,
-                                            fontSize = 10.sp,
-                                            color = ConfirmedGreen.copy(alpha = 0.8f)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    if (isNextUp) {
-                                        StatusPill(
-                                            text = "Próximo",
-                                            textColor = TextOnGold,
-                                            containerColor = NewShapeGold
-                                        )
-                                    }
-                                    if (relTag != null) {
-                                        StatusPill(
-                                            text = relTag,
-                                            textColor = NewShapeGoldBright,
-                                            containerColor = NewShapeGoldMuted
-                                        )
-                                    }
-                                }
-                                if (isNextUp || relTag != null) Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = session.dateLabel,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = TextPrimaryDark
-                                )
-                                Text(
-                                    text = "${session.timeLabel.replace(":", "h")}" +
-                                        (if (endTime.isNotBlank()) " – ${endTime.replace(":", "h")}" else "") +
-                                        " · ${session.durationMinutes} min" +
-                                        (if (week != null) " · Sem. ${week.label}" else ""),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondaryDark
-                                )
-                                if (session.note.isNotBlank()) {
                                     Text(
-                                        text = session.note,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = NewShapeGoldBright
+                                        text = "${session.timeLabel.replace(":", "h")}" +
+                                            (if (endTime.isNotBlank()) " – ${endTime.replace(":", "h")}" else "") +
+                                            " · ${session.durationMinutes} min" +
+                                            (if (week != null) " · Sem. ${week.label}" else ""),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondaryDark
                                     )
+                                    if (session.note.isNotBlank()) {
+                                        Text(
+                                            text = session.note,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = NewShapeGoldBright
+                                        )
+                                    }
+                                }
+
+                                Column(
+                                    horizontalAlignment = Alignment.End,
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    StatusPill(
+                                        text = "Confirmado ✓",
+                                        textColor = ConfirmedGreen,
+                                        containerColor = ConfirmedGreenContainer
+                                    )
+                                    when (booking.attendanceStatus) {
+                                        "PRESENT" -> Text(
+                                            text = "Presença ✓",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = ConfirmedGreen,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        "ABSENT" -> Text(
+                                            text = "Falta",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = DangerRed,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
 
-                            Column(
-                                horizontalAlignment = Alignment.End,
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                StatusPill(
-                                    text = "Confirmado ✓",
-                                    textColor = ConfirmedGreen,
-                                    containerColor = ConfirmedGreenContainer
-                                )
-                                when (booking.attendanceStatus) {
-                                    "PRESENT" -> Text(
-                                        text = "Presença ✓",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = ConfirmedGreen,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    "ABSENT" -> Text(
-                                        text = "Falta",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = DangerRed,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                            val lockReason = bookingEditLockReason(booking, session)
+                            Spacer(Modifier.height(10.dp))
+                            HorizontalDivider(color = ConfirmedGreen.copy(alpha = 0.25f))
+                            Spacer(Modifier.height(10.dp))
+                            if (lockReason == null) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { swapTarget = booking to session },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 44.dp)
+                                            .testTag("student_swap_booking_${booking.id}"),
+                                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.7f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = NewShapeGoldMuted.copy(alpha = 0.75f),
+                                            contentColor = NewShapeGoldBright
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.SwapHoriz,
+                                            contentDescription = "Trocar horário",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(5.dp))
+                                        Text("Trocar horário", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { cancelTarget = booking to session },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 44.dp)
+                                            .testTag("student_cancel_booking_${booking.id}"),
+                                        border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.7f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = DangerRedContainer.copy(alpha = 0.85f),
+                                            contentColor = DangerRed
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Cancel,
+                                            contentDescription = "Desmarcar treino",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(5.dp))
+                                        Text("Desmarcar", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                    }
                                 }
+                            } else {
+                                Text(
+                                    text = lockReason,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = PendingAmber
+                                )
                             }
                         }
                     }
@@ -1143,11 +1279,18 @@ internal fun StudentAgendaSection(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = "A aguardar confirmação do PT (${myPendingAll.size})",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = PendingAmber
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "A aguardar confirmação do PT (${myPendingAll.size})",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = PendingAmber
+                                )
+                                Text(
+                                    text = "Podes trocar o horário ou desmarcar enquanto aguardas confirmação.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondaryDark
+                                )
+                            }
                             StatusPill(
                                 text = "Pendente",
                                 textColor = PendingAmber,
@@ -1156,31 +1299,86 @@ internal fun StudentAgendaSection(
                         }
                         Spacer(Modifier.height(10.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            myPendingAll.forEach { (_, session) ->
+                            myPendingAll.forEach { (booking, session) ->
+                                val lockReason = bookingEditLockReason(booking, session)
+                                val week = weekMap[booking.weekKey]
                                 Surface(
                                     color = PendingAmberContainer.copy(alpha = 0.35f),
                                     shape = RoundedCornerShape(10.dp),
                                     border = BorderStroke(1.dp, PendingAmber.copy(alpha = 0.45f)),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(session.dateLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = TextPrimaryDark)
-                                            Text(
-                                                "${session.timeLabel.replace(":", "h")} · ${session.durationMinutes} min",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = NewShapeGoldBright
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(session.dateLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = TextPrimaryDark)
+                                                Text(
+                                                    "${session.timeLabel.replace(":", "h")} · ${session.durationMinutes} min" +
+                                                        (if (week != null) " · Sem. ${week.label}" else ""),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = NewShapeGoldBright
+                                                )
+                                            }
+                                            StatusPill(
+                                                text = "Por confirmar",
+                                                textColor = PendingAmber,
+                                                containerColor = ObsidianBg.copy(alpha = 0.5f)
                                             )
                                         }
-                                        StatusPill(
-                                            text = "Por confirmar",
-                                            textColor = PendingAmber,
-                                            containerColor = ObsidianBg.copy(alpha = 0.5f)
-                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        HorizontalDivider(color = PendingAmber.copy(alpha = 0.2f))
+                                        Spacer(Modifier.height(8.dp))
+                                        if (lockReason == null) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = { swapTarget = booking to session },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .heightIn(min = 40.dp)
+                                                        .testTag("student_pending_swap_${booking.id}"),
+                                                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.7f)),
+                                                    colors = ButtonDefaults.outlinedButtonColors(
+                                                        containerColor = ObsidianBg.copy(alpha = 0.55f),
+                                                        contentColor = NewShapeGoldBright
+                                                    ),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Icon(Icons.Default.SwapHoriz, contentDescription = "Trocar horário", modifier = Modifier.size(15.dp))
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text("Trocar horário", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { cancelTarget = booking to session },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .heightIn(min = 40.dp)
+                                                        .testTag("student_pending_cancel_${booking.id}"),
+                                                    border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.7f)),
+                                                    colors = ButtonDefaults.outlinedButtonColors(
+                                                        containerColor = DangerRedContainer.copy(alpha = 0.85f),
+                                                        contentColor = DangerRed
+                                                    ),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Cancel, contentDescription = "Desmarcar", modifier = Modifier.size(15.dp))
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text("Desmarcar", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                                }
+                                            }
+                                        } else {
+                                            Text(
+                                                text = lockReason,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = PendingAmber
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1362,5 +1560,242 @@ internal fun StudentAgendaSection(
                 }
             }
         }
+    }
+
+    // ==================== DIALOG: DESMARCAR TREINO ====================
+    cancelTarget?.let { (booking, session) ->
+        AlertDialog(
+            onDismissRequest = { cancelTarget = null },
+            containerColor = CharcoalSurface,
+            title = {
+                Text(
+                    text = "Desmarcar treino?",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = TextPrimaryDark
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(
+                        color = DangerRedContainer.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "${session.dateLabel} · ${session.timeLabel.replace(":", "h")} (${session.durationMinutes} min)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                text = "O teu lugar será libertado e o teu Personal Trainer será avisado automaticamente.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val pair = booking to session
+                            cancelTarget = null
+                            swapTarget = pair
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 44.dp)
+                            .testTag("student_cancel_switch_to_swap_btn"),
+                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.7f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = NewShapeGoldMuted.copy(alpha = 0.7f),
+                            contentColor = NewShapeGoldBright
+                        )
+                    ) {
+                        Icon(Icons.Default.SwapHoriz, contentDescription = "Trocar horário", modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Prefiro trocar de horário", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.cancelSingleStudentBooking(booking.weekKey, student.id, session.id)
+                        if (currentWeek?.weekKey == booking.weekKey) {
+                            selectedSessionIds = selectedSessionIds - session.id
+                        }
+                        cancelTarget = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed, contentColor = TextPrimaryDark),
+                    modifier = Modifier.testTag("student_confirm_cancel_btn")
+                ) {
+                    Text("Desmarcar", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { cancelTarget = null },
+                    modifier = Modifier.testTag("student_keep_booking_btn")
+                ) {
+                    Text("Manter treino", color = TextSecondaryDark)
+                }
+            }
+        )
+    }
+
+    // ==================== DIALOG: TROCAR HORÁRIO DO TREINO ====================
+    swapTarget?.let { (booking, oldSession) ->
+        val weekKey = booking.weekKey
+        val weekLabel = weekMap[weekKey]?.label ?: weekKey
+        val bookedIdsInWeek = state.bookings
+            .filter { it.weekKey == weekKey && it.clientId == student.id && it.status != BookingStatus.CANCELLED.name }
+            .map { it.sessionId }
+            .toSet()
+        val now = System.currentTimeMillis()
+        val candidates = visibleSessions
+            .filter { s ->
+                s.weekKey == weekKey &&
+                    s.id != oldSession.id &&
+                    s.id !in bookedIdsInWeek &&
+                    (s.startMillis <= 0L || now < s.startMillis) &&
+                    (cutoffMs <= 0L || s.startMillis <= 0L || now <= s.startMillis - cutoffMs) &&
+                    state.bookings.count { it.sessionId == s.id && it.status == BookingStatus.CONFIRMED.name } < s.capacity
+            }
+            .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
+        val candidatesByDay = candidates.groupBy { it.dayOfWeek }.toSortedMap()
+
+        AlertDialog(
+            onDismissRequest = { swapTarget = null },
+            containerColor = CharcoalSurface,
+            title = {
+                Column {
+                    Text("Trocar horário do treino", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
+                    Text(
+                        text = "A trocar: ${oldSession.dateLabel} às ${oldSession.timeLabel.replace(":", "h")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NewShapeGoldBright
+                    )
+                }
+            },
+            text = {
+                if (candidatesByDay.isEmpty()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Schedule, contentDescription = null, tint = TextSecondaryDark, modifier = Modifier.size(32.dp))
+                        Text(
+                            text = "Sem outros horários com vagas na semana $weekLabel.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimaryDark,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "Podes desmarcar este treino ou falar com o teu PT no chat.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        candidatesByDay.forEach { (dayNum, dayList) ->
+                            item(key = "swap_day_$dayNum") {
+                                Text(
+                                    text = "${STUDENT_DAY_FULL_PT[dayNum] ?: "Dia $dayNum"} · ${dayList.firstOrNull()?.dateLabel.orEmpty()}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = NewShapeGoldBright,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                            items(dayList, key = { it.id }) { candidate ->
+                                val confCount = state.bookings.count {
+                                    it.sessionId == candidate.id && it.status == BookingStatus.CONFIRMED.name
+                                }
+                                val spotsLeft = (candidate.capacity - confCount).coerceAtLeast(0)
+                                val endT = studentComputeEndTime(candidate.timeLabel, candidate.durationMinutes)
+                                Surface(
+                                    color = ElevatedCharcoal,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, HairlineBorder),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            viewModel.swapSingleStudentBooking(
+                                                weekKey = weekKey,
+                                                clientId = student.id,
+                                                fromSessionId = oldSession.id,
+                                                toSessionId = candidate.id
+                                            )
+                                            if (currentWeek?.weekKey == weekKey) {
+                                                selectedSessionIds = (selectedSessionIds - oldSession.id) + candidate.id
+                                            }
+                                            swapTarget = null
+                                        }
+                                        .testTag("student_swap_target_${candidate.id}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Surface(
+                                                color = ObsidianBg,
+                                                shape = RoundedCornerShape(8.dp),
+                                                border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.45f))
+                                            ) {
+                                                Text(
+                                                    text = candidate.timeLabel,
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = NewShapeGoldBright,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                )
+                                            }
+                                            Column {
+                                                Text(
+                                                    text = candidate.dateLabel + (if (endT.isNotBlank()) " · até $endT" else ""),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TextPrimaryDark
+                                                )
+                                                Text(
+                                                    text = "${candidate.durationMinutes} min" +
+                                                        (if (candidate.note.isNotBlank()) " · ${candidate.note}" else ""),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = TextSecondaryDark
+                                                )
+                                            }
+                                        }
+                                        StatusPill(
+                                            text = "$spotsLeft ${if (spotsLeft == 1) "vaga" else "vagas"}",
+                                            textColor = ConfirmedGreen,
+                                            containerColor = ConfirmedGreenContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { swapTarget = null }) {
+                    Text("Fechar", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }

@@ -932,6 +932,17 @@ private fun FidelizacoesSection(
     var showCreateChooser by remember { mutableStateOf(false) }
     var targetClientForCreate by remember { mutableStateOf<ClientRecord?>(null) }
     var editingFid by remember { mutableStateOf<FidelizacaoRecord?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredFidelizacoes = remember(state.fidelizacoes, clientMap, searchQuery) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isEmpty()) state.fidelizacoes
+        else state.fidelizacoes.filter { fid ->
+            val c = clientMap[fid.clientId]
+            val haystack = "${c?.name.orEmpty()} ${c?.phone.orEmpty()} ${fid.notes} ${fid.durationMonths} meses".lowercase()
+            haystack.contains(q)
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -956,6 +967,39 @@ private fun FidelizacoesSection(
             }
         }
 
+        if (state.fidelizacoes.isNotEmpty()) {
+            item {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Pesquisar aluno por nome, telemóvel ou notas...") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = "Pesquisar aluno",
+                            tint = TextSecondaryDark
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Limpar pesquisa",
+                                    tint = TextSecondaryDark
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("fidelizacoes_search_input"),
+                    colors = darkFieldColors()
+                )
+            }
+        }
+
         if (state.fidelizacoes.isEmpty()) {
             item {
                 EmptyStateBox(
@@ -964,8 +1008,16 @@ private fun FidelizacoesSection(
                     subtitle = "Aponta quando começa e termina o período de 6 ou 12 meses de cada aluno."
                 )
             }
+        } else if (filteredFidelizacoes.isEmpty()) {
+            item {
+                EmptyStateBox(
+                    icon = Icons.Default.Search,
+                    title = "Nenhum aluno encontrado",
+                    subtitle = "Sem fidelizações correspondentes a \"${searchQuery.trim()}\"."
+                )
+            }
         } else {
-            items(state.fidelizacoes, key = { it.id }) { fid ->
+            items(filteredFidelizacoes, key = { it.id }) { fid ->
                 val clientName = clientMap[fid.clientId]?.name ?: "Aluno"
                 val now = System.currentTimeMillis()
                 val totalMs = (fid.endDateMillis - fid.startDateMillis).coerceAtLeast(1L)

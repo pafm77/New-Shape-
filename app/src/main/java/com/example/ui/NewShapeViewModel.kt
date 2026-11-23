@@ -798,8 +798,12 @@ class NewShapeViewModel(
 
     fun submitStudentBookings(weekKey: String, clientId: String, selectedSessionIds: Set<String>) {
         val data = currentData
+        val visibleSessionIds = data?.sessions?.filter { !it.ptPrivatePersonal }?.map { it.id }?.toSet().orEmpty()
         val existing = data?.bookings?.filter {
-            it.weekKey == weekKey && it.clientId == clientId && it.status != BookingStatus.CANCELLED.name
+            it.weekKey == weekKey &&
+                it.clientId == clientId &&
+                it.status != BookingStatus.CANCELLED.name &&
+                it.sessionId in visibleSessionIds
         }.orEmpty()
         val existingIds = existing.map { it.sessionId }.toSet()
         val isCancel = existing.isNotEmpty() && selectedSessionIds.isEmpty()
@@ -848,6 +852,81 @@ class NewShapeViewModel(
                     } else {
                         _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp."
                     }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun cancelSingleStudentBooking(weekKey: String, clientId: String, sessionIdToCancel: String) {
+        val data = currentData
+        val sessionMap = data?.sessions?.associateBy { it.id }.orEmpty()
+        val visibleSessionIds = data?.sessions?.filter { !it.ptPrivatePersonal }?.map { it.id }?.toSet().orEmpty()
+        val existing = data?.bookings?.filter {
+            it.weekKey == weekKey &&
+                it.clientId == clientId &&
+                it.status != BookingStatus.CANCELLED.name &&
+                it.sessionId in visibleSessionIds
+        }.orEmpty()
+        val nextIds = existing.map { it.sessionId }.filter { it != sessionIdToCancel }.toSet()
+        val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
+        val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
+        val cancelledSession = sessionMap[sessionIdToCancel]
+        val cancelledDesc = cancelledSession?.let { "${it.dateLabel} às ${it.timeLabel.replace(":", "h")}" } ?: "treino"
+
+        viewModelScope.launch {
+            repository.submitStudentBookings(weekKey, clientId, nextIds, existing)
+                .onSuccess {
+                    val summary = "$clientName desmarcou o treino de $cancelledDesc (semana $weekLabel)."
+                    repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
+                    val waMsg = "Olá! Sou $clientName (New Shape). Tive de desmarcar o meu treino de $cancelledDesc (semana $weekLabel). Já atualizei na app!"
+                    _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                        type = "CANCELLED",
+                        title = "Treino desmarcado — avisa o teu PT",
+                        detail = "O teu lugar foi libertado e o teu PT já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.",
+                        whatsappMessage = waMsg
+                    )
+                    _statusBanner.value = "Treino de $cancelledDesc desmarcado!"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun swapSingleStudentBooking(
+        weekKey: String,
+        clientId: String,
+        fromSessionId: String,
+        toSessionId: String
+    ) {
+        val data = currentData
+        val sessionMap = data?.sessions?.associateBy { it.id }.orEmpty()
+        val visibleSessionIds = data?.sessions?.filter { !it.ptPrivatePersonal }?.map { it.id }?.toSet().orEmpty()
+        val existing = data?.bookings?.filter {
+            it.weekKey == weekKey &&
+                it.clientId == clientId &&
+                it.status != BookingStatus.CANCELLED.name &&
+                it.sessionId in visibleSessionIds
+        }.orEmpty()
+        val nextIds = (existing.map { it.sessionId }.filter { it != fromSessionId } + toSessionId).toSet()
+        val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
+        val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
+        val oldSession = sessionMap[fromSessionId]
+        val newSession = sessionMap[toSessionId]
+        val oldDesc = oldSession?.let { "${it.dateLabel} às ${it.timeLabel.replace(":", "h")}" } ?: "horário anterior"
+        val newDesc = newSession?.let { "${it.dateLabel} às ${it.timeLabel.replace(":", "h")}" } ?: "novo horário"
+
+        viewModelScope.launch {
+            repository.submitStudentBookings(weekKey, clientId, nextIds, existing)
+                .onSuccess {
+                    val summary = "$clientName trocou o treino na semana $weekLabel: saiu de $oldDesc para $newDesc."
+                    repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
+                    val waMsg = "Olá! Sou $clientName (New Shape). Troquei o meu treino da semana $weekLabel:\n• Anterior: $oldDesc\n• Novo horário: $newDesc\nJá atualizei na app!"
+                    _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                        type = "ALTERED",
+                        title = "Horário trocado — avisa o teu PT",
+                        detail = "O pedido de troca foi enviado e o teu PT já foi notificado na app. Envia também a mensagem pelo WhatsApp para confirmar.",
+                        whatsappMessage = waMsg
+                    )
+                    _statusBanner.value = "Treino trocado para $newDesc!"
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }

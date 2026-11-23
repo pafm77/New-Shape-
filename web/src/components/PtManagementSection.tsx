@@ -7,11 +7,13 @@ import {
   Edit3,
   MessageCircle,
   Plus,
+  Search,
   Send,
   ShieldCheck,
   Trash2,
   ArrowLeft,
   UserX,
+  X,
 } from 'lucide-react';
 import {
   ChatMessageRecord,
@@ -1122,6 +1124,24 @@ const FidelizacaoSubTab: React.FC<{
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<FidelizacaoRecord | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredFidelizacoes = useMemo(() => {
+    const q = searchQuery
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    if (!q) return fidelizacoes;
+    return fidelizacoes.filter((f) => {
+      const client = clientMap.get(f.clientId);
+      const haystack = `${client?.name || ''} ${client?.phone || ''} ${f.notes || ''} ${f.durationMonths} meses`
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return haystack.includes(q);
+    });
+  }, [fidelizacoes, clientMap, searchQuery]);
 
   return (
     <div className="space-y-4">
@@ -1144,15 +1164,43 @@ const FidelizacaoSubTab: React.FC<{
         </GoldButton>
       </div>
 
+      {fidelizacoes.length > 0 && (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#A1A1AA]" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Pesquisar aluno por nome, telemóvel ou notas..."
+            className="pl-10 pr-9"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              aria-label="Limpar pesquisa"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-[#A1A1AA] hover:bg-[#242429] hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
+
       {fidelizacoes.length === 0 ? (
         <EmptyState
           icon={<Award className="h-6 w-6" />}
           title="Sem contratos de fidelização"
           subtitle="Regista contratos de 6 ou 12 meses para acompanhar os prazos dos teus alunos."
         />
+      ) : filteredFidelizacoes.length === 0 ? (
+        <EmptyState
+          icon={<Search className="h-6 w-6" />}
+          title="Nenhum aluno encontrado"
+          subtitle={`Sem fidelizações correspondentes a "${searchQuery.trim()}".`}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {fidelizacoes.map((f) => {
+          {filteredFidelizacoes.map((f) => {
             const client = clientMap.get(f.clientId);
             const now = Date.now();
             const totalMs = Math.max(1, f.endDateMillis - f.startDateMillis);

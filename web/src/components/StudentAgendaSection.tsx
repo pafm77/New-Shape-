@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeftRight,
   Bell,
   Calendar,
   CalendarCheck2,
@@ -9,6 +10,7 @@ import {
   ChevronRight,
   Clock,
   Sparkles,
+  X,
   XCircle,
 } from 'lucide-react';
 import {
@@ -38,6 +40,7 @@ import {
   BrandCard,
   EmptyState,
   GoldButton,
+  Modal,
   SecondaryButton,
   StatusPill,
 } from './UiPrimitives';
@@ -150,6 +153,17 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
   const [subTab, setSubTab] = useState<StudentAgendaSubTab>('marcar');
   const [selectedDay, setSelectedDay] = useState<number>(1);
   const [showPastConfirmed, setShowPastConfirmed] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<{
+    booking: BookingRecord;
+    session: TrainingSessionRecord;
+    week?: TrainingWeekRecord;
+  } | null>(null);
+  const [swapTarget, setSwapTarget] = useState<{
+    booking: BookingRecord;
+    session: TrainingSessionRecord;
+    week?: TrainingWeekRecord;
+  } | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const weekSessions = useMemo(() => {
     if (!activeWeek) return [];
@@ -264,6 +278,191 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
       .sort((a, b) => a.startMillis - b.startMillis);
   }, [weekSessions, draftSessionIds]);
 
+  const hasUnsavedDraftChanges = useMemo(() => {
+    const existingIds = new Set(clientWeekBookings.map((b) => b.sessionId));
+    if (existingIds.size !== draftSessionIds.size) return true;
+    for (const id of draftSessionIds) {
+      if (!existingIds.has(id)) return true;
+    }
+    return false;
+  }, [clientWeekBookings, draftSessionIds]);
+
+  const cutoffMinutes = getEffectiveCutoffMinutes(settings);
+  const cutoffMs = cutoffMinutes * 60_000;
+
+  const getBookingEditState = (booking: BookingRecord, session: TrainingSessionRecord) => {
+    const now = Date.now();
+    const isStartedOrPast = session.startMillis > 0 && now >= session.startMillis;
+    const isCutoffLocked =
+      cutoffMs > 0 && session.startMillis > 0 && now > session.startMillis - cutoffMs;
+    const isConfirmedLockedByPt = booking.status === 'CONFIRMED' && !settings.clientsCanEdit;
+    const canModify = !isStartedOrPast && !isCutoffLocked && !isConfirmedLockedByPt;
+    const lockReason = isStartedOrPast
+      ? 'Este treino já começou ou terminou.'
+      : isCutoffLocked
+      ? `Prazo de alteração (${formatCutoffLabel(cutoffMinutes)} antes) encerrado.`
+      : isConfirmedLockedByPt
+      ? 'Alterações bloqueadas pelo PT.'
+      : null;
+    return { canModify, lockReason };
+  };
+
+  const getWeekActiveVisibleBookings = (weekKey: string) =>
+    bookings.filter(
+      (b) =>
+        b.weekKey === weekKey &&
+        b.clientId === client.id &&
+        b.status !== 'CANCELLED' &&
+        sessionMap.has(b.sessionId)
+    );
+
+  const handleCancelSingleBooking = async (target: {
+    booking: BookingRecord;
+    session: TrainingSessionRecord;
+    week?: TrainingWeekRecord;
+  }) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      const weekKey = target.booking.weekKey;
+      const weekLabel = target.week?.label || weekKey;
+      const activeForWeek = getWeekActiveVisibleBookings(weekKey);
+      const nextIds = new Set(
+        activeForWeek
+          .map((b) => b.sessionId)
+          .filter((sid) => sid !== target.booking.sessionId)
+      );
+
+      await repo.submitStudentBookings(uid, weekKey, client.id, nextIds, activeForWeek);
+
+      if (activeWeek?.weekKey === weekKey) {
+        setDraftSessionIds(nextIds);
+      }
+
+      const cancelledDesc = `${target.session.dateLabel} às ${target.session.timeLabel.replace(':', 'h')}`;
+      const summary = `${client.name} desmarcou o treino de ${cancelledDesc} (semana ${weekLabel}).`;
+      await repo
+        .createPtNotification(uid, {
+          clientId: client.id,
+          clientName: client.name,
+          type: 'CANCELLED',
+          summary,
+          weekKey,
+        })
+        .catch(() => {});
+
+      setCancelTarget(null);
+      onWhatsAppAlert({
+        title: 'Treino desmarcado — Avisa o PT no WhatsApp',
+        subtitle:
+          'O teu lugar foi libertado e o teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
+        message: `Olá! Sou ${client.name} (New Shape). Tive de desmarcar o meu treino de ${cancelledDesc} (semana ${weekLabel}). Já atualizei na app!`,
+      });
+      onBanner(`Treino de ${cancelledDesc} desmarcado!`);
+    } catch {
+      onBanner('Não foi possível desmarcar o treino. Tenta novamente.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleSwapSingleBooking = async (
+    target: {
+      booking: BookingRecord;
+      session: TrainingSessionRecord;
+      week?: TrainingWeekRecord;
+    },
+    newSession: TrainingSessionRecord
+  ) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      const weekKey = target.booking.weekKey;
+      const weekLabel = target.week?.label || weekKey;
+      const activeForWeek = getWeekActiveVisibleBookings(weekKey);
+      const nextIds = new Set(
+        activeForWeek
+          .map((b) => b.sessionId)
+          .filter((sid) => sid !== target.booking.sessionId)
+      );
+      nextIds.add(newSession.id);
+
+      await repo.submitStudentBookings(uid, weekKey, client.id, nextIds, activeForWeek);
+
+      if (activeWeek?.weekKey === weekKey) {
+        setDraftSessionIds(nextIds);
+      }
+
+      const oldDesc = `${target.session.dateLabel} às ${target.session.timeLabel.replace(':', 'h')}`;
+      const newDesc = `${newSession.dateLabel} às ${newSession.timeLabel.replace(':', 'h')}`;
+      const summary = `${client.name} trocou o treino na semana ${weekLabel}: saiu de ${oldDesc} para ${newDesc}.`;
+      await repo
+        .createPtNotification(uid, {
+          clientId: client.id,
+          clientName: client.name,
+          type: 'ALTERED',
+          summary,
+          weekKey,
+        })
+        .catch(() => {});
+
+      setSwapTarget(null);
+      onWhatsAppAlert({
+        title: 'Horário trocado — Avisa o PT no WhatsApp',
+        subtitle:
+          'O pedido de troca foi enviado e o teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
+        message: `Olá! Sou ${client.name} (New Shape). Troquei o meu treino da semana ${weekLabel}:\n• Anterior: ${oldDesc}\n• Novo horário: ${newDesc}\nJá atualizei na app!`,
+      });
+      onBanner(`Treino trocado para ${newDesc}!`);
+    } catch {
+      onBanner('Não foi possível trocar o horário. Tenta novamente.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const swapCandidateSessions = useMemo(() => {
+    if (!swapTarget) return [];
+    const weekKey = swapTarget.booking.weekKey;
+    const activeWeekBookedIds = new Set(
+      bookings
+        .filter(
+          (b) =>
+            b.weekKey === weekKey &&
+            b.clientId === client.id &&
+            b.status !== 'CANCELLED'
+        )
+        .map((b) => b.sessionId)
+    );
+    const now = Date.now();
+    return sessions
+      .filter((s) => {
+        if (s.ptPrivatePersonal) return false;
+        if (s.weekKey !== weekKey) return false;
+        if (s.id === swapTarget.session.id) return false;
+        if (activeWeekBookedIds.has(s.id)) return false;
+        if (s.startMillis > 0 && now >= s.startMillis) return false;
+        if (cutoffMs > 0 && s.startMillis > 0 && now > s.startMillis - cutoffMs) return false;
+        const confirmedCount = bookings.filter(
+          (b) => b.sessionId === s.id && b.status === 'CONFIRMED'
+        ).length;
+        return confirmedCount < s.capacity;
+      })
+      .sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
+  }, [swapTarget, sessions, bookings, client.id, cutoffMs]);
+
+  const swapCandidatesByDay = useMemo(() => {
+    const map = new Map<number, TrainingSessionRecord[]>();
+    swapCandidateSessions.forEach((s) => {
+      const arr = map.get(s.dayOfWeek) || [];
+      arr.push(s);
+      map.set(s.dayOfWeek, arr);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
+  }, [swapCandidateSessions]);
+
+  const totalManageableCount = upcomingConfirmed.length + myPendingItems.length;
+
   const selectedDayDate = activeWeek ? getWeekDayDate(activeWeek, selectedDay) : null;
   const selectedDayTitle = selectedDayDate
     ? `${DAYS_PT[selectedDay]}, ${selectedDayDate.getDate()} ${MONTHS_PT[selectedDayDate.getMonth()]}`
@@ -296,7 +495,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
         >
           <CalendarCheck2 className="h-4 w-4 shrink-0" />
           <span>Marcações</span>
-          {upcomingConfirmed.length > 0 && (
+          {totalManageableCount > 0 && (
             <span
               className={`rounded-full px-2 py-0.5 text-[11px] font-extrabold ${
                 subTab === 'marcacoes'
@@ -304,7 +503,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                   : 'bg-[#143521] text-[#86EFAC] border border-[#22C55E]/40'
               }`}
             >
-              {upcomingConfirmed.length}
+              {totalManageableCount}
             </span>
           )}
         </button>
@@ -479,22 +678,31 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                       : 'border-[#22C55E]/50 bg-[#143521] text-[#86EFAC]'
                   }`}
                 >
-                  <span>
-                    {clientWeekBookings.some(
-                      (b) => b.status === 'PENDING' || b.status === 'ALTERED'
-                    )
-                      ? 'Pedido enviado! 🙌 O teu PT vai confirmar no WhatsApp em breve.'
-                      : 'Treinos confirmados ✓ — Consulta os teus horários na subaba Marcações.'}
-                  </span>
-                  {clientWeekBookings.some((b) => b.status === 'CONFIRMED') && (
-                    <button
-                      type="button"
-                      onClick={() => setSubTab('marcacoes')}
-                      className="rounded-lg border border-[#22C55E]/60 bg-[#0F291A] px-2.5 py-1 text-xs font-bold text-[#86EFAC] hover:bg-[#163B25]"
-                    >
-                      Ver Marcações →
-                    </button>
-                  )}
+                  <div className="space-y-0.5">
+                    <p className="font-semibold">
+                      {clientWeekBookings.some(
+                        (b) => b.status === 'PENDING' || b.status === 'ALTERED'
+                      )
+                        ? 'Pedido enviado! 🙌 O teu PT vai confirmar no WhatsApp em breve.'
+                        : 'Treinos confirmados ✓'}
+                    </p>
+                    <p className="text-[11px] opacity-85">
+                      Podes trocar de horário ou desmarcar diretamente em cada treino ou em Marcações.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('marcacoes')}
+                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
+                      clientWeekBookings.some(
+                        (b) => b.status === 'PENDING' || b.status === 'ALTERED'
+                      )
+                        ? 'border-[#EAB308]/60 bg-[#2A230D] text-[#FACC15] hover:bg-[#3B3113]'
+                        : 'border-[#22C55E]/60 bg-[#0F291A] text-[#86EFAC] hover:bg-[#163B25]'
+                    }`}
+                  >
+                    Gerir Marcações →
+                  </button>
                 </div>
               )}
 
@@ -696,6 +904,55 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                               </div>
                             </button>
 
+                            {existingForSession && (() => {
+                              const editState = getBookingEditState(existingForSession, s);
+                              return (
+                                <div className="mx-3.5 mb-3 border-t border-[#323238]/70 pt-2.5 flex flex-wrap items-center justify-between gap-2">
+                                  {editState.canModify ? (
+                                    <>
+                                      <span className="text-[11px] text-[#A1A1AA]">
+                                        Precisas de mudar este treino?
+                                      </span>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setSwapTarget({
+                                              booking: existingForSession,
+                                              session: s,
+                                              week: activeWeek,
+                                            })
+                                          }
+                                          className="inline-flex items-center gap-1.5 rounded-xl border border-[#EAB308]/60 bg-[#3D3314] px-3 py-1.5 text-xs font-bold text-[#FACC15] transition hover:bg-[#4D4019]"
+                                        >
+                                          <ArrowLeftRight className="h-3.5 w-3.5" />
+                                          Trocar horário
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setCancelTarget({
+                                              booking: existingForSession,
+                                              session: s,
+                                              week: activeWeek,
+                                            })
+                                          }
+                                          className="inline-flex items-center gap-1.5 rounded-xl border border-[#EF4444]/60 bg-[#3B1518] px-3 py-1.5 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#4B1A1E]"
+                                        >
+                                          <XCircle className="h-3.5 w-3.5" />
+                                          Desmarcar
+                                        </button>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <span className="text-[11px] text-[#F59E0B]">
+                                      {editState.lockReason}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
+
                             {fullAndNotMine && !editLocked && (
                               <div className="mx-3.5 mb-3 border-t border-[#323238]/70 pt-2.5 flex items-center justify-between gap-2">
                                 <span className="text-[11px] text-[#A1A1AA]">
@@ -748,22 +1005,54 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
               {/* Selected Summary Chips across the whole week */}
               {activeWeek && selectedWeekSummary.length > 0 && (
                 <div className="rounded-2xl border border-[#323238] bg-[#1B1B1E] p-3.5 space-y-2">
-                  <p className="text-xs font-bold text-[#FACC15]">
-                    Selecionados nesta semana ({selectedWeekSummary.length}):
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-[#FACC15]">
+                      Selecionados nesta semana ({selectedWeekSummary.length}):
+                    </p>
+                    {hasUnsavedDraftChanges && (
+                      <span className="rounded-full border border-[#F59E0B]/50 bg-[#3B2A10] px-2 py-0.5 text-[10px] font-bold text-[#FDE68A]">
+                        Toca em &ldquo;Guardar alterações&rdquo; abaixo
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {selectedWeekSummary.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => setSelectedDay(s.dayOfWeek)}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/60 px-2.5 py-1 text-xs font-bold text-[#FACC15] hover:border-[#EAB308]"
-                      >
-                        <span>
-                          {DAY_SHORT_PT[s.dayOfWeek]} · {s.timeLabel}
-                        </span>
-                      </button>
-                    ))}
+                    {selectedWeekSummary.map((s) => {
+                      const lockedByCutoff =
+                        cutoffMs > 0 &&
+                        s.startMillis > 0 &&
+                        Date.now() > s.startMillis - cutoffMs;
+                      const canRemoveChip = settings.clientsCanEdit && !lockedByCutoff;
+                      return (
+                        <div
+                          key={s.id}
+                          className="inline-flex items-center rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/60 text-xs font-bold text-[#FACC15]"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDay(s.dayOfWeek)}
+                            className="px-2.5 py-1 hover:text-white"
+                          >
+                            {DAY_SHORT_PT[s.dayOfWeek]} · {s.timeLabel}
+                          </button>
+                          {canRemoveChip && (
+                            <button
+                              type="button"
+                              aria-label={`Remover ${DAY_SHORT_PT[s.dayOfWeek]} ${s.timeLabel}`}
+                              onClick={() =>
+                                setDraftSessionIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(s.id);
+                                  return next;
+                                })
+                              }
+                              className="border-l border-[#EAB308]/35 px-1.5 py-1 text-[#FCA5A5] hover:bg-[#3B1518] rounded-r-xl"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1047,6 +1336,38 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         )}
                       </div>
                     </div>
+
+                    {(() => {
+                      const editState = getBookingEditState(booking, session);
+                      return (
+                        <div className="mt-3 pt-3 border-t border-[#22C55E]/25 flex flex-wrap items-center justify-between gap-2">
+                          {editState.canModify ? (
+                            <div className="grid w-full grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSwapTarget({ booking, session, week })}
+                                className="inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-[#EAB308]/60 bg-[#3D3314]/80 px-3 py-2 text-xs font-bold text-[#FACC15] transition hover:bg-[#4D4019]"
+                              >
+                                <ArrowLeftRight className="h-3.5 w-3.5" />
+                                Trocar horário
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCancelTarget({ booking, session, week })}
+                                className="inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border border-[#EF4444]/60 bg-[#3B1518]/90 px-3 py-2 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#4B1A1E]"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                Desmarcar treino
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-[#F59E0B]">
+                              {editState.lockReason}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -1062,27 +1383,55 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                     A aguardar confirmação do PT ({myPendingItems.length})
                   </p>
                   <p className="text-[11px] text-[#A1A1AA]">
-                    Assim que o teu Personal Trainer aceitar, passam para a lista de confirmados acima.
+                    Podes trocar o horário ou desmarcar enquanto aguardas confirmação.
                   </p>
                 </div>
                 <StatusPill tone="amber">Pendente</StatusPill>
               </div>
-              <div className="space-y-2">
-                {myPendingItems.map(({ booking, session }) => (
-                  <div
-                    key={booking.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-[#EAB308]/35 bg-[#3D3314]/35 px-3.5 py-2.5"
-                  >
-                    <div>
-                      <p className="text-sm font-bold text-[#F4F4F5]">{session.dateLabel}</p>
-                      <p className="text-xs text-[#FACC15]">
-                        {session.timeLabel.replace(':', 'h')} · {session.durationMinutes} min
-                        {session.note ? ` · ${session.note}` : ''}
-                      </p>
+              <div className="space-y-2.5">
+                {myPendingItems.map(({ booking, session, week }) => {
+                  const editState = getBookingEditState(booking, session);
+                  return (
+                    <div
+                      key={booking.id}
+                      className="rounded-xl border border-[#EAB308]/35 bg-[#3D3314]/35 p-3.5 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-[#F4F4F5]">{session.dateLabel}</p>
+                          <p className="text-xs text-[#FACC15]">
+                            {session.timeLabel.replace(':', 'h')} · {session.durationMinutes} min
+                            {week ? ` · Sem. ${week.label}` : ''}
+                            {session.note ? ` · ${session.note}` : ''}
+                          </p>
+                        </div>
+                        <StatusPill tone="amber">Por confirmar</StatusPill>
+                      </div>
+                      {editState.canModify ? (
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#EAB308]/20">
+                          <button
+                            type="button"
+                            onClick={() => setSwapTarget({ booking, session, week })}
+                            className="inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl border border-[#EAB308]/60 bg-[#2A230D] px-3 py-1.5 text-xs font-bold text-[#FACC15] transition hover:bg-[#3B3113]"
+                          >
+                            <ArrowLeftRight className="h-3.5 w-3.5" />
+                            Trocar horário
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCancelTarget({ booking, session, week })}
+                            className="inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl border border-[#EF4444]/60 bg-[#3B1518] px-3 py-1.5 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#4B1A1E]"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            Desmarcar
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-[#F59E0B]">{editState.lockReason}</p>
+                      )}
                     </div>
-                    <StatusPill tone="amber">Por confirmar</StatusPill>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </BrandCard>
           )}
@@ -1254,6 +1603,162 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
           )}
         </div>
       )}
+
+      {/* ==================== MODAL: DESMARCAR TREINO ==================== */}
+      <Modal
+        open={Boolean(cancelTarget)}
+        title="Desmarcar treino?"
+        subtitle={
+          cancelTarget
+            ? `${cancelTarget.session.dateLabel} · ${cancelTarget.session.timeLabel.replace(':', 'h')} (${cancelTarget.session.durationMinutes} min)`
+            : undefined
+        }
+        onClose={() => {
+          if (!actionBusy) setCancelTarget(null);
+        }}
+      >
+        {cancelTarget && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[#EF4444]/40 bg-[#3B1518]/60 p-3.5 text-xs text-[#FCA5A5] space-y-1">
+              <p className="font-bold text-[#F4F4F5]">
+                Queres mesmo desmarcar este treino?
+              </p>
+              <p className="leading-relaxed">
+                O teu lugar neste horário será libertado e o teu Personal Trainer será avisado
+                automaticamente.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={() => handleCancelSingleBooking(cancelTarget)}
+                className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-[#EF4444] px-4 py-2.5 text-sm font-extrabold text-white transition hover:bg-[#DC2626] disabled:opacity-50"
+              >
+                <XCircle className="h-4 w-4" />
+                {actionBusy ? 'A desmarcar...' : 'Confirmar desmarcação'}
+              </button>
+
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={() => {
+                  const target = cancelTarget;
+                  setCancelTarget(null);
+                  setSwapTarget(target);
+                }}
+                className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-[#EAB308]/60 bg-[#3D3314]/80 px-4 py-2 text-xs font-bold text-[#FACC15] transition hover:bg-[#4D4019] disabled:opacity-50"
+              >
+                <ArrowLeftRight className="h-4 w-4" />
+                Prefiro trocar de horário
+              </button>
+
+              <SecondaryButton
+                fullWidth
+                disabled={actionBusy}
+                onClick={() => setCancelTarget(null)}
+              >
+                Manter treino
+              </SecondaryButton>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ==================== MODAL: TROCAR HORÁRIO DO TREINO ==================== */}
+      <Modal
+        open={Boolean(swapTarget)}
+        title="Trocar horário do treino"
+        subtitle={
+          swapTarget
+            ? `A trocar: ${swapTarget.session.dateLabel} às ${swapTarget.session.timeLabel.replace(':', 'h')}`
+            : undefined
+        }
+        onClose={() => {
+          if (!actionBusy) setSwapTarget(null);
+        }}
+      >
+        {swapTarget && (
+          <div className="space-y-3.5">
+            <div className="rounded-xl border border-[#EAB308]/40 bg-[#3D3314]/50 px-3.5 py-2.5 text-xs text-[#FACC15]">
+              Escolhe abaixo o novo dia e hora para a semana{' '}
+              <strong>{swapTarget.week?.label || swapTarget.booking.weekKey}</strong>. A troca é
+              imediata e o teu PT é avisado automaticamente.
+            </div>
+
+            {swapCandidatesByDay.length === 0 ? (
+              <div className="rounded-xl border border-[#323238] bg-[#242429] p-5 text-center space-y-2">
+                <Clock className="mx-auto h-6 w-6 text-[#A1A1AA]" />
+                <p className="text-sm font-bold text-[#F4F4F5]">
+                  Sem outros horários com vagas nesta semana
+                </p>
+                <p className="text-xs text-[#A1A1AA]">
+                  Podes desmarcar este treino ou falar diretamente com o teu PT no chat.
+                </p>
+              </div>
+            ) : (
+              <div className="max-h-[55vh] overflow-y-auto space-y-3 pr-1">
+                {swapCandidatesByDay.map(([dayNum, list]) => (
+                  <div key={dayNum} className="space-y-1.5">
+                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-[#EAB308]">
+                      {DAYS_PT[dayNum] || `Dia ${dayNum}`} · {list[0]?.dateLabel}
+                    </p>
+                    <div className="space-y-1.5">
+                      {list.map((candidate) => {
+                        const confirmedCount = bookings.filter(
+                          (b) => b.sessionId === candidate.id && b.status === 'CONFIRMED'
+                        ).length;
+                        const spotsLeft = Math.max(0, candidate.capacity - confirmedCount);
+                        const endT = computeEndTimeLabel(
+                          candidate.timeLabel,
+                          candidate.durationMinutes
+                        );
+                        return (
+                          <button
+                            key={candidate.id}
+                            type="button"
+                            disabled={actionBusy}
+                            onClick={() => handleSwapSingleBooking(swapTarget, candidate)}
+                            className="flex w-full items-center justify-between gap-3 rounded-xl border border-[#323238] bg-[#242429] p-3 text-left transition hover:border-[#EAB308] hover:bg-[#3D3314]/40 disabled:opacity-50"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="rounded-lg border border-[#EAB308]/40 bg-[#18181B] px-2.5 py-1.5 text-sm font-extrabold text-[#FACC15]">
+                                {candidate.timeLabel}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-[#F4F4F5] truncate">
+                                  {candidate.dateLabel}
+                                  {endT ? ` · até ${endT}` : ''}
+                                </p>
+                                <p className="text-[11px] text-[#A1A1AA] truncate">
+                                  {candidate.durationMinutes} min
+                                  {candidate.note ? ` · ${candidate.note}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <StatusPill tone="green">
+                              {spotsLeft} {spotsLeft === 1 ? 'vaga' : 'vagas'}
+                            </StatusPill>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <SecondaryButton
+              fullWidth
+              disabled={actionBusy}
+              onClick={() => setSwapTarget(null)}
+            >
+              Fechar
+            </SecondaryButton>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
