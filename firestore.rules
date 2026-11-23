@@ -78,7 +78,8 @@ service cloud.firestore {
              data.durationMinutes is int && data.durationMinutes >= 10 && data.durationMinutes <= 300 &&
              data.capacity is int && data.capacity >= 1 && data.capacity <= 100 &&
              data.note is string && data.note.size() <= 200 &&
-             data.startMillis is int;
+             data.startMillis is int &&
+             (!('ptPrivatePersonal' in data) || data.ptPrivatePersonal is bool);
     }
 
     function isValidBooking(data) {
@@ -337,7 +338,7 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(sessionId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'weekKey', 'dayOfWeek', 'dateLabel', 'timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'weekKey', 'dayOfWeek', 'dateLabel', 'timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'weekKey', 'dayOfWeek', 'dateLabel', 'timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'ptPrivatePersonal', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidSession(incoming());
         allow update: if isOwner(userId) && isValidId(sessionId) &&
@@ -345,7 +346,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['timeLabel', 'durationMinutes', 'capacity', 'note', 'startMillis', 'ptPrivatePersonal', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(sessionId);
       }
 

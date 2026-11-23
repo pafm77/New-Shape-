@@ -148,6 +148,26 @@ fun PtMarcacoesSection(
     var sentByWeek by remember { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
     var showSendDialog by remember { mutableStateOf(false) }
     var includeAllConfirmed by remember { mutableStateOf(false) }
+    var showPrivateDialog by remember { mutableStateOf(false) }
+
+    val allSessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
+    val monthlyPersonalGiven = remember(state.bookings, allSessionMap, clientMap) {
+        val nowCal = Calendar.getInstance()
+        val y = nowCal.get(Calendar.YEAR)
+        val m = nowCal.get(Calendar.MONTH)
+        val sCal = Calendar.getInstance()
+        var given = 0
+        state.bookings.forEach { b ->
+            if (b.status != BookingStatus.CONFIRMED.name || b.attendanceStatus != "PRESENT") return@forEach
+            val ses = allSessionMap[b.sessionId] ?: return@forEach
+            if (ses.startMillis <= 0L) return@forEach
+            sCal.timeInMillis = ses.startMillis
+            if (sCal.get(Calendar.YEAR) != y || sCal.get(Calendar.MONTH) != m) return@forEach
+            val c = clientMap[b.clientId]
+            if (ses.ptPrivatePersonal || c?.trainingType == "PERSONALIZADO") given += 1
+        }
+        MONTHS_SHORT_PT[m] to given
+    }
 
     val queuedIds = queuedByWeek[weekKey].orEmpty()
     val sentIds = sentByWeek[weekKey].orEmpty()
@@ -185,6 +205,7 @@ fun PtMarcacoesSection(
                 .filter { it.status == BookingStatus.CONFIRMED.name }
                 .forEach { b ->
                     val s = sessionMap[b.sessionId] ?: return@forEach
+                    if (s.ptPrivatePersonal) return@forEach
                     val list = byClient.getOrPut(b.clientId) { mutableListOf() }
                     if (list.none { it.id == s.id }) list.add(s)
                 }
@@ -268,11 +289,21 @@ fun PtMarcacoesSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StatusPill(
-                        text = if (totalWeekPending > 0) "$totalWeekPending por aceitar" else "Tudo aceite",
-                        textColor = if (totalWeekPending > 0) PendingAmber else ConfirmedGreen,
-                        containerColor = if (totalWeekPending > 0) PendingAmberContainer else ConfirmedGreenContainer
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusPill(
+                            text = if (totalWeekPending > 0) "$totalWeekPending por aceitar" else "Tudo aceite",
+                            textColor = if (totalWeekPending > 0) PendingAmber else ConfirmedGreen,
+                            containerColor = if (totalWeekPending > 0) PendingAmberContainer else ConfirmedGreenContainer
+                        )
+                        StatusPill(
+                            text = "Pers. (${monthlyPersonalGiven.first}): ${monthlyPersonalGiven.second}✓",
+                            textColor = NewShapeGoldBright,
+                            containerColor = NewShapeGoldMuted
+                        )
+                    }
                     if (confirmedGroups.isNotEmpty()) {
                         TextButton(
                             onClick = {
@@ -287,7 +318,7 @@ fun PtMarcacoesSection(
                                 tint = NewShapeGoldBright,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text(
                                 text = if (unsentQueuedCount > 0) "Enviar ($unsentQueuedCount)" else "Mensagens (${confirmedGroups.size})",
                                 color = NewShapeGoldBright,
@@ -296,6 +327,15 @@ fun PtMarcacoesSection(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(8.dp))
+                GoldPrimaryButton(
+                    text = "+ Personalizado (Oculto)",
+                    icon = Icons.Default.VisibilityOff,
+                    onClick = { showPrivateDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "marcacoes_add_private_personal_btn"
+                )
             }
         }
 
@@ -503,6 +543,13 @@ fun PtMarcacoesSection(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier.padding(top = 4.dp)
                                 ) {
+                                    if (session.ptPrivatePersonal) {
+                                        StatusPill(
+                                            text = "Personalizado · Oculto",
+                                            textColor = NewShapeGoldBright,
+                                            containerColor = NewShapeGoldMuted
+                                        )
+                                    }
                                     if (pendingList.isNotEmpty()) {
                                         StatusPill(
                                             text = "${pendingList.size} por aceitar",
@@ -586,6 +633,31 @@ fun PtMarcacoesSection(
                                     }
                                 }
 
+                                if (session.ptPrivatePersonal) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Treino personalizado oculto dos alunos",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = NewShapeGoldBright
+                                        )
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.deleteSession(session.id)
+                                                selectedSessionId = null
+                                            },
+                                            modifier = Modifier.testTag("marcacoes_delete_private_${session.id}")
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Apagar treino", tint = DangerRed, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Apagar", color = DangerRed, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
                                 if (slotBookings.isEmpty()) {
                                     Text(
                                         text = "Nenhum aluno pediu este horário ainda.",
@@ -599,6 +671,8 @@ fun PtMarcacoesSection(
                                         if (client != null) {
                                             val isConfirmed = b.status == BookingStatus.CONFIRMED.name
                                             val isAltered = b.status == BookingStatus.ALTERED.name
+                                            val isPresent = b.attendanceStatus == "PRESENT"
+                                            val isAbsent = b.attendanceStatus == "ABSENT"
                                             val isPersonal = client.trainingType == "PERSONALIZADO"
 
                                             Surface(
@@ -691,6 +765,59 @@ fun PtMarcacoesSection(
                                                             }
                                                         }
                                                     } else {
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                        ) {
+                                                            Button(
+                                                                onClick = {
+                                                                    viewModel.setBookingAttendance(
+                                                                        b.id,
+                                                                        if (isPresent) "" else "PRESENT"
+                                                                    )
+                                                                },
+                                                                colors = ButtonDefaults.buttonColors(
+                                                                    containerColor = if (isPresent) ConfirmedGreen else CharcoalSurface,
+                                                                    contentColor = if (isPresent) ObsidianBg else TextPrimaryDark
+                                                                ),
+                                                                border = BorderStroke(
+                                                                    1.dp,
+                                                                    if (isPresent) ConfirmedGreen else HairlineBorder
+                                                                ),
+                                                                modifier = Modifier
+                                                                    .weight(1f)
+                                                                    .heightIn(min = 48.dp)
+                                                                    .testTag("marcacoes_present_${b.id}")
+                                                            ) {
+                                                                Icon(Icons.Default.Check, contentDescription = "Presença", modifier = Modifier.size(16.dp))
+                                                                Spacer(Modifier.width(4.dp))
+                                                                Text(if (isPresent) "Veio ✓" else "Presença", fontWeight = FontWeight.ExtraBold)
+                                                            }
+                                                            Button(
+                                                                onClick = {
+                                                                    viewModel.setBookingAttendance(
+                                                                        b.id,
+                                                                        if (isAbsent) "" else "ABSENT"
+                                                                    )
+                                                                },
+                                                                colors = ButtonDefaults.buttonColors(
+                                                                    containerColor = if (isAbsent) DangerRed else CharcoalSurface,
+                                                                    contentColor = if (isAbsent) TextPrimaryDark else TextSecondaryDark
+                                                                ),
+                                                                border = BorderStroke(
+                                                                    1.dp,
+                                                                    if (isAbsent) DangerRed else HairlineBorder
+                                                                ),
+                                                                modifier = Modifier
+                                                                    .weight(1f)
+                                                                    .heightIn(min = 48.dp)
+                                                                    .testTag("marcacoes_absent_${b.id}")
+                                                            ) {
+                                                                Icon(Icons.Default.Close, contentDescription = "Falta", modifier = Modifier.size(16.dp))
+                                                                Spacer(Modifier.width(4.dp))
+                                                                Text(if (isAbsent) "Faltou ✕" else "Falta", fontWeight = FontWeight.Bold)
+                                                            }
+                                                        }
                                                         Row(
                                                             modifier = Modifier.fillMaxWidth(),
                                                             horizontalArrangement = Arrangement.End
@@ -958,6 +1085,31 @@ fun PtMarcacoesSection(
                 TextButton(onClick = { showSendDialog = false }) {
                     Text("Fechar", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
                 }
+            }
+        )
+    }
+
+    if (showPrivateDialog) {
+        val initialDateMs = if (activeWeek != null && activeWeek.startDateMillis > 0L) {
+            activeWeek.startDateMillis + (selectedDay - 1) * 86_400_000L
+        } else {
+            System.currentTimeMillis()
+        }
+        PrivatePersonalSessionDialog(
+            clients = state.clients,
+            initialClientId = null,
+            initialDateMillis = initialDateMs,
+            onDismiss = { showPrivateDialog = false },
+            onConfirm = { clientId, clientName, dateMs, hour, minute, durationMinutes, note ->
+                viewModel.createPrivatePersonalTraining(
+                    clientId = clientId,
+                    clientName = clientName,
+                    dateMillis = dateMs,
+                    hour = hour,
+                    minute = minute,
+                    durationMinutes = durationMinutes,
+                    note = note
+                )
             }
         )
     }

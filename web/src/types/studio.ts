@@ -81,6 +81,7 @@ export interface TrainingSessionRecord {
   capacity: number;
   note: string;
   startMillis: number;
+  ptPrivatePersonal?: boolean;
 }
 
 export interface BookingRecord {

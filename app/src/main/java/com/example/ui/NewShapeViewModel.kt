@@ -579,6 +579,31 @@ class NewShapeViewModel(
         }
     }
 
+    fun createPrivatePersonalTraining(
+        clientId: String,
+        clientName: String,
+        dateMillis: Long,
+        hour: Int,
+        minute: Int,
+        durationMinutes: Int,
+        note: String
+    ) {
+        viewModelScope.launch {
+            repository.createPrivatePersonalSessionAndBooking(
+                clientId = clientId,
+                dateMillis = dateMillis,
+                hour = hour,
+                minute = minute,
+                durationMinutes = durationMinutes,
+                note = note
+            )
+                .onSuccess {
+                    _statusBanner.value = "Treino personalizado (oculto) marcado para $clientName ✓"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     fun duplicatePreviousWeek(targetWeek: TrainingWeekRecord) {
         val data = currentData ?: return
         viewModelScope.launch {

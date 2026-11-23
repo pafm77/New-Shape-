@@ -3,10 +3,14 @@ import {
   Calendar,
   Check,
   CheckCheck,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
   Dumbbell,
+  EyeOff,
+  Plus,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
@@ -24,7 +28,8 @@ import {
   MONTHS_PT,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
-import { BrandCard, EmptyState, StatusPill } from './UiPrimitives';
+import { BrandCard, EmptyState, GoldButton, StatusPill } from './UiPrimitives';
+import { PrivatePersonalSessionModal } from './PrivatePersonalSessionModal';
 
 interface PtTrainingAgendaViewProps {
   uid: string;
@@ -70,11 +75,68 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
 }) => {
   const [selectedDateMs, setSelectedDateMs] = useState<number>(() => startOfDay(new Date()).getTime());
   const [busyBookingId, setBusyBookingId] = useState<string | null>(null);
+  const [showPrivateModal, setShowPrivateModal] = useState(false);
+  const [counterMonthOffset, setCounterMonthOffset] = useState(0);
+  const [showClientBreakdown, setShowClientBreakdown] = useState(false);
 
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
+  const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
   const today = useMemo(() => startOfDay(new Date()), []);
   const selectedDate = useMemo(() => new Date(selectedDateMs), [selectedDateMs]);
   const isSelectedToday = isSameCalendarDay(selectedDate, today);
+
+  const counterMonthDate = useMemo(() => {
+    const base = new Date(today.getFullYear(), today.getMonth() + counterMonthOffset, 1);
+    return base;
+  }, [today, counterMonthOffset]);
+
+  const personalStats = useMemo(() => {
+    const targetYear = counterMonthDate.getFullYear();
+    const targetMonth = counterMonthDate.getMonth();
+    let given = 0;
+    let absent = 0;
+    let pending = 0;
+    const perClient = new Map<
+      string,
+      { clientId: string; name: string; given: number; absent: number; pending: number }
+    >();
+
+    bookings.forEach((b) => {
+      if (b.status !== 'CONFIRMED') return;
+      const ses = sessionMap.get(b.sessionId);
+      if (!ses || ses.startMillis <= 0) return;
+      const client = clientMap.get(b.clientId);
+      const isPersonal = Boolean(ses.ptPrivatePersonal) || client?.trainingType === 'PERSONALIZADO';
+      if (!isPersonal) return;
+
+      const dt = new Date(ses.startMillis);
+      if (dt.getFullYear() !== targetYear || dt.getMonth() !== targetMonth) return;
+
+      const entry = perClient.get(b.clientId) || {
+        clientId: b.clientId,
+        name: client?.name || 'Aluno removido',
+        given: 0,
+        absent: 0,
+        pending: 0,
+      };
+      if (b.attendanceStatus === 'PRESENT') {
+        given += 1;
+        entry.given += 1;
+      } else if (b.attendanceStatus === 'ABSENT') {
+        absent += 1;
+        entry.absent += 1;
+      } else {
+        pending += 1;
+        entry.pending += 1;
+      }
+      perClient.set(b.clientId, entry);
+    });
+
+    const byClient = Array.from(perClient.values()).sort(
+      (a, b) => b.given - a.given || b.pending - a.pending || a.name.localeCompare(b.name)
+    );
+    return { given, absent, pending, total: given + absent + pending, byClient };
+  }, [bookings, sessionMap, clientMap, counterMonthDate]);
 
   const shiftDay = (deltaDays: number) => {
     const next = new Date(selectedDateMs);
@@ -246,15 +308,108 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
           </div>
         </div>
 
-        {!isSelectedToday && (
-          <div className="mt-3 flex justify-center">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#323238] pt-3">
+          {!isSelectedToday ? (
             <button
               type="button"
               onClick={() => setSelectedDateMs(today.getTime())}
-              className="rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/50 px-3 py-1 text-xs font-bold text-[#FACC15] hover:bg-[#EAB308] hover:text-[#121214]"
+              className="rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/50 px-3 py-1.5 text-xs font-bold text-[#FACC15] hover:bg-[#EAB308] hover:text-[#121214]"
             >
               Voltar a Hoje ({formatDayDate(today)})
             </button>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs text-[#A1A1AA]">
+              <EyeOff className="h-3.5 w-3.5 text-[#FACC15]" />
+              Podes marcar treinos privados só para o PT
+            </span>
+          )}
+          <GoldButton onClick={() => setShowPrivateModal(true)}>
+            <Plus className="h-4 w-4" />
+            Personalizado (Oculto)
+          </GoldButton>
+        </div>
+      </BrandCard>
+
+      {/* Personal Training Monthly Counter Card */}
+      <BrandCard>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#FACC15]">
+              Treinos Personalizados Dados
+            </p>
+            <p className="text-xs text-[#A1A1AA]">
+              Contabiliza presenças confirmadas (✓) em treinos personalizados
+            </p>
+          </div>
+          <div className="flex items-center gap-1 rounded-xl border border-[#323238] bg-[#242429] p-1">
+            <button
+              type="button"
+              onClick={() => setCounterMonthOffset((prev) => prev - 1)}
+              aria-label="Mês anterior"
+              className="rounded-lg p-1.5 text-[#EAB308] hover:bg-[#1B1B1E]"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="min-w-[116px] text-center text-xs font-bold text-[#F4F4F5]">
+              {MONTHS_PT[counterMonthDate.getMonth()]} {counterMonthDate.getFullYear()}
+            </span>
+            <button
+              type="button"
+              onClick={() => setCounterMonthOffset((prev) => prev + 1)}
+              aria-label="Mês seguinte"
+              className="rounded-lg p-1.5 text-[#EAB308] hover:bg-[#1B1B1E]"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="rounded-xl border border-[#22C55E]/40 bg-[#143521]/30 px-3 py-2 text-center">
+            <p className="text-[10px] font-bold uppercase text-[#86EFAC]">Dados (✓)</p>
+            <p className="text-lg font-extrabold text-[#22C55E]">{personalStats.given}</p>
+          </div>
+          <div className="rounded-xl border border-[#EF4444]/35 bg-[#3B1518]/25 px-3 py-2 text-center">
+            <p className="text-[10px] font-bold uppercase text-[#FCA5A5]">Faltas (✕)</p>
+            <p className="text-lg font-extrabold text-[#EF4444]">{personalStats.absent}</p>
+          </div>
+          <div className="rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-center">
+            <p className="text-[10px] font-bold uppercase text-[#A1A1AA]">Por registar</p>
+            <p className="text-lg font-extrabold text-[#FACC15]">{personalStats.pending}</p>
+          </div>
+        </div>
+
+        {personalStats.byClient.length > 0 && (
+          <div className="mt-2.5 border-t border-[#323238] pt-2.5">
+            <button
+              type="button"
+              onClick={() => setShowClientBreakdown((prev) => !prev)}
+              className="flex w-full items-center justify-between text-xs font-bold text-[#FACC15] hover:underline"
+            >
+              <span>Detalhe por aluno ({personalStats.byClient.length})</span>
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${showClientBreakdown ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {showClientBreakdown && (
+              <div className="mt-2 space-y-1.5">
+                {personalStats.byClient.map((row) => (
+                  <div
+                    key={row.clientId}
+                    className="flex items-center justify-between rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-xs"
+                  >
+                    <span className="font-bold text-[#F4F4F5]">{row.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <StatusPill tone="green">{row.given} dado(s) ✓</StatusPill>
+                      {row.absent > 0 && <StatusPill tone="red">{row.absent} falta(s)</StatusPill>}
+                      {row.pending > 0 && (
+                        <StatusPill tone="amber">{row.pending} por registar</StatusPill>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </BrandCard>
@@ -307,6 +462,9 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
                     </div>
                     <div>
                       <div className="flex flex-wrap items-center gap-1.5">
+                        {session.ptPrivatePersonal && (
+                          <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
+                        )}
                         <StatusPill
                           tone={confirmedBookings.length >= session.capacity ? 'red' : 'gold'}
                         >
@@ -329,16 +487,32 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
                     </div>
                   </div>
 
-                  {confirmedBookings.length > 1 && !allPresent && (
-                    <button
-                      type="button"
-                      onClick={() => handleMarkAllPresent(confirmedBookings)}
-                      className="inline-flex items-center gap-1 rounded-xl border border-[#22C55E]/50 bg-[#143521]/50 px-2.5 py-1.5 text-xs font-bold text-[#86EFAC] hover:bg-[#22C55E] hover:text-[#121214]"
-                    >
-                      <CheckCheck className="h-3.5 w-3.5" />
-                      Todos vieram
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {confirmedBookings.length > 1 && !allPresent && (
+                      <button
+                        type="button"
+                        onClick={() => handleMarkAllPresent(confirmedBookings)}
+                        className="inline-flex items-center gap-1 rounded-xl border border-[#22C55E]/50 bg-[#143521]/50 px-2.5 py-1.5 text-xs font-bold text-[#86EFAC] hover:bg-[#22C55E] hover:text-[#121214]"
+                      >
+                        <CheckCheck className="h-3.5 w-3.5" />
+                        Todos vieram
+                      </button>
+                    )}
+                    {session.ptPrivatePersonal && (
+                      <button
+                        type="button"
+                        aria-label="Apagar treino personalizado oculto"
+                        onClick={async () => {
+                          await repo.deleteSession(uid, session.id, allActiveBookings);
+                          onBanner('Treino personalizado oculto removido.');
+                        }}
+                        className="inline-flex items-center gap-1 rounded-xl border border-[#EF4444]/40 bg-[#3B1518]/50 px-2.5 py-1.5 text-xs font-bold text-[#FCA5A5] hover:bg-[#EF4444] hover:text-white"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Apagar
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="my-3 border-t border-[#323238]" />
@@ -463,6 +637,19 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
           })}
         </div>
       )}
+      <PrivatePersonalSessionModal
+        open={showPrivateModal}
+        clients={clients}
+        initialDateMs={selectedDateMs}
+        onClose={() => setShowPrivateModal(false)}
+        onSubmit={async (payload) => {
+          await repo.createPrivatePersonalSessionAndBooking(uid, payload);
+          setSelectedDateMs(startOfDay(new Date(payload.dateMs)).getTime());
+          onBanner(
+            `Treino personalizado (oculto) marcado para ${payload.clientName} ✓`
+          );
+        }}
+      />
     </div>
   );
 };

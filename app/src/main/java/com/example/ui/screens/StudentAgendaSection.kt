@@ -147,7 +147,7 @@ internal fun StudentAgendaSection(
                 context = context,
                 clientId = student.id,
                 bookings = state.bookings,
-                sessions = state.sessions,
+                sessions = state.sessions.filter { !it.ptPrivatePersonal },
                 leadMinutes = leadMinutes
             )
         } else {
@@ -156,9 +156,16 @@ internal fun StudentAgendaSection(
         }
     }
 
-    val weekSessions = remember(state.sessions, currentWeek?.weekKey) {
+    val visibleSessions = remember(state.sessions) {
+        state.sessions.filter { !it.ptPrivatePersonal }
+    }
+    val visibleSessionIds = remember(visibleSessions) {
+        visibleSessions.map { it.id }.toSet()
+    }
+
+    val weekSessions = remember(visibleSessions, currentWeek?.weekKey) {
         if (currentWeek == null) emptyList()
-        else state.sessions
+        else visibleSessions
             .filter { it.weekKey == currentWeek.weekKey }
             .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
     }
@@ -188,10 +195,13 @@ internal fun StudentAgendaSection(
         weekSessions.filter { it.dayOfWeek == selectedDay }
     }
 
-    val existingBookings = remember(state.bookings, currentWeek?.weekKey, student.id) {
+    val existingBookings = remember(state.bookings, currentWeek?.weekKey, student.id, visibleSessionIds) {
         if (currentWeek == null) emptyList()
         else state.bookings.filter {
-            it.weekKey == currentWeek.weekKey && it.clientId == student.id && it.status != BookingStatus.CANCELLED.name
+            it.weekKey == currentWeek.weekKey &&
+                it.clientId == student.id &&
+                it.status != BookingStatus.CANCELLED.name &&
+                it.sessionId in visibleSessionIds
         }
     }
     val existingIds = remember(existingBookings) { existingBookings.map { it.sessionId }.toSet() }
@@ -208,7 +218,7 @@ internal fun StudentAgendaSection(
     val weeklyLimit = student.weeklySessionLimit.coerceAtLeast(0)
 
     // Data for "Marcações" sub-tab across all weeks
-    val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
+    val sessionMap = remember(visibleSessions) { visibleSessions.associateBy { it.id } }
     val weekMap = remember(state.weeks) { state.weeks.associateBy { it.weekKey } }
 
     val myConfirmedAll = remember(state.bookings, sessionMap, student.id) {

@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  EyeOff,
   MessageCircle,
   Plus,
   Search,
@@ -17,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  AttendanceStatus,
   BookingRecord,
   ClientRecord,
   MessageTemplateRecord,
@@ -41,6 +43,7 @@ import {
   StatusPill,
   Textarea,
 } from './UiPrimitives';
+import { PrivatePersonalSessionModal } from './PrivatePersonalSessionModal';
 
 interface PtTrainingMarcacoesViewProps {
   uid: string;
@@ -111,7 +114,9 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
   const [clientQuery, setClientQuery] = useState('');
   const [bookingStatusFilter, setBookingStatusFilter] = useState<'ALL' | 'BOOKED' | 'UNBOOKED'>('ALL');
   const [askMessageOnAction, setAskMessageOnAction] = useState(true);
+  const [showPrivateModal, setShowPrivateModal] = useState(false);
 
+  const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
   const weekMap = useMemo(() => new Map(weeks.map((w) => [w.weekKey, w])), [weeks]);
 
@@ -207,6 +212,66 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
     () => studentWeekBookings.filter((x) => x.booking.status === 'CONFIRMED').length,
     [studentWeekBookings]
   );
+
+  const confirmedPublicCountInWeek = useMemo(
+    () =>
+      studentWeekBookings.filter(
+        (x) => x.booking.status === 'CONFIRMED' && !x.session.ptPrivatePersonal
+      ).length,
+    [studentWeekBookings]
+  );
+
+  // Current month count of Personal Training sessions given (Studio total + selected client)
+  const monthlyPersonalSummary = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    let studioGiven = 0;
+    let clientGiven = 0;
+    let clientAbsent = 0;
+    bookings.forEach((b) => {
+      if (b.status !== 'CONFIRMED') return;
+      const ses = sessionMap.get(b.sessionId);
+      if (!ses || ses.startMillis <= 0) return;
+      const dt = new Date(ses.startMillis);
+      if (dt.getFullYear() !== y || dt.getMonth() !== m) return;
+      const c = clientMap.get(b.clientId);
+      const isPersonal = Boolean(ses.ptPrivatePersonal) || c?.trainingType === 'PERSONALIZADO';
+      if (!isPersonal) return;
+      if (b.attendanceStatus === 'PRESENT') {
+        studioGiven += 1;
+        if (effectiveClient && b.clientId === effectiveClient.id) clientGiven += 1;
+      } else if (b.attendanceStatus === 'ABSENT') {
+        if (effectiveClient && b.clientId === effectiveClient.id) clientAbsent += 1;
+      }
+    });
+    return {
+      monthLabel: MONTHS_PT[m],
+      studioGiven,
+      clientGiven,
+      clientAbsent,
+    };
+  }, [bookings, sessionMap, clientMap, effectiveClient]);
+
+  const handleSetAttendance = async (
+    bookingId: string,
+    nextStatus: AttendanceStatus,
+    clientName: string
+  ) => {
+    setBusyKey(bookingId);
+    try {
+      await repo.setBookingAttendance(uid, bookingId, nextStatus);
+      onBanner(
+        nextStatus === 'PRESENT'
+          ? `Presença de ${clientName} confirmada ✓`
+          : nextStatus === 'ABSENT'
+          ? `Falta de ${clientName} registada.`
+          : `Registo de presença de ${clientName} limpo.`
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   // Per-day metadata for the 7-day strip
   const dayStats = useMemo(() => {
@@ -569,9 +634,32 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                     } marcado${confirmedCountInWeek > 1 ? 's' : ''}`
                   : 'Sem treinos marcados'}
               </StatusPill>
+              {(monthlyPersonalSummary.clientGiven > 0 ||
+                effectiveClient.trainingType === 'PERSONALIZADO') && (
+                <StatusPill tone="gold">
+                  Personalizados ({monthlyPersonalSummary.monthLabel}):{' '}
+                  {monthlyPersonalSummary.clientGiven}✓
+                  {monthlyPersonalSummary.clientAbsent > 0
+                    ? ` · ${monthlyPersonalSummary.clientAbsent}✕`
+                    : ''}
+                </StatusPill>
+              )}
             </div>
           </div>
         )}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#323238] pt-3">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-[#A1A1AA]">
+            <StatusPill tone="gold">
+              Personalizados dados ({monthlyPersonalSummary.monthLabel}):{' '}
+              {monthlyPersonalSummary.studioGiven}
+            </StatusPill>
+          </div>
+          <GoldButton onClick={() => setShowPrivateModal(true)}>
+            <EyeOff className="h-4 w-4" />
+            + Personalizado (Oculto)
+          </GoldButton>
+        </div>
       </BrandCard>
 
       {/* Week Navigation + Current Bookings of this Student */}
@@ -640,12 +728,14 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                 Horários de {effectiveClient.name.split(' ')[0]} nesta semana (
                 {studentWeekBookings.length})
               </p>
-              {confirmedCountInWeek > 0 && (
+              {confirmedPublicCountInWeek > 0 && (
                 <button
                   type="button"
                   onClick={() => {
                     const confirmedSessions = studentWeekBookings
-                      .filter((x) => x.booking.status === 'CONFIRMED')
+                      .filter(
+                        (x) => x.booking.status === 'CONFIRMED' && !x.session.ptPrivatePersonal
+                      )
                       .map((x) => x.session);
                     const msg = buildConfirmMessage(effectiveClient, confirmedSessions, activeWeek);
                     setMessageModal({
@@ -658,7 +748,7 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#EAB308] px-2.5 py-1.5 text-xs font-bold text-[#121214] hover:bg-[#FACC15]"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  Enviar mensagem ({confirmedCountInWeek})
+                  Enviar mensagem ({confirmedPublicCountInWeek})
                 </button>
               )}
             </div>
@@ -673,68 +763,136 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                   const isSwappingThis = swappingTarget?.booking.id === booking.id;
                   const endTime = computeEndTime(session.timeLabel, session.durationMinutes);
                   const isConfirmed = booking.status === 'CONFIRMED';
+                  const isPresent = booking.attendanceStatus === 'PRESENT';
+                  const isAbsent = booking.attendanceStatus === 'ABSENT';
                   return (
                     <div
                       key={booking.id}
-                      className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border p-2.5 transition ${
+                      className={`rounded-xl border p-2.5 transition space-y-2 ${
                         isSwappingThis
                           ? 'border-[#EAB308] bg-[#3D3314]/50'
+                          : isPresent
+                          ? 'border-[#22C55E]/55 bg-[#143524]/35'
+                          : isAbsent
+                          ? 'border-[#EF4444]/55 bg-[#3B1518]/30'
                           : isConfirmed
                           ? 'border-[#22C55E]/40 bg-[#143524]/25'
                           : 'border-[#F59E0B]/40 bg-[#3F2A10]/30'
                       }`}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-sm font-bold text-[#F4F4F5]">
-                            {session.dateLabel}
-                          </span>
-                          <StatusPill tone={isConfirmed ? 'green' : 'amber'}>
-                            {isConfirmed ? 'Confirmado ✓' : 'Por confirmar'}
-                          </StatusPill>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-sm font-bold text-[#F4F4F5]">
+                              {session.dateLabel}
+                            </span>
+                            {session.ptPrivatePersonal && (
+                              <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
+                            )}
+                            <StatusPill tone={isConfirmed ? 'green' : 'amber'}>
+                              {isConfirmed ? 'Confirmado ✓' : 'Por confirmar'}
+                            </StatusPill>
+                          </div>
+                          <p className="mt-0.5 text-xs font-semibold text-[#FACC15]">
+                            {session.timeLabel}
+                            {endTime ? ` – ${endTime}` : ''} · {session.durationMinutes} min
+                          </p>
                         </div>
-                        <p className="mt-0.5 text-xs font-semibold text-[#FACC15]">
-                          {session.timeLabel}
-                          {endTime ? ` – ${endTime}` : ''} · {session.durationMinutes} min
-                        </p>
-                      </div>
 
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {!isConfirmed && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {!isConfirmed && (
+                            <button
+                              type="button"
+                              disabled={busyKey === booking.id}
+                              onClick={() => handleConfirmPendingBooking(booking, session)}
+                              className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-[#22C55E] px-2.5 py-1 text-xs font-bold text-[#0B1F14] hover:brightness-110 disabled:opacity-50"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              Confirmar
+                            </button>
+                          )}
+                          {!session.ptPrivatePersonal && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSwappingTarget(isSwappingThis ? null : { booking, session })
+                              }
+                              className={`inline-flex min-h-[36px] items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                                isSwappingThis
+                                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                                  : 'border-[#EAB308]/60 bg-[#1B1B1E] text-[#FACC15] hover:bg-[#3D3314]'
+                              }`}
+                            >
+                              <ArrowLeftRight className="h-3.5 w-3.5" />
+                              {isSwappingThis ? 'A trocar...' : 'Trocar horário'}
+                            </button>
+                          )}
                           <button
                             type="button"
                             disabled={busyKey === booking.id}
-                            onClick={() => handleConfirmPendingBooking(booking, session)}
-                            className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-[#22C55E] px-2.5 py-1 text-xs font-bold text-[#0B1F14] hover:brightness-110 disabled:opacity-50"
+                            onClick={async () => {
+                              if (session.ptPrivatePersonal) {
+                                setBusyKey(booking.id);
+                                try {
+                                  await repo.deleteSession(uid, session.id, [booking]);
+                                  onBanner('Treino personalizado oculto removido.');
+                                } finally {
+                                  setBusyKey(null);
+                                }
+                              } else {
+                                await handleRemoveBooking(booking, session);
+                              }
+                            }}
+                            aria-label="Desmarcar treino"
+                            className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-[#EF4444]/40 bg-[#3B1518]/60 px-2.5 py-1 text-xs font-bold text-[#EF4444] hover:bg-[#3B1518] disabled:opacity-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {isConfirmed && (
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#323238]/60">
+                          <button
+                            type="button"
+                            disabled={busyKey === booking.id}
+                            onClick={() =>
+                              handleSetAttendance(
+                                booking.id,
+                                isPresent ? '' : 'PRESENT',
+                                effectiveClient.name
+                              )
+                            }
+                            className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl border text-xs font-extrabold transition disabled:opacity-40 ${
+                              isPresent
+                                ? 'border-[#22C55E] bg-[#22C55E] text-[#121214]'
+                                : 'border-[#323238] bg-[#1B1B1E] text-[#D4D4D8] hover:border-[#22C55E] hover:text-[#86EFAC]'
+                            }`}
                           >
                             <Check className="h-3.5 w-3.5" />
-                            Confirmar
+                            {isPresent ? 'Veio ✓' : 'Presença'}
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSwappingTarget(isSwappingThis ? null : { booking, session })
-                          }
-                          className={`inline-flex min-h-[36px] items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
-                            isSwappingThis
-                              ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
-                              : 'border-[#EAB308]/60 bg-[#1B1B1E] text-[#FACC15] hover:bg-[#3D3314]'
-                          }`}
-                        >
-                          <ArrowLeftRight className="h-3.5 w-3.5" />
-                          {isSwappingThis ? 'A trocar...' : 'Trocar horário'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyKey === booking.id}
-                          onClick={() => handleRemoveBooking(booking, session)}
-                          aria-label="Desmarcar treino"
-                          className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-[#EF4444]/40 bg-[#3B1518]/60 px-2.5 py-1 text-xs font-bold text-[#EF4444] hover:bg-[#3B1518] disabled:opacity-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                          <button
+                            type="button"
+                            disabled={busyKey === booking.id}
+                            onClick={() =>
+                              handleSetAttendance(
+                                booking.id,
+                                isAbsent ? '' : 'ABSENT',
+                                effectiveClient.name
+                              )
+                            }
+                            className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl border text-xs font-extrabold transition disabled:opacity-40 ${
+                              isAbsent
+                                ? 'border-[#EF4444] bg-[#EF4444] text-white'
+                                : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#EF4444] hover:text-[#FCA5A5]'
+                            }`}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            {isAbsent ? 'Faltou ✕' : 'Falta'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -868,6 +1026,9 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
+                            {session.ptPrivatePersonal && (
+                              <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
+                            )}
                             <span className="inline-flex items-center gap-1 text-xs font-bold text-[#F4F4F5]">
                               <Clock className="h-3.5 w-3.5 text-[#A1A1AA]" />
                               {session.durationMinutes} min
@@ -1048,6 +1209,23 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
           </div>
         </Modal>
       )}
+      <PrivatePersonalSessionModal
+        open={showPrivateModal}
+        clients={clients}
+        initialClientId={effectiveClient?.id}
+        initialDateMs={
+          activeWeek?.startDateMillis
+            ? activeWeek.startDateMillis + (selectedDay - 1) * 86_400_000
+            : Date.now()
+        }
+        onClose={() => setShowPrivateModal(false)}
+        onSubmit={async (payload) => {
+          await repo.createPrivatePersonalSessionAndBooking(uid, payload);
+          onBanner(
+            `Treino personalizado (oculto) marcado para ${payload.clientName} ✓`
+          );
+        }}
+      />
     </div>
   );
 };

@@ -31,6 +31,18 @@ import com.example.ui.theme.*
 import java.util.Calendar
 
 private val AGENDA_DAYS_SHORT = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+private val AGENDA_MONTHS_PT = arrayOf(
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+)
+
+private data class PersonalClientRow(
+    val clientId: String,
+    val name: String,
+    val given: Int,
+    val absent: Int,
+    val pending: Int
+)
 
 private fun startOfDayMillis(ts: Long = System.currentTimeMillis()): Long {
     val c = Calendar.getInstance().apply {
@@ -78,11 +90,71 @@ fun PtTrainingAgendaSection(
 ) {
     val todayMillis = remember { startOfDayMillis() }
     var selectedDateMillis by remember { mutableLongStateOf(todayMillis) }
+    var showPrivateDialog by remember { mutableStateOf(false) }
+    var counterMonthOffset by remember { mutableIntStateOf(0) }
+    var showClientBreakdown by remember { mutableStateOf(false) }
 
     val todayCal = remember(todayMillis) { Calendar.getInstance().apply { timeInMillis = todayMillis } }
     val selectedCal = remember(selectedDateMillis) { Calendar.getInstance().apply { timeInMillis = selectedDateMillis } }
     val isSelectedToday = isSameDay(selectedCal, todayCal)
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
+    val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
+
+    val counterMonthCal = remember(todayMillis, counterMonthOffset) {
+        (todayCal.clone() as Calendar).apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            add(Calendar.MONTH, counterMonthOffset)
+        }
+    }
+
+    val personalMonthlyStats = remember(state.bookings, sessionMap, clientMap, counterMonthCal.timeInMillis) {
+        val targetYear = counterMonthCal.get(Calendar.YEAR)
+        val targetMonth = counterMonthCal.get(Calendar.MONTH)
+        var given = 0
+        var absent = 0
+        var pending = 0
+        val perClient = mutableMapOf<String, PersonalClientRow>()
+        val sCal = Calendar.getInstance()
+
+        state.bookings.forEach { b ->
+            if (b.status != BookingStatus.CONFIRMED.name) return@forEach
+            val ses = sessionMap[b.sessionId] ?: return@forEach
+            if (ses.startMillis <= 0L) return@forEach
+            val client = clientMap[b.clientId]
+            val isPersonal = ses.ptPrivatePersonal || client?.trainingType == "PERSONALIZADO"
+            if (!isPersonal) return@forEach
+            sCal.timeInMillis = ses.startMillis
+            if (sCal.get(Calendar.YEAR) != targetYear || sCal.get(Calendar.MONTH) != targetMonth) return@forEach
+
+            val prev = perClient[b.clientId] ?: PersonalClientRow(
+                clientId = b.clientId,
+                name = client?.name ?: "Aluno removido",
+                given = 0,
+                absent = 0,
+                pending = 0
+            )
+            when (b.attendanceStatus) {
+                "PRESENT" -> {
+                    given += 1
+                    perClient[b.clientId] = prev.copy(given = prev.given + 1)
+                }
+                "ABSENT" -> {
+                    absent += 1
+                    perClient[b.clientId] = prev.copy(absent = prev.absent + 1)
+                }
+                else -> {
+                    pending += 1
+                    perClient[b.clientId] = prev.copy(pending = prev.pending + 1)
+                }
+            }
+        }
+        val rows = perClient.values.sortedWith(
+            compareByDescending<PersonalClientRow> { it.given }
+                .thenByDescending { it.pending }
+                .thenBy { it.name.lowercase() }
+        )
+        Triple(Triple(given, absent, pending), rows, "${AGENDA_MONTHS_PT[targetMonth]} $targetYear")
+    }
 
     fun shiftDay(delta: Int) {
         val next = (selectedCal.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, delta) }
@@ -255,19 +327,154 @@ fun PtTrainingAgendaSection(
                     )
                 }
 
-                if (!isSelectedToday) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!isSelectedToday) {
                         TextButton(
                             onClick = { selectedDateMillis = todayMillis },
                             modifier = Modifier.testTag("training_agenda_today_btn")
                         ) {
                             Icon(Icons.Default.Today, contentDescription = "Ir para hoje", tint = NewShapeGold, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Voltar a Hoje", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                            Text("Hoje", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    GoldPrimaryButton(
+                        text = "+ Personalizado (Oculto)",
+                        icon = Icons.Default.VisibilityOff,
+                        onClick = { showPrivateDialog = true },
+                        modifier = Modifier.weight(1f),
+                        testTag = "training_agenda_add_private_personal_btn"
+                    )
+                }
+            }
+        }
+
+        // Personal Training Monthly Counter Card
+        item {
+            val (counts, clientRows, monthTitle) = personalMonthlyStats
+            BrandCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "TREINOS PERSONALIZADOS DADOS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NewShapeGoldBright,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "Presenças confirmadas (✓) em treinos personalizados",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(
+                        onClick = { counterMonthOffset -= 1 },
+                        modifier = Modifier.testTag("personal_counter_prev_month_btn")
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = "Mês anterior",
+                            tint = NewShapeGold
+                        )
+                    }
+                    Text(
+                        text = monthTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextPrimaryDark
+                    )
+                    IconButton(
+                        onClick = { counterMonthOffset += 1 },
+                        modifier = Modifier.testTag("personal_counter_next_month_btn")
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Mês seguinte",
+                            tint = NewShapeGold
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AgendaKpiBox("Dados ✓", counts.first.toString(), ConfirmedGreen, Modifier.weight(1f))
+                    AgendaKpiBox("Faltas ✕", counts.second.toString(), DangerRed, Modifier.weight(1f))
+                    AgendaKpiBox("Por registar", counts.third.toString(), NewShapeGoldBright, Modifier.weight(1f))
+                }
+
+                if (clientRows.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider(color = HairlineBorder)
+                    TextButton(
+                        onClick = { showClientBreakdown = !showClientBreakdown },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("personal_counter_toggle_breakdown_btn")
+                    ) {
+                        Text(
+                            text = if (showClientBreakdown) "Ocultar detalhe por aluno (${clientRows.size})"
+                            else "Ver detalhe por aluno (${clientRows.size})",
+                            color = NewShapeGoldBright,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    if (showClientBreakdown) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            clientRows.forEach { row ->
+                                Surface(
+                                    color = ElevatedCharcoal,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, HairlineBorder),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = row.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimaryDark,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            StatusPill("${row.given}✓", ConfirmedGreen, ConfirmedGreenContainer)
+                                            if (row.absent > 0) {
+                                                StatusPill("${row.absent}✕", DangerRed, DangerRedContainer)
+                                            }
+                                            if (row.pending > 0) {
+                                                StatusPill("${row.pending}?", PendingAmber, PendingAmberContainer)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -336,6 +543,13 @@ fun PtTrainingAgendaSection(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    if (session.ptPrivatePersonal) {
+                                        StatusPill(
+                                            text = "Oculto",
+                                            textColor = NewShapeGoldBright,
+                                            containerColor = NewShapeGoldMuted
+                                        )
+                                    }
                                     StatusPill(
                                         text = "${confirmed.size}/${session.capacity}",
                                         textColor = if (confirmed.size >= session.capacity) DangerRed else NewShapeGoldBright,
@@ -360,16 +574,30 @@ fun PtTrainingAgendaSection(
                             }
                         }
 
-                        if (confirmed.size > 1 && !allPresent) {
-                            TextButton(
-                                onClick = {
-                                    confirmed
-                                        .filter { it.attendanceStatus != "PRESENT" }
-                                        .forEach { viewModel.setBookingAttendance(it.id, "PRESENT") }
-                                },
-                                modifier = Modifier.testTag("agenda_all_present_${session.id}")
-                            ) {
-                                Text("Todos ✓", color = ConfirmedGreen, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (confirmed.size > 1 && !allPresent) {
+                                TextButton(
+                                    onClick = {
+                                        confirmed
+                                            .filter { it.attendanceStatus != "PRESENT" }
+                                            .forEach { viewModel.setBookingAttendance(it.id, "PRESENT") }
+                                    },
+                                    modifier = Modifier.testTag("agenda_all_present_${session.id}")
+                                ) {
+                                    Text("Todos ✓", color = ConfirmedGreen, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (session.ptPrivatePersonal) {
+                                IconButton(
+                                    onClick = { viewModel.deleteSession(session.id) },
+                                    modifier = Modifier.testTag("agenda_delete_private_${session.id}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Apagar treino personalizado oculto",
+                                        tint = DangerRed
+                                    )
+                                }
                             }
                         }
                     }
@@ -541,6 +769,27 @@ fun PtTrainingAgendaSection(
                 }
             }
         }
+    }
+
+    if (showPrivateDialog) {
+        PrivatePersonalSessionDialog(
+            clients = state.clients,
+            initialClientId = null,
+            initialDateMillis = selectedDateMillis,
+            onDismiss = { showPrivateDialog = false },
+            onConfirm = { clientId, clientName, dateMs, hour, minute, durationMinutes, note ->
+                viewModel.createPrivatePersonalTraining(
+                    clientId = clientId,
+                    clientName = clientName,
+                    dateMillis = dateMs,
+                    hour = hour,
+                    minute = minute,
+                    durationMinutes = durationMinutes,
+                    note = note
+                )
+                selectedDateMillis = startOfDayMillis(dateMs)
+            }
+        )
     }
 }
 

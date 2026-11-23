@@ -1221,7 +1221,7 @@ class FirestoreStudioRepository(
         val uid = requireUserId()
         val batch = db.batch()
         val created = mutableListOf<TrainingSessionRecord>()
-        prevSessions.forEach { prev ->
+        prevSessions.filter { !it.ptPrivatePersonal }.forEach { prev ->
             val parts = prev.timeLabel.split(":")
             val h = parts.getOrNull(0)?.toIntOrNull() ?: 18
             val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
@@ -1250,6 +1250,88 @@ class FirestoreStudioRepository(
         }
         if (created.isNotEmpty()) batch.commit().await()
         Result.success(created)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/sessions")
+        Result.failure(e)
+    }
+
+    suspend fun createPrivatePersonalSessionAndBooking(
+        clientId: String,
+        dateMillis: Long,
+        hour: Int,
+        minute: Int,
+        durationMinutes: Int,
+        note: String
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        val targetCal = Calendar.getInstance().apply {
+            timeInMillis = dateMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val dow = targetCal.get(Calendar.DAY_OF_WEEK)
+        val isoDay = if (dow == Calendar.SUNDAY) 7 else dow - 1
+        val mondayCal = (targetCal.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_YEAR, -(isoDay - 1))
+        }
+        val week = ensureWeekExists(mondayCal.timeInMillis).getOrThrow()
+        val safeHour = hour.coerceIn(0, 23)
+        val safeMinute = minute.coerceIn(0, 59)
+        val safeDuration = durationMinutes.coerceIn(15, 240)
+        val cleanNote = note.trim().take(200).ifBlank { "Treino Personalizado (Privado PT)" }
+
+        val s = SeedCatalog.createSession(
+            userId = uid,
+            weekKey = week.weekKey,
+            mondayMillis = week.startDateMillis,
+            dayOfWeek = isoDay,
+            hour = safeHour,
+            minute = safeMinute,
+            durationMinutes = safeDuration,
+            capacity = 1,
+            note = cleanNote
+        )
+
+        val sessionRef = userDoc(uid).collection("sessions").document()
+        val bookingRef = userDoc(uid).collection("bookings").document()
+        val batch = db.batch()
+        batch.set(
+            sessionRef,
+            mapOf(
+                "userId" to uid,
+                "weekKey" to s.weekKey,
+                "dayOfWeek" to s.dayOfWeek,
+                "dateLabel" to s.dateLabel,
+                "timeLabel" to s.timeLabel,
+                "durationMinutes" to s.durationMinutes,
+                "capacity" to 1,
+                "note" to s.note,
+                "startMillis" to s.startMillis,
+                "ptPrivatePersonal" to true,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        batch.set(
+            bookingRef,
+            mapOf(
+                "userId" to uid,
+                "sessionId" to sessionRef.id,
+                "weekKey" to week.weekKey,
+                "clientId" to clientId,
+                "status" to BookingStatus.CONFIRMED.name,
+                "attendanceStatus" to "",
+                "requestedAtMillis" to System.currentTimeMillis(),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        batch.commit().await()
+        Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

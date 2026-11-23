@@ -154,7 +154,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
   const weekSessions = useMemo(() => {
     if (!activeWeek) return [];
     return sessions
-      .filter((s) => s.weekKey === activeWeek.weekKey)
+      .filter((s) => s.weekKey === activeWeek.weekKey && !s.ptPrivatePersonal)
       .sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
   }, [sessions, activeWeek]);
 
@@ -189,7 +189,10 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
   );
 
   // All confirmed & pending bookings across ALL weeks for the "Marcações" sub-tab
-  const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
+  const sessionMap = useMemo(
+    () => new Map(sessions.filter((s) => !s.ptPrivatePersonal).map((s) => [s.id, s])),
+    [sessions]
+  );
   const weekMap = useMemo(() => new Map(publishedWeeks.map((w) => [w.weekKey, w])), [publishedWeeks]);
 
   const myConfirmedItems = useMemo(() => {

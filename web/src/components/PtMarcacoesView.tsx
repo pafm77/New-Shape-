@@ -8,11 +8,14 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  EyeOff,
   Send,
+  Trash2,
   Users,
   X,
 } from 'lucide-react';
 import {
+  AttendanceStatus,
   BookingRecord,
   ClientRecord,
   MessageTemplateRecord,
@@ -37,6 +40,7 @@ import {
   SecondaryButton,
   StatusPill,
 } from './UiPrimitives';
+import { PrivatePersonalSessionModal } from './PrivatePersonalSessionModal';
 
 interface PtMarcacoesViewProps {
   uid: string;
@@ -151,6 +155,27 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
   const [includeAllConfirmed, setIncludeAllConfirmed] = useState(false);
   const [expandedPreviewClientId, setExpandedPreviewClientId] = useState<string | null>(null);
   const [busyBookingId, setBusyBookingId] = useState<string | null>(null);
+  const [showPrivateModal, setShowPrivateModal] = useState(false);
+
+  const allSessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
+  const monthlyPersonalGiven = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    let given = 0;
+    bookings.forEach((b) => {
+      if (b.status !== 'CONFIRMED' || b.attendanceStatus !== 'PRESENT') return;
+      const ses = allSessionMap.get(b.sessionId);
+      if (!ses || ses.startMillis <= 0) return;
+      const dt = new Date(ses.startMillis);
+      if (dt.getFullYear() !== y || dt.getMonth() !== m) return;
+      const c = clientMap.get(b.clientId);
+      if (ses.ptPrivatePersonal || c?.trainingType === 'PERSONALIZADO') {
+        given += 1;
+      }
+    });
+    return { monthLabel: MONTHS_PT[m], given };
+  }, [bookings, allSessionMap, clientMap]);
 
   // Reset selected day & slot when switching week
   useEffect(() => {
@@ -188,7 +213,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
       .filter((b) => b.status === 'CONFIRMED')
       .forEach((b) => {
         const ses = sessionMap.get(b.sessionId);
-        if (!ses) return;
+        if (!ses || ses.ptPrivatePersonal) return;
         const arr = byClient.get(b.clientId) || [];
         if (!arr.some((x) => x.id === ses.id)) arr.push(ses);
         byClient.set(b.clientId, arr);
@@ -305,6 +330,26 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
     onBanner(`${pendingList.length} marcação(ões) aceite(s) ✓`);
   };
 
+  const handleSetAttendance = async (
+    bookingId: string,
+    nextStatus: AttendanceStatus,
+    clientName: string
+  ) => {
+    setBusyBookingId(bookingId);
+    try {
+      await repo.setBookingAttendance(uid, bookingId, nextStatus);
+      onBanner(
+        nextStatus === 'PRESENT'
+          ? `Presença de ${clientName} confirmada ✓`
+          : nextStatus === 'ABSENT'
+          ? `Falta de ${clientName} registada.`
+          : `Registo de presença de ${clientName} limpo.`
+      );
+    } finally {
+      setBusyBookingId(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Week Header */}
@@ -343,27 +388,40 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                 ? `${totalWeekPending} pedido(s) por aceitar`
                 : 'Tudo aceite esta semana'}
             </StatusPill>
+            <StatusPill tone="gold">
+              Personalizados dados ({monthlyPersonalGiven.monthLabel}): {monthlyPersonalGiven.given}
+            </StatusPill>
             {unsentQueuedGroups.length > 0 && (
               <StatusPill tone="gold">
                 {unsentQueuedGroups.length} confirmação(ões) por enviar
               </StatusPill>
             )}
           </div>
-          {confirmedClientGroups.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => {
-                setIncludeAllConfirmed(queuedClientIds.length === 0);
-                setShowSendModal(true);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-[#EAB308]/60 bg-[#3D3314] px-3 py-1.5 text-xs font-bold text-[#FACC15] transition hover:bg-[#EAB308] hover:text-[#121214]"
+              onClick={() => setShowPrivateModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#EAB308] px-3 py-1.5 text-xs font-extrabold text-[#121214] transition hover:bg-[#FACC15]"
             >
-              <Send className="h-3.5 w-3.5" />
-              {unsentQueuedGroups.length > 0
-                ? `Enviar confirmações (${unsentQueuedGroups.length})`
-                : `Enviar mensagens (${confirmedClientGroups.length})`}
+              <EyeOff className="h-3.5 w-3.5" />
+              + Personalizado (Oculto)
             </button>
-          )}
+            {confirmedClientGroups.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIncludeAllConfirmed(queuedClientIds.length === 0);
+                  setShowSendModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#EAB308]/60 bg-[#3D3314] px-3 py-1.5 text-xs font-bold text-[#FACC15] transition hover:bg-[#EAB308] hover:text-[#121214]"
+              >
+                <Send className="h-3.5 w-3.5" />
+                {unsentQueuedGroups.length > 0
+                  ? `Enviar confirmações (${unsentQueuedGroups.length})`
+                  : `Enviar mensagens (${confirmedClientGroups.length})`}
+              </button>
+            )}
+          </div>
         </div>
       </BrandCard>
 
@@ -508,6 +566,9 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                             ? 'Sem pedidos'
                             : `${sessionBookings.length} pessoa(s) neste horário`}
                         </span>
+                        {session.ptPrivatePersonal && (
+                          <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
+                        )}
                         {pendingBookings.length > 0 && (
                           <StatusPill tone="amber">
                             {pendingBookings.length} por aceitar
@@ -555,6 +616,27 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                       </div>
                     )}
 
+                    {session.ptPrivatePersonal && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#EAB308]/40 bg-[#3D3314]/35 px-3 py-2">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#FACC15]">
+                          <EyeOff className="h-3.5 w-3.5" />
+                          Treino personalizado oculto dos alunos
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await repo.deleteSession(uid, session.id, sessionBookings);
+                            setSelectedSessionId(null);
+                            onBanner('Treino personalizado oculto removido.');
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-[#EF4444]/40 bg-[#3B1518]/60 px-2.5 py-1 text-xs font-bold text-[#FCA5A5] hover:bg-[#EF4444] hover:text-white"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Apagar treino
+                        </button>
+                      </div>
+                    )}
+
                     {sessionBookings.length === 0 ? (
                       <p className="py-2 text-center text-xs text-[#A1A1AA]">
                         Nenhum aluno pediu este horário ainda.
@@ -566,83 +648,134 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                           if (!client) return null;
                           const isConfirmed = b.status === 'CONFIRMED';
                           const isAltered = b.status === 'ALTERED';
+                          const isPresent = b.attendanceStatus === 'PRESENT';
+                          const isAbsent = b.attendanceStatus === 'ABSENT';
                           const isBusy = busyBookingId === b.id;
 
                           return (
                             <div
                               key={b.id}
-                              className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${
-                                isConfirmed
+                              className={`rounded-xl border p-3 space-y-2 ${
+                                isPresent
+                                  ? 'border-[#22C55E]/55 bg-[#143521]/35'
+                                  : isAbsent
+                                  ? 'border-[#EF4444]/55 bg-[#3B1518]/30'
+                                  : isConfirmed
                                   ? 'border-[#22C55E]/35 bg-[#143521]/25'
                                   : 'border-[#323238] bg-[#242429]'
                               }`}
                             >
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <span className="text-sm font-bold text-[#F4F4F5]">
-                                    {client.name}
-                                  </span>
-                                  <StatusPill
-                                    tone={
-                                      client.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'
-                                    }
-                                  >
-                                    {client.trainingType === 'PERSONALIZADO'
-                                      ? 'Personalizado'
-                                      : 'Grupo'}
-                                  </StatusPill>
-                                  {isConfirmed ? (
-                                    <StatusPill tone="green">Aceite ✓</StatusPill>
-                                  ) : isAltered ? (
-                                    <StatusPill tone="amber">Alterado</StatusPill>
-                                  ) : (
-                                    <StatusPill tone="amber">Pendente</StatusPill>
-                                  )}
-                                </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#A1A1AA]">
-                                  <span>{formatPhoneDisplay(client.phone)}</span>
-                                  {b.requestedAtMillis > 0 && (
-                                    <span className="inline-flex items-center gap-1">
-                                      <Clock className="h-3 w-3" />
-                                      {formatTimeAgo(b.requestedAtMillis)}
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="text-sm font-bold text-[#F4F4F5]">
+                                      {client.name}
                                     </span>
-                                  )}
+                                    <StatusPill
+                                      tone={
+                                        client.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'
+                                      }
+                                    >
+                                      {client.trainingType === 'PERSONALIZADO'
+                                        ? 'Personalizado'
+                                        : 'Grupo'}
+                                    </StatusPill>
+                                    {isConfirmed ? (
+                                      <StatusPill tone="green">Aceite ✓</StatusPill>
+                                    ) : isAltered ? (
+                                      <StatusPill tone="amber">Alterado</StatusPill>
+                                    ) : (
+                                      <StatusPill tone="amber">Pendente</StatusPill>
+                                    )}
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#A1A1AA]">
+                                    <span>{formatPhoneDisplay(client.phone)}</span>
+                                    {b.requestedAtMillis > 0 && (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Clock className="h-3 w-3" />
+                                        {formatTimeAgo(b.requestedAtMillis)}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
 
-                              <div className="flex items-center gap-2">
-                                {!isConfirmed ? (
-                                  <>
+                                <div className="flex items-center gap-2">
+                                  {!isConfirmed ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={() => handleRejectOne(b, client.name)}
+                                        className="inline-flex min-h-[38px] items-center gap-1 rounded-xl border border-[#EF4444]/60 bg-[#3B1518]/50 px-3 py-1.5 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#EF4444] hover:text-white disabled:opacity-40"
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                        Recusar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={() => handleAcceptOne(b, client.name)}
+                                        className="inline-flex min-h-[38px] items-center gap-1 rounded-xl bg-[#22C55E] px-3.5 py-1.5 text-xs font-extrabold text-[#121214] transition hover:bg-[#4ADE80] disabled:opacity-40"
+                                      >
+                                        <Check className="h-3.5 w-3.5" />
+                                        Aceitar
+                                      </button>
+                                    </>
+                                  ) : (
                                     <button
                                       type="button"
                                       disabled={isBusy}
                                       onClick={() => handleRejectOne(b, client.name)}
-                                      className="inline-flex min-h-[38px] items-center gap-1 rounded-xl border border-[#EF4444]/60 bg-[#3B1518]/50 px-3 py-1.5 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#EF4444] hover:text-white disabled:opacity-40"
+                                      className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#EF4444] hover:bg-[#3B1518]/60"
                                     >
-                                      <X className="h-3.5 w-3.5" />
-                                      Recusar
+                                      Remover
                                     </button>
-                                    <button
-                                      type="button"
-                                      disabled={isBusy}
-                                      onClick={() => handleAcceptOne(b, client.name)}
-                                      className="inline-flex min-h-[38px] items-center gap-1 rounded-xl bg-[#22C55E] px-3.5 py-1.5 text-xs font-extrabold text-[#121214] transition hover:bg-[#4ADE80] disabled:opacity-40"
-                                    >
-                                      <Check className="h-3.5 w-3.5" />
-                                      Aceitar
-                                    </button>
-                                  </>
-                                ) : (
+                                  )}
+                                </div>
+                              </div>
+
+                              {isConfirmed && (
+                                <div className="grid grid-cols-2 gap-2 border-t border-[#323238]/60 pt-2">
                                   <button
                                     type="button"
                                     disabled={isBusy}
-                                    onClick={() => handleRejectOne(b, client.name)}
-                                    className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#EF4444] hover:bg-[#3B1518]/60"
+                                    onClick={() =>
+                                      handleSetAttendance(
+                                        b.id,
+                                        isPresent ? '' : 'PRESENT',
+                                        client.name
+                                      )
+                                    }
+                                    className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl border text-xs font-extrabold transition disabled:opacity-40 ${
+                                      isPresent
+                                        ? 'border-[#22C55E] bg-[#22C55E] text-[#121214]'
+                                        : 'border-[#323238] bg-[#1B1B1E] text-[#D4D4D8] hover:border-[#22C55E] hover:text-[#86EFAC]'
+                                    }`}
                                   >
-                                    Remover
+                                    <Check className="h-3.5 w-3.5" />
+                                    {isPresent ? 'Veio ✓' : 'Presença'}
                                   </button>
-                                )}
-                              </div>
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() =>
+                                      handleSetAttendance(
+                                        b.id,
+                                        isAbsent ? '' : 'ABSENT',
+                                        client.name
+                                      )
+                                    }
+                                    className={`inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-xl border text-xs font-extrabold transition disabled:opacity-40 ${
+                                      isAbsent
+                                        ? 'border-[#EF4444] bg-[#EF4444] text-white'
+                                        : 'border-[#323238] bg-[#1B1B1E] text-[#A1A1AA] hover:border-[#EF4444] hover:text-[#FCA5A5]'
+                                    }`}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                    {isAbsent ? 'Faltou ✕' : 'Falta'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -862,6 +995,23 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
           </div>
         </div>
       </Modal>
+      <PrivatePersonalSessionModal
+        open={showPrivateModal}
+        clients={clients}
+        initialDateMs={
+          currentDayInfo?.date?.getTime() ||
+          (activeWeek?.startDateMillis
+            ? activeWeek.startDateMillis + (selectedDay - 1) * 86_400_000
+            : Date.now())
+        }
+        onClose={() => setShowPrivateModal(false)}
+        onSubmit={async (payload) => {
+          await repo.createPrivatePersonalSessionAndBooking(uid, payload);
+          onBanner(
+            `Treino personalizado (oculto) marcado para ${payload.clientName} ✓`
+          );
+        }}
+      />
     </div>
   );
 };

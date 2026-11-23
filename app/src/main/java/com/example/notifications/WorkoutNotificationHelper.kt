@@ -197,6 +197,7 @@ object WorkoutNotificationHelper {
             .filter { it.clientId == clientId && it.status == BookingStatus.CONFIRMED.name }
             .forEach { booking ->
                 val session = sessionMap[booking.sessionId] ?: return@forEach
+                if (session.ptPrivatePersonal) return@forEach
                 if (session.startMillis <= nowMs) return@forEach
 
                 val triggerAt = (session.startMillis - leadMs).coerceAtLeast(nowMs + 5_000L)

@@ -170,10 +170,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [restSecondsLeft, setRestSecondsLeft] = useState<number>(0);
   const restIntervalRef = useRef<number | null>(null);
 
+  const visibleSessions = useMemo(
+    () => sessions.filter((s) => !s.ptPrivatePersonal),
+    [sessions]
+  );
+  const visibleSessionIds = useMemo(
+    () => new Set(visibleSessions.map((s) => s.id)),
+    [visibleSessions]
+  );
+
   useEffect(() => {
     if (!reminderEnabled || notifPerm !== 'granted') return;
-    return scheduleConfirmedWorkoutReminders(client.id, bookings, sessions, reminderLeadMins);
-  }, [reminderEnabled, notifPerm, client.id, bookings, sessions, reminderLeadMins]);
+    return scheduleConfirmedWorkoutReminders(client.id, bookings, visibleSessions, reminderLeadMins);
+  }, [reminderEnabled, notifPerm, client.id, bookings, visibleSessions, reminderLeadMins]);
 
   useEffect(() => {
     if (restSecondsLeft <= 0) {
@@ -267,10 +276,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             (b) =>
               b.weekKey === activeWeek.weekKey &&
               b.clientId === client.id &&
-              b.status !== 'CANCELLED'
+              b.status !== 'CANCELLED' &&
+              visibleSessionIds.has(b.sessionId)
           )
         : [],
-    [bookings, activeWeek, client.id]
+    [bookings, activeWeek, client.id, visibleSessionIds]
   );
 
   const [draftSessionIds, setDraftSessionIds] = useState<Set<string>>(new Set());
@@ -511,7 +521,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               activeWeek={activeWeek}
               activeWeekIdx={activeWeekIdx}
               onSelectWeekKey={setSelectedWeekKey}
-              sessions={sessions}
+              sessions={visibleSessions}
               bookings={bookings}
               clientWeekBookings={clientWeekBookings}
               draftSessionIds={draftSessionIds}

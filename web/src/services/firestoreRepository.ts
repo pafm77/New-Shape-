@@ -285,6 +285,7 @@ export function subscribeStudioData(
       capacity: Number(d.capacity ?? 6),
       note: String(d.note ?? ''),
       startMillis: Number(d.startMillis ?? 0),
+      ptPrivatePersonal: Boolean(d.ptPrivatePersonal ?? false),
     }),
     (list) => list.sort((a, b) => a.startMillis - b.startMillis),
     handlers.sessions
@@ -1495,7 +1496,9 @@ export async function duplicatePreviousWeek(
 ): Promise<{ added: number; createdSessions: TrainingSessionRecord[] }> {
   const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
   const createdSessions: TrainingSessionRecord[] = [];
-  prevSessions.forEach((prev) => {
+  prevSessions
+    .filter((prev) => !prev.ptPrivatePersonal)
+    .forEach((prev) => {
     const [hStr, mStr] = prev.timeLabel.split(':');
     const h = Number(hStr) || 18;
     const m = Number(mStr) || 0;
@@ -1528,6 +1531,63 @@ export async function duplicatePreviousWeek(
   });
   if (writes.length > 0) await commitWrites(writes);
   return { added: writes.length, createdSessions };
+}
+
+export async function createPrivatePersonalSessionAndBooking(
+  uid: string,
+  payload: {
+    clientId: string;
+    dateMs: number;
+    hour: number;
+    minute: number;
+    durationMinutes: number;
+    note?: string;
+  }
+): Promise<{ sessionId: string; bookingId: string }> {
+  const targetDate = new Date(payload.dateMs);
+  const monday = getMondayOfWeek(targetDate);
+  const week = await ensureWeekExists(uid, monday.getTime());
+  const jsDay = targetDate.getDay();
+  const isoDay = jsDay === 0 ? 7 : jsDay;
+  const safeHour = Math.max(0, Math.min(23, Math.round(payload.hour)));
+  const safeMinute = Math.max(0, Math.min(59, Math.round(payload.minute)));
+  const safeDuration = Math.max(15, Math.min(240, Math.round(payload.durationMinutes || 60)));
+  const cleanNote = (payload.note ?? '').trim().slice(0, 200) || 'Treino Personalizado (Privado PT)';
+
+  const sessionModel = createSessionModel(
+    uid,
+    week.weekKey,
+    week.startDateMillis,
+    isoDay,
+    safeHour,
+    safeMinute,
+    safeDuration,
+    1,
+    cleanNote
+  );
+
+  const sessionRef = doc(subcol(uid, 'sessions'));
+  const bookingRef = doc(subcol(uid, 'bookings'));
+  const batch = writeBatch(db);
+  batch.set(sessionRef, {
+    ...sessionModel,
+    ptPrivatePersonal: true,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(bookingRef, {
+    userId: uid,
+    sessionId: sessionRef.id,
+    weekKey: week.weekKey,
+    clientId: payload.clientId,
+    status: 'CONFIRMED',
+    attendanceStatus: '',
+    requestedAtMillis: Date.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  await batch.commit();
+  return { sessionId: sessionRef.id, bookingId: bookingRef.id };
 }
 
 // --- Bookings & Confirmations ---

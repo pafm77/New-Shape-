@@ -57,6 +57,7 @@ data class TrainingSessionRecord(
     val capacity: Int = 6,
     val note: String = "",
     val startMillis: Long = 0L,
+    val ptPrivatePersonal: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
