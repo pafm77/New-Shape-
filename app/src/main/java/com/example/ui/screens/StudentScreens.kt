@@ -64,6 +64,23 @@ fun StudentMainScaffold(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     val firstName = student.name.trim().split(" ").firstOrNull().orEmpty()
+    val unreadChatCount = remember(state.chatMessages, student.id) {
+        state.unreadStudentChatCount(student.id)
+    }
+
+    LaunchedEffect(state.chatMessages, student.id) {
+        val undeliveredIds = state.chatMessages
+            .filter {
+                it.clientId == student.id &&
+                    it.senderRole == "PT" &&
+                    it.deliveredAtMillis == 0L &&
+                    it.readAtMillis == 0L
+            }
+            .map { it.id }
+        if (undeliveredIds.isNotEmpty()) {
+            viewModel.markChatMessagesDelivered(undeliveredIds)
+        }
+    }
 
     val navItems = listOf(
         Triple("Agenda", Icons.Default.CalendarMonth, "student_nav_agenda"),
@@ -152,11 +169,24 @@ fun StudentMainScaffold(
                 if (!isWide) {
                     NavigationBar(containerColor = CharcoalSurface, tonalElevation = 4.dp) {
                         navItems.forEachIndexed { idx, (label, icon, tag) ->
+                            val badgeCount = if (idx == 5) unreadChatCount else 0
                             NavigationBarItem(
                                 selected = selectedTab == idx,
                                 onClick = { selectedTab = idx },
                                 modifier = Modifier.testTag(tag),
-                                icon = { Icon(icon, contentDescription = label) },
+                                icon = {
+                                    BadgedBox(
+                                        badge = {
+                                            if (badgeCount > 0) {
+                                                Badge(containerColor = DangerRed, contentColor = TextPrimaryDark) {
+                                                    Text(badgeCount.toString())
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(icon, contentDescription = label)
+                                    }
+                                },
                                 label = { Text(label, fontSize = 10.sp, maxLines = 1, softWrap = false) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = NewShapeGold,
@@ -180,11 +210,24 @@ fun StudentMainScaffold(
                     NavigationRail(containerColor = CharcoalSurface) {
                         Spacer(Modifier.height(12.dp))
                         navItems.forEachIndexed { idx, (label, icon, tag) ->
+                            val badgeCount = if (idx == 5) unreadChatCount else 0
                             NavigationRailItem(
                                 selected = selectedTab == idx,
                                 onClick = { selectedTab = idx },
                                 modifier = Modifier.testTag(tag),
-                                icon = { Icon(icon, contentDescription = label) },
+                                icon = {
+                                    BadgedBox(
+                                        badge = {
+                                            if (badgeCount > 0) {
+                                                Badge(containerColor = DangerRed, contentColor = TextPrimaryDark) {
+                                                    Text(badgeCount.toString())
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(icon, contentDescription = label)
+                                    }
+                                },
                                 label = { Text(label) },
                                 colors = NavigationRailItemDefaults.colors(
                                     selectedIconColor = NewShapeGold,
@@ -214,6 +257,7 @@ fun StudentMainScaffold(
                                 messages = state.chatMessages.filter { it.clientId == student.id },
                                 viewerRole = "STUDENT",
                                 onSendMessage = { text -> viewModel.sendChatMessage(student.id, "STUDENT", text) },
+                                onMarkRead = { viewModel.markChatThreadRead(student.id, "STUDENT") },
                                 onBack = null
                             )
                         }

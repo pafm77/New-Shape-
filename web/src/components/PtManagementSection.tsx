@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
   Check,
+  CheckCheck,
   CreditCard,
   Edit3,
   MessageCircle,
@@ -18,6 +19,7 @@ import {
   FidelizacaoRecord,
   PaymentRecord,
   PtAccountRecord,
+  PtNotificationRecord,
   StudioSettingsRecord,
   TrainingType,
 } from '../types/studio';
@@ -61,6 +63,7 @@ interface PtManagementSectionProps {
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   chatMessages: ChatMessageRecord[];
+  ptNotifications?: PtNotificationRecord[];
   ptAccounts: PtAccountRecord[];
   settings: StudioSettingsRecord;
   whatsappWebMode?: boolean;
@@ -77,6 +80,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
   payments,
   fidelizacoes,
   chatMessages,
+  ptNotifications = [],
   ptAccounts,
   settings,
   whatsappWebMode = false,
@@ -110,20 +114,26 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
     [ptAccounts]
   );
 
-  const tabs: Array<{ id: ManagementSubTab; label: string }> = isSuperAdmin
+  const unreadChatCount = useMemo(
+    () => chatMessages.filter((m) => m.senderRole === 'STUDENT' && !m.readAtMillis).length,
+    [chatMessages]
+  );
+
+  const tabs: Array<{ id: ManagementSubTab; label: string; badge?: number }> = isSuperAdmin
     ? [
         { id: 'finance', label: 'Finanças' },
         {
           id: 'team',
-          label: pendingPtCount > 0 ? `Equipa PT (${pendingPtCount})` : 'Equipa PT',
+          label: 'Equipa PT',
+          badge: pendingPtCount > 0 ? pendingPtCount : undefined,
         },
         { id: 'fidelizacao', label: 'Fidelizações' },
-        { id: 'chat', label: 'Chat' },
+        { id: 'chat', label: 'Chat', badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         { id: 'guide', label: 'Guia App (PDF)' },
       ]
     : [
         { id: 'fidelizacao', label: 'Fidelizações' },
-        { id: 'chat', label: 'Chat' },
+        { id: 'chat', label: 'Chat', badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         { id: 'guide', label: 'Guia App (PDF)' },
       ];
 
@@ -139,13 +149,24 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
             key={t.id}
             type="button"
             onClick={() => setSubTab(t.id)}
-            className={`min-h-[40px] rounded-xl px-2 text-xs sm:text-sm font-bold transition ${
+            className={`inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-xs sm:text-sm font-bold transition ${
               subTab === t.id
                 ? 'bg-[#EAB308] text-[#121214]'
                 : 'text-[#A1A1AA] hover:text-white'
             }`}
           >
-            {t.label}
+            <span>{t.label}</span>
+            {t.badge !== undefined && t.badge > 0 && (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] font-extrabold leading-none ${
+                  subTab === t.id
+                    ? 'bg-[#121214] text-[#FACC15]'
+                    : 'bg-[#EF4444] text-white'
+                }`}
+              >
+                {t.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -181,6 +202,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           uid={uid}
           clients={clients}
           chatMessages={chatMessages}
+          ptNotifications={ptNotifications}
           selectedClientId={selectedChatClientId}
           onSelectClient={setSelectedChatClientId}
         />
@@ -1535,15 +1557,105 @@ export const FidelizacaoModal: React.FC<{
   );
 };
 
+const MessageReceiptIcon: React.FC<{
+  message: ChatMessageRecord;
+  onGoldBubble?: boolean;
+}> = ({ message, onGoldBubble = true }) => {
+  const isRead = Boolean(message.readAtMillis && message.readAtMillis > 0);
+  const isDelivered = Boolean(message.deliveredAtMillis && message.deliveredAtMillis > 0);
+
+  if (isRead) {
+    return (
+      <span
+        title="Lida"
+        aria-label="Mensagem lida"
+        className={`inline-flex items-center ${
+          onGoldBubble ? 'text-[#1E40AF]' : 'text-[#38BDF8]'
+        }`}
+      >
+        <CheckCheck className="h-3.5 w-3.5 stroke-[2.5]" />
+      </span>
+    );
+  }
+  if (isDelivered) {
+    return (
+      <span
+        title="Entregue"
+        aria-label="Mensagem entregue"
+        className={`inline-flex items-center ${
+          onGoldBubble ? 'text-[#121214]/75' : 'text-[#A1A1AA]'
+        }`}
+      >
+        <CheckCheck className="h-3.5 w-3.5 stroke-[2.2]" />
+      </span>
+    );
+  }
+  return (
+    <span
+      title="Enviada"
+      aria-label="Mensagem enviada"
+      className={`inline-flex items-center ${
+        onGoldBubble ? 'text-[#121214]/60' : 'text-[#71717A]'
+      }`}
+    >
+      <Check className="h-3.5 w-3.5 stroke-[2.2]" />
+    </span>
+  );
+};
+
 const PtChatSubTab: React.FC<{
   uid: string;
   clients: ClientRecord[];
   chatMessages: ChatMessageRecord[];
+  ptNotifications?: PtNotificationRecord[];
   selectedClientId: string;
   onSelectClient: (clientId: string) => void;
-}> = ({ uid, clients, chatMessages, selectedClientId, onSelectClient }) => {
+}> = ({
+  uid,
+  clients,
+  chatMessages,
+  ptNotifications = [],
+  selectedClientId,
+  onSelectClient,
+}) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const selectedClient = clients.find((c) => c.id === selectedClientId) || null;
+
+  const sortedThreads = useMemo(() => {
+    const msgsByClient = new Map<string, ChatMessageRecord[]>();
+    chatMessages.forEach((m) => {
+      const list = msgsByClient.get(m.clientId) || [];
+      list.push(m);
+      msgsByClient.set(m.clientId, list);
+    });
+
+    return activeClients
+      .map((client) => {
+        const msgs = msgsByClient.get(client.id) || [];
+        const unreadMsgs = msgs.filter((m) => m.senderRole === 'STUDENT' && !m.readAtMillis);
+        const lastMsg = msgs[msgs.length - 1] || null;
+        const latestUnreadTs = unreadMsgs.length > 0 ? unreadMsgs[unreadMsgs.length - 1].timestampMillis : 0;
+        return {
+          client,
+          msgs,
+          unreadCount: unreadMsgs.length,
+          lastMsg,
+          latestUnreadTs,
+          latestMsgTs: lastMsg ? lastMsg.timestampMillis : 0,
+        };
+      })
+      .sort((a, b) => {
+        // 1) Unread conversations ALWAYS at the top (most recent unread first)
+        const aUnread = a.unreadCount > 0 ? 1 : 0;
+        const bUnread = b.unreadCount > 0 ? 1 : 0;
+        if (aUnread !== bUnread) return bUnread - aUnread;
+        if (a.latestUnreadTs !== b.latestUnreadTs) return b.latestUnreadTs - a.latestUnreadTs;
+        // 2) Conversations with messages (most recent first)
+        if (a.latestMsgTs !== b.latestMsgTs) return b.latestMsgTs - a.latestMsgTs;
+        // 3) Alphabetical
+        return a.client.name.localeCompare(b.client.name, 'pt');
+      });
+  }, [activeClients, chatMessages]);
 
   if (selectedClient) {
     return (
@@ -1559,7 +1671,7 @@ const PtChatSubTab: React.FC<{
           <div>
             <h3 className="text-lg font-bold text-[#F4F4F5]">{selectedClient.name}</h3>
             <p className="text-xs text-[#A1A1AA]">
-              Chat privado · {formatPhoneDisplay(selectedClient.phone)}
+              Chat privado · {selectedClient.phone ? formatPhoneDisplay(selectedClient.phone) : 'Sem telemóvel'}
             </p>
           </div>
         </div>
@@ -1570,21 +1682,31 @@ const PtChatSubTab: React.FC<{
           clientName={selectedClient.name}
           viewerRole="PT"
           messages={chatMessages.filter((m) => m.clientId === selectedClient.id)}
+          ptNotifications={ptNotifications}
         />
       </div>
     );
   }
 
+  const totalUnread = sortedThreads.reduce((acc, t) => acc + t.unreadCount, 0);
+
   return (
     <div className="space-y-3">
-      <div>
-        <h2 className="text-xl font-bold text-[#F4F4F5]">Chat Privado com Alunos</h2>
-        <p className="text-xs text-[#A1A1AA]">
-          Escolhe um aluno para enviar ou responder a mensagens em tempo real
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-bold text-[#F4F4F5]">Chat Privado com Alunos</h2>
+          <p className="text-xs text-[#A1A1AA]">
+            Mensagens por ler aparecem automaticamente no topo
+          </p>
+        </div>
+        {totalUnread > 0 && (
+          <StatusPill tone="red">
+            {totalUnread} {totalUnread === 1 ? 'mensagem por ler' : 'mensagens por ler'}
+          </StatusPill>
+        )}
       </div>
 
-      {activeClients.length === 0 ? (
+      {sortedThreads.length === 0 ? (
         <EmptyState
           icon={<MessageCircle className="h-6 w-6" />}
           title="Sem alunos ativos"
@@ -1592,31 +1714,56 @@ const PtChatSubTab: React.FC<{
         />
       ) : (
         <div className="space-y-2">
-          {activeClients.map((c) => {
-            const msgs = chatMessages.filter((m) => m.clientId === c.id);
-            const last = msgs[msgs.length - 1];
+          {sortedThreads.map(({ client: c, unreadCount, lastMsg }) => {
+            const hasUnread = unreadCount > 0;
             return (
               <button
                 key={c.id}
                 type="button"
                 onClick={() => onSelectClient(c.id)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-4 text-left transition hover:border-[#EAB308]/60"
+                className={`flex w-full items-center justify-between gap-3 rounded-2xl border p-4 text-left transition ${
+                  hasUnread
+                    ? 'border-[#EAB308]/80 bg-[#3D3314]/30 hover:border-[#FACC15]'
+                    : 'border-[#323238] bg-[#1B1B1E] hover:border-[#EAB308]/60'
+                }`}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-[#F4F4F5]">{c.name}</p>
-                  <p className="mt-0.5 truncate text-xs text-[#A1A1AA]">
-                    {last
-                      ? `${last.senderRole === 'PT' ? 'Tu: ' : ''}${last.text}`
-                      : 'Nenhuma mensagem ainda — toca para conversar'}
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-bold text-[#F4F4F5]">{c.name}</p>
+                    {hasUnread && (
+                      <span className="h-2 w-2 rounded-full bg-[#EF4444]" aria-hidden="true" />
+                    )}
+                  </div>
+                  <p
+                    className={`mt-0.5 flex items-center gap-1 truncate text-xs ${
+                      hasUnread ? 'font-semibold text-[#F4F4F5]' : 'text-[#A1A1AA]'
+                    }`}
+                  >
+                    {lastMsg && lastMsg.senderRole === 'PT' && (
+                      <MessageReceiptIcon message={lastMsg} onGoldBubble={false} />
+                    )}
+                    <span className="truncate">
+                      {lastMsg
+                        ? `${lastMsg.senderRole === 'PT' ? 'Tu: ' : ''}${lastMsg.text}`
+                        : 'Nenhuma mensagem ainda — toca para conversar'}
+                    </span>
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
-                  {last && (
-                    <span className="text-[11px] text-[#A1A1AA]">
-                      {formatTimeAgo(last.timestampMillis)}
+                  {lastMsg && (
+                    <span
+                      className={`text-[11px] ${
+                        hasUnread ? 'font-bold text-[#FACC15]' : 'text-[#A1A1AA]'
+                      }`}
+                    >
+                      {formatTimeAgo(lastMsg.timestampMillis)}
                     </span>
                   )}
-                  {msgs.length > 0 && <StatusPill tone="gold">{msgs.length}</StatusPill>}
+                  {hasUnread && (
+                    <span className="rounded-full bg-[#EF4444] px-2 py-0.5 text-[11px] font-extrabold text-white">
+                      {unreadCount}
+                    </span>
+                  )}
                 </div>
               </button>
             );
@@ -1633,21 +1780,62 @@ export const PrivateChatPanel: React.FC<{
   clientName: string;
   viewerRole: 'PT' | 'STUDENT';
   messages: ChatMessageRecord[];
-}> = ({ uid, clientId, clientName, viewerRole, messages }) => {
+  senderClientName?: string;
+  ptNotifications?: PtNotificationRecord[];
+}> = ({
+  uid,
+  clientId,
+  clientName,
+  viewerRole,
+  messages,
+  senderClientName,
+  ptNotifications = [],
+}) => {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const markedReadIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
+
+  // Automatically mark incoming messages as READ when the conversation is open
+  useEffect(() => {
+    const incomingUnread = messages.filter(
+      (m) => m.senderRole !== viewerRole && !m.readAtMillis && !markedReadIdsRef.current.has(m.id)
+    );
+    if (incomingUnread.length > 0) {
+      incomingUnread.forEach((m) => markedReadIdsRef.current.add(m.id));
+      void repo.markChatMessagesRead(uid, incomingUnread).catch(() => {
+        incomingUnread.forEach((m) => markedReadIdsRef.current.delete(m.id));
+      });
+    }
+  }, [uid, viewerRole, messages]);
+
+  // When PT opens a student's chat, also mark matching CHAT notifications in bell as read
+  useEffect(() => {
+    if (viewerRole !== 'PT' || ptNotifications.length === 0) return;
+    const hasUnreadChatNotif = ptNotifications.some(
+      (n) => !n.read && n.type === 'CHAT' && n.clientId === clientId
+    );
+    if (hasUnreadChatNotif) {
+      void repo.markClientChatNotificationsRead(uid, ptNotifications, clientId).catch(() => {});
+    }
+  }, [uid, viewerRole, clientId, ptNotifications]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!draft.trim() || sending) return;
     setSending(true);
     try {
-      await repo.sendChatMessage(uid, clientId, viewerRole, draft);
+      await repo.sendChatMessage(
+        uid,
+        clientId,
+        viewerRole,
+        draft,
+        viewerRole === 'STUDENT' ? senderClientName || clientName : undefined
+      );
       setDraft('');
     } finally {
       setSending(false);
@@ -1656,6 +1844,19 @@ export const PrivateChatPanel: React.FC<{
 
   return (
     <BrandCard className="flex flex-col">
+      {/* Compact receipt legend */}
+      <div className="mb-2.5 flex flex-wrap items-center justify-end gap-3 border-b border-[#323238] pb-2 text-[10px] text-[#A1A1AA]">
+        <span className="inline-flex items-center gap-1">
+          <Check className="h-3 w-3 text-[#71717A]" /> Enviada
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <CheckCheck className="h-3 w-3 text-[#A1A1AA]" /> Entregue
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <CheckCheck className="h-3 w-3 text-[#38BDF8]" /> Lida
+        </span>
+      </div>
+
       <div className="max-h-[420px] min-h-[260px] flex-1 space-y-2.5 overflow-y-auto pr-1">
         {messages.length === 0 ? (
           <div className="flex h-56 flex-col items-center justify-center text-center text-xs text-[#A1A1AA]">
@@ -1666,6 +1867,11 @@ export const PrivateChatPanel: React.FC<{
         ) : (
           messages.map((m) => {
             const mine = m.senderRole === viewerRole;
+            const statusText = m.readAtMillis
+              ? 'Lida'
+              : m.deliveredAtMillis
+              ? 'Entregue'
+              : 'Enviada';
             return (
               <div
                 key={m.id}
@@ -1679,14 +1885,21 @@ export const PrivateChatPanel: React.FC<{
                   }`}
                 >
                   <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
-                  <p
-                    className={`mt-1 text-[10px] ${
+                  <div
+                    className={`mt-1 flex items-center justify-end gap-1.5 text-[10px] ${
                       mine ? 'text-[#121214]/75 font-semibold' : 'text-[#A1A1AA]'
                     }`}
                   >
-                    {m.senderRole === 'PT' ? 'PT' : 'Aluno'} ·{' '}
-                    {formatTimeAgo(m.timestampMillis)}
-                  </p>
+                    <span>
+                      {m.senderRole === 'PT' ? 'PT' : 'Aluno'} ·{' '}
+                      {formatTimeAgo(m.timestampMillis)}
+                    </span>
+                    {mine && (
+                      <span className="inline-flex items-center gap-0.5" title={statusText}>
+                        <MessageReceiptIcon message={m} onGoldBubble />
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );

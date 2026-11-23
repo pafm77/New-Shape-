@@ -485,6 +485,8 @@ export function subscribeStudioData(
       senderRole: (String(d.senderRole) === 'STUDENT' ? 'STUDENT' : 'PT'),
       text: String(d.text ?? ''),
       timestampMillis: Number(d.timestampMillis ?? 0),
+      deliveredAtMillis: Number(d.deliveredAtMillis ?? 0),
+      readAtMillis: Number(d.readAtMillis ?? 0),
     }),
     (list) => list.sort((a, b) => a.timestampMillis - b.timestampMillis),
     handlers.chatMessages,
@@ -519,7 +521,10 @@ export function subscribeStudioData(
         clientId: String(d.clientId ?? ''),
         clientName: String(d.clientName ?? ''),
         type:
-          d.type === 'CANCELLED' || d.type === 'UNAVAILABLE' || d.type === 'ASSESSMENT'
+          d.type === 'CANCELLED' ||
+          d.type === 'UNAVAILABLE' ||
+          d.type === 'ASSESSMENT' ||
+          d.type === 'CHAT'
             ? d.type
             : 'ALTERED',
         summary: String(d.summary ?? ''),
@@ -1179,7 +1184,12 @@ export async function importClientsCsv(
   rawText: string,
   existingClients: ClientRecord[]
 ): Promise<ImportResult> {
-  const existingPhones = new Set(existingClients.map((c) => c.phone));
+  const existingPhones = new Set(existingClients.map((c) => c.phone).filter(Boolean));
+  const existingPhoneLessNames = new Set(
+    existingClients
+      .filter((c) => !c.phone)
+      .map((c) => c.name.trim().toLowerCase())
+  );
   let added = 0;
   let ignored = 0;
   const errors: string[] = [];
@@ -1193,21 +1203,32 @@ export async function importClientsCsv(
     if (idx === 0 && line.toLowerCase().includes('nome') && line.toLowerCase().includes('telem')) return;
     const delimiter = line.includes(';') ? ';' : line.includes('\t') ? '\t' : ',';
     const parts = line.split(delimiter).map((p) => p.trim());
-    if (parts.length < 2) {
-      errors.push(`Linha ${idx + 1}: formato inválido`);
+    const name = (parts[0] || '').slice(0, 100);
+    if (!name) {
+      errors.push(`Linha ${idx + 1}: nome em falta`);
       return;
     }
-    const name = parts[0].slice(0, 100);
-    const phone = normalizePortuguesePhone(parts[1]);
-    if (!name || !isValidPortuguesePhone(phone)) {
-      errors.push(`Linha ${idx + 1}: telemóvel inválido (${parts[1]})`);
-      return;
+    const rawPhone = parts.length >= 2 ? parts[1] : '';
+    let phone = '';
+    if (rawPhone) {
+      phone = normalizePortuguesePhone(rawPhone);
+      if (!isValidPortuguesePhone(phone)) {
+        errors.push(`Linha ${idx + 1}: telemóvel inválido (${rawPhone})`);
+        return;
+      }
+      if (existingPhones.has(phone)) {
+        ignored++;
+        return;
+      }
+      existingPhones.add(phone);
+    } else {
+      const nameKey = name.toLowerCase();
+      if (existingPhoneLessNames.has(nameKey)) {
+        ignored++;
+        return;
+      }
+      existingPhoneLessNames.add(nameKey);
     }
-    if (existingPhones.has(phone)) {
-      ignored++;
-      return;
-    }
-    existingPhones.add(phone);
     writes.push([
       doc(subcol(uid, 'clients')),
       {
@@ -2195,19 +2216,93 @@ export async function sendChatMessage(
   uid: string,
   clientId: string,
   senderRole: 'PT' | 'STUDENT',
-  text: string
+  text: string,
+  senderClientName?: string
 ): Promise<void> {
   const trimmed = text.trim().slice(0, 2000);
   if (!trimmed) return;
+  const now = Date.now();
   await setDoc(doc(subcol(uid, 'chat_messages')), {
     userId: uid,
     clientId,
     senderRole,
     text: trimmed,
-    timestampMillis: Date.now(),
+    timestampMillis: now,
+    deliveredAtMillis: 0,
+    readAtMillis: 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  if (senderRole === 'STUDENT') {
+    try {
+      await createPtNotification(uid, {
+        clientId,
+        clientName: senderClientName?.trim() || 'Aluno',
+        type: 'CHAT',
+        summary: trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed,
+        weekKey: '',
+      });
+    } catch {
+      // Non-blocking notification failure
+    }
+  }
+}
+
+export async function markChatMessagesDelivered(
+  uid: string,
+  messageIds: string[]
+): Promise<void> {
+  if (messageIds.length === 0) return;
+  const now = Date.now();
+  for (let i = 0; i < messageIds.length; i += 400) {
+    const batch = writeBatch(db);
+    messageIds.slice(i, i + 400).forEach((id) => {
+      batch.update(doc(subcol(uid, 'chat_messages'), id), {
+        deliveredAtMillis: now,
+        updatedAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+}
+
+export async function markChatMessagesRead(
+  uid: string,
+  messages: ChatMessageRecord[]
+): Promise<void> {
+  const unread = messages.filter((m) => !m.readAtMillis);
+  if (unread.length === 0) return;
+  const now = Date.now();
+  for (let i = 0; i < unread.length; i += 400) {
+    const batch = writeBatch(db);
+    unread.slice(i, i + 400).forEach((m) => {
+      batch.update(doc(subcol(uid, 'chat_messages'), m.id), {
+        deliveredAtMillis: m.deliveredAtMillis && m.deliveredAtMillis > 0 ? m.deliveredAtMillis : now,
+        readAtMillis: now,
+        updatedAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+}
+
+export async function markClientChatNotificationsRead(
+  uid: string,
+  notifications: PtNotificationRecord[],
+  clientId: string
+): Promise<void> {
+  const unread = notifications.filter(
+    (n) => !n.read && n.type === 'CHAT' && n.clientId === clientId
+  );
+  if (unread.length === 0) return;
+  const batch = writeBatch(db);
+  unread.forEach((n) => {
+    batch.update(doc(subcol(uid, 'pt_notifications'), n.id), {
+      read: true,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  await batch.commit();
 }
 
 // --- Templates & Settings ---

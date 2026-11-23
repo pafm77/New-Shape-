@@ -7,9 +7,11 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -80,12 +82,55 @@ internal fun PtTrainingMarcacoesSection(
         state.clients.filter { it.active }.sortedBy { it.name.lowercase() }
     }
     var searchQuery by remember { mutableStateOf("") }
-    val filteredClients = remember(activeClients, searchQuery) {
+    var bookingStatusFilter by remember { mutableStateOf("ALL") } // ALL, BOOKED, UNBOOKED
+    var askMessageOnAction by remember { mutableStateOf(true) }
+
+    val activeWeek = state.activeWeek
+    val weekKey = activeWeek?.weekKey.orEmpty()
+    val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
+    val weekMap = remember(state.weeks) { state.weeks.associateBy { it.weekKey } }
+
+    // Map clientId -> Pair(confirmedCount, pendingCount) in active week
+    val clientWeekBookingCounts = remember(state.bookings, weekKey) {
+        if (weekKey.isBlank()) emptyMap()
+        else {
+            val map = mutableMapOf<String, Pair<Int, Int>>()
+            state.bookings.forEach { b ->
+                if (b.weekKey != weekKey || b.status == BookingStatus.CANCELLED.name) return@forEach
+                val prev = map[b.clientId] ?: (0 to 0)
+                map[b.clientId] = if (b.status == BookingStatus.CONFIRMED.name) {
+                    (prev.first + 1) to prev.second
+                } else {
+                    prev.first to (prev.second + 1)
+                }
+            }
+            map
+        }
+    }
+
+    val bookedClientsCount = remember(activeClients, clientWeekBookingCounts) {
+        activeClients.count { c ->
+            val counts = clientWeekBookingCounts[c.id]
+            (counts?.first ?: 0) + (counts?.second ?: 0) > 0
+        }
+    }
+    val unbookedClientsCount = (activeClients.size - bookedClientsCount).coerceAtLeast(0)
+
+    val filteredClients = remember(activeClients, searchQuery, bookingStatusFilter, clientWeekBookingCounts) {
         val q = searchQuery.trim().lowercase()
-        if (q.isBlank()) activeClients
-        else activeClients.filter {
-            it.name.lowercase().contains(q) ||
-                it.phone.filter(Char::isDigit).contains(q.filter(Char::isDigit))
+        val qDigits = q.filter(Char::isDigit)
+        activeClients.filter { c ->
+            val counts = clientWeekBookingCounts[c.id]
+            val hasWeekBooking = ((counts?.first ?: 0) + (counts?.second ?: 0)) > 0
+            val matchesStatus = when (bookingStatusFilter) {
+                "BOOKED" -> hasWeekBooking
+                "UNBOOKED" -> !hasWeekBooking
+                else -> true
+            }
+            val matchesSearch = q.isBlank() ||
+                c.name.lowercase().contains(q) ||
+                (qDigits.isNotEmpty() && c.phone.filter(Char::isDigit).contains(qDigits))
+            matchesStatus && matchesSearch
         }
     }
     val selectedClient = activeClients.find { it.id == selectedClientId }
@@ -94,10 +139,9 @@ internal fun PtTrainingMarcacoesSection(
 
     var clientMenuExpanded by remember { mutableStateOf(false) }
 
-    val activeWeek = state.activeWeek
-    val weekKey = activeWeek?.weekKey.orEmpty()
-    val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
-    val weekMap = remember(state.weeks) { state.weeks.associateBy { it.weekKey } }
+    fun shouldPromptMessage(client: ClientRecord): Boolean {
+        return askMessageOnAction && client.phone.isNotBlank()
+    }
 
     val weekSessions = remember(state.sessions, weekKey) {
         if (weekKey.isBlank()) emptyList()
@@ -232,7 +276,7 @@ internal fun PtTrainingMarcacoesSection(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Escolhe o aluno, marca ou troca o horário e envia a mensagem.",
+                            text = "Escolhe o aluno, vê se já tem treinos marcados e marca ou troca o horário (envio de mensagem opcional).",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondaryDark
                         )
@@ -248,6 +292,31 @@ internal fun PtTrainingMarcacoesSection(
                 }
 
                 Spacer(Modifier.height(10.dp))
+
+                // Weekly booking status filter chips
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
+                    listOf(
+                        "ALL" to "Todos (${activeClients.size})",
+                        "BOOKED" to "Já marcados ($bookedClientsCount)",
+                        "UNBOOKED" to "Por marcar ($unbookedClientsCount)"
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = bookingStatusFilter == key,
+                            onClick = { bookingStatusFilter = key },
+                            label = { Text(label, maxLines = 1) },
+                            modifier = Modifier.testTag("pt_training_marcacoes_filter_$key"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = searchQuery,
@@ -272,10 +341,15 @@ internal fun PtTrainingMarcacoesSection(
                     expanded = clientMenuExpanded,
                     onExpandedChange = { clientMenuExpanded = !clientMenuExpanded }
                 ) {
+                    val selectedWeekCounts = selectedClient?.let { clientWeekBookingCounts[it.id] }
+                    val selectedSummarySuffix = when {
+                        selectedClient == null -> ""
+                        (selectedWeekCounts?.first ?: 0) > 0 -> " · ✓ ${selectedWeekCounts!!.first} marcado(s)"
+                        (selectedWeekCounts?.second ?: 0) > 0 -> " · ${selectedWeekCounts!!.second} pendente(s)"
+                        else -> " · Por marcar"
+                    }
                     OutlinedTextField(
-                        value = selectedClient?.let {
-                            if (it.phone.isNotBlank()) "${it.name} · ${it.phone}" else it.name
-                        } ?: "Nenhum aluno encontrado",
+                        value = selectedClient?.let { "${it.name}$selectedSummarySuffix" } ?: "Nenhum aluno encontrado",
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Aluno (${filteredClients.size})") },
@@ -291,12 +365,29 @@ internal fun PtTrainingMarcacoesSection(
                         onDismissRequest = { clientMenuExpanded = false }
                     ) {
                         filteredClients.forEach { client ->
+                            val cCounts = clientWeekBookingCounts[client.id]
+                            val cConfirmed = cCounts?.first ?: 0
+                            val cPending = cCounts?.second ?: 0
                             DropdownMenuItem(
                                 text = {
-                                    Column {
-                                        Text(client.name, fontWeight = FontWeight.Bold)
-                                        if (client.phone.isNotBlank()) {
-                                            Text(client.phone, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(client.name, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = client.phone.ifBlank { "Sem telemóvel" },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = TextSecondaryDark
+                                            )
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        when {
+                                            cConfirmed > 0 -> StatusPill("✓ $cConfirmed", ConfirmedGreen, ConfirmedGreenContainer)
+                                            cPending > 0 -> StatusPill("$cPending pend.", PendingAmber, PendingAmberContainer)
+                                            else -> StatusPill("Por marcar", TextSecondaryDark, ElevatedCharcoal)
                                         }
                                     }
                                 },
@@ -309,8 +400,36 @@ internal fun PtTrainingMarcacoesSection(
                     }
                 }
 
+                Spacer(Modifier.height(6.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { askMessageOnAction = !askMessageOnAction }
+                        .padding(vertical = 2.dp)
+                        .testTag("pt_training_ask_message_toggle")
+                ) {
+                    Checkbox(
+                        checked = askMessageOnAction,
+                        onCheckedChange = { askMessageOnAction = it },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = NewShapeGold,
+                            checkmarkColor = TextOnGold,
+                            uncheckedColor = TextSecondaryDark
+                        )
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Pedir envio de mensagem ao marcar/trocar (clientes sem telemóvel marcam sempre direto)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark
+                    )
+                }
+
                 if (selectedClient != null) {
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
                     Surface(
                         color = ElevatedCharcoal,
                         shape = RoundedCornerShape(12.dp),
@@ -325,21 +444,32 @@ internal fun PtTrainingMarcacoesSection(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(selectedClient.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = TextPrimaryDark)
                                 val limitStr = if (selectedClient.weeklySessionLimit > 0) " · Pacote ${selectedClient.weeklySessionLimit}×/semana" else ""
+                                val phoneLabel = selectedClient.phone.ifBlank { "Sem telemóvel (marcação direta)" }
                                 Text(
-                                    text = "${selectedClient.phone.ifBlank { "Sem telemóvel" }}$limitStr",
+                                    text = "$phoneLabel$limitStr",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextSecondaryDark
                                 )
                             }
-                            val countLabel = if (selectedClient.weeklySessionLimit > 0) {
-                                "$confirmedCountInWeek/${selectedClient.weeklySessionLimit} confirmados"
-                            } else {
-                                "$confirmedCountInWeek confirmado(s)"
+                            val pendingInWeek = studentWeekBookings.count { (b, _) -> b.status != BookingStatus.CONFIRMED.name }
+                            val countLabel = when {
+                                selectedClient.weeklySessionLimit > 0 -> "$confirmedCountInWeek/${selectedClient.weeklySessionLimit} marcados"
+                                confirmedCountInWeek > 0 -> "✓ $confirmedCountInWeek marcado(s)"
+                                pendingInWeek > 0 -> "$pendingInWeek por confirmar"
+                                else -> "Sem treinos marcados"
                             }
                             StatusPill(
                                 text = countLabel,
-                                textColor = if (confirmedCountInWeek > 0) ConfirmedGreen else TextSecondaryDark,
-                                containerColor = if (confirmedCountInWeek > 0) ConfirmedGreenContainer else CharcoalSurface
+                                textColor = when {
+                                    confirmedCountInWeek > 0 -> ConfirmedGreen
+                                    pendingInWeek > 0 -> PendingAmber
+                                    else -> TextSecondaryDark
+                                },
+                                containerColor = when {
+                                    confirmedCountInWeek > 0 -> ConfirmedGreenContainer
+                                    pendingInWeek > 0 -> PendingAmberContainer
+                                    else -> CharcoalSurface
+                                }
                             )
                         }
                     }
@@ -536,13 +666,17 @@ internal fun PtTrainingMarcacoesSection(
                                                 FilledTonalButton(
                                                     onClick = {
                                                         viewModel.acceptBookingSilently(booking, selectedClient.name)
-                                                        val msg = buildConfirmMessage(selectedClient, listOf(session), weekMap[session.weekKey] ?: activeWeek)
-                                                        messageDraft = PtMessageDraft(
-                                                            title = "Marcação confirmada · Enviar mensagem",
-                                                            subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
-                                                            client = selectedClient,
-                                                            message = msg
-                                                        )
+                                                        if (shouldPromptMessage(selectedClient)) {
+                                                            val msg = buildConfirmMessage(selectedClient, listOf(session), weekMap[session.weekKey] ?: activeWeek)
+                                                            messageDraft = PtMessageDraft(
+                                                                title = "Marcação confirmada · Enviar mensagem",
+                                                                subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
+                                                                client = selectedClient,
+                                                                message = msg
+                                                            )
+                                                        } else {
+                                                            Toast.makeText(context, "Treino confirmado para ${selectedClient.name} ✓", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     },
                                                     colors = ButtonDefaults.filledTonalButtonColors(
                                                         containerColor = ConfirmedGreen,
@@ -586,13 +720,17 @@ internal fun PtTrainingMarcacoesSection(
                                                 onClick = {
                                                     viewModel.removeBooking(booking.id)
                                                     if (isSwappingThis) swappingTarget = null
-                                                    val first = selectedClient.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { selectedClient.name }
-                                                    messageDraft = PtMessageDraft(
-                                                        title = "Treino desmarcado · Avisar aluno",
-                                                        subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
-                                                        client = selectedClient,
-                                                        message = "Olá $first, o teu treino de ${session.dateLabel} às ${session.timeLabel.replace(":", "h")} foi desmarcado. Diz-me quando preferes reagendar! 💪 New Shape"
-                                                    )
+                                                    if (shouldPromptMessage(selectedClient)) {
+                                                        val first = selectedClient.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { selectedClient.name }
+                                                        messageDraft = PtMessageDraft(
+                                                            title = "Treino desmarcado · Avisar aluno",
+                                                            subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
+                                                            client = selectedClient,
+                                                            message = "Olá $first, o teu treino de ${session.dateLabel} às ${session.timeLabel.replace(":", "h")} foi desmarcado. Diz-me quando preferes reagendar! 💪 New Shape"
+                                                        )
+                                                    } else {
+                                                        Toast.makeText(context, "Treino desmarcado para ${selectedClient.name}.", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 },
                                                 modifier = Modifier.testTag("pt_training_remove_btn_${booking.id}")
                                             ) {
@@ -825,29 +963,33 @@ internal fun PtTrainingMarcacoesSection(
                                             onClick = {
                                                 val (oldBooking, oldSession) = activeSwap
                                                 viewModel.swapStudentBooking(oldBooking, session, selectedClient.name)
-                                                val targetWeek = weekMap[session.weekKey] ?: activeWeek
-                                                val otherConfirmed = state.bookings
-                                                    .filter {
-                                                        it.clientId == selectedClient.id &&
-                                                            it.weekKey == session.weekKey &&
-                                                            it.status == BookingStatus.CONFIRMED.name &&
-                                                            it.id != oldBooking.id
-                                                    }
-                                                    .mapNotNull { sessionMap[it.sessionId] }
-                                                val allUpdated = (otherConfirmed.filter { it.id != session.id } + session)
-                                                    .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
-                                                val singleMsg = buildSwapMessage(selectedClient, oldSession, session, listOf(session), targetWeek)
-                                                val weekMsg = if (allUpdated.size > 1) {
-                                                    buildSwapMessage(selectedClient, oldSession, session, allUpdated, targetWeek)
-                                                } else null
                                                 swappingTarget = null
-                                                messageDraft = PtMessageDraft(
-                                                    title = "Horário trocado · Enviar mensagem",
-                                                    subtitle = "${selectedClient.name} · Novo: ${session.dateLabel} às ${session.timeLabel}",
-                                                    client = selectedClient,
-                                                    message = singleMsg,
-                                                    alternateMessage = weekMsg
-                                                )
+                                                if (shouldPromptMessage(selectedClient)) {
+                                                    val targetWeek = weekMap[session.weekKey] ?: activeWeek
+                                                    val otherConfirmed = state.bookings
+                                                        .filter {
+                                                            it.clientId == selectedClient.id &&
+                                                                it.weekKey == session.weekKey &&
+                                                                it.status == BookingStatus.CONFIRMED.name &&
+                                                                it.id != oldBooking.id
+                                                        }
+                                                        .mapNotNull { sessionMap[it.sessionId] }
+                                                    val allUpdated = (otherConfirmed.filter { it.id != session.id } + session)
+                                                        .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
+                                                    val singleMsg = buildSwapMessage(selectedClient, oldSession, session, listOf(session), targetWeek)
+                                                    val weekMsg = if (allUpdated.size > 1) {
+                                                        buildSwapMessage(selectedClient, oldSession, session, allUpdated, targetWeek)
+                                                    } else null
+                                                    messageDraft = PtMessageDraft(
+                                                        title = "Horário trocado · Enviar mensagem",
+                                                        subtitle = "${selectedClient.name} · Novo: ${session.dateLabel} às ${session.timeLabel}",
+                                                        client = selectedClient,
+                                                        message = singleMsg,
+                                                        alternateMessage = weekMsg
+                                                    )
+                                                } else {
+                                                    Toast.makeText(context, "Horário trocado para ${session.dateLabel} às ${session.timeLabel} ✓", Toast.LENGTH_SHORT).show()
+                                                }
                                             },
                                             colors = ButtonDefaults.buttonColors(
                                                 containerColor = NewShapeGold,
@@ -881,22 +1023,26 @@ internal fun PtTrainingMarcacoesSection(
                                         Button(
                                             onClick = {
                                                 viewModel.addManualClientToSession(session.id, session.weekKey, selectedClient.id)
-                                                val targetWeek = weekMap[session.weekKey] ?: activeWeek
-                                                val singleMsg = buildConfirmMessage(selectedClient, listOf(session), targetWeek)
-                                                val allWeek = (studentWeekBookings
-                                                    .filter { it.first.status == BookingStatus.CONFIRMED.name && it.second.id != session.id }
-                                                    .map { it.second } + session)
-                                                    .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
-                                                val weekMsg = if (allWeek.size > 1) {
-                                                    buildConfirmMessage(selectedClient, allWeek, targetWeek)
-                                                } else null
-                                                messageDraft = PtMessageDraft(
-                                                    title = "Treino marcado · Enviar mensagem",
-                                                    subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
-                                                    client = selectedClient,
-                                                    message = singleMsg,
-                                                    alternateMessage = weekMsg
-                                                )
+                                                if (shouldPromptMessage(selectedClient)) {
+                                                    val targetWeek = weekMap[session.weekKey] ?: activeWeek
+                                                    val singleMsg = buildConfirmMessage(selectedClient, listOf(session), targetWeek)
+                                                    val allWeek = (studentWeekBookings
+                                                        .filter { it.first.status == BookingStatus.CONFIRMED.name && it.second.id != session.id }
+                                                        .map { it.second } + session)
+                                                        .sortedWith(compareBy<TrainingSessionRecord> { it.startMillis }.thenBy { it.timeLabel })
+                                                    val weekMsg = if (allWeek.size > 1) {
+                                                        buildConfirmMessage(selectedClient, allWeek, targetWeek)
+                                                    } else null
+                                                    messageDraft = PtMessageDraft(
+                                                        title = "Treino marcado · Enviar mensagem",
+                                                        subtitle = "${selectedClient.name} · ${session.dateLabel} às ${session.timeLabel}",
+                                                        client = selectedClient,
+                                                        message = singleMsg,
+                                                        alternateMessage = weekMsg
+                                                    )
+                                                } else {
+                                                    Toast.makeText(context, "Treino marcado para ${selectedClient.name} (${session.dateLabel} · ${session.timeLabel}) ✓", Toast.LENGTH_SHORT).show()
+                                                }
                                             },
                                             colors = ButtonDefaults.buttonColors(
                                                 containerColor = NewShapeGold,
@@ -1009,8 +1155,11 @@ internal fun PtTrainingMarcacoesSection(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { messageDraft = null }) {
-                    Text("Fechar", color = TextSecondaryDark)
+                TextButton(
+                    onClick = { messageDraft = null },
+                    modifier = Modifier.testTag("pt_training_msg_skip_btn")
+                ) {
+                    Text("Concluir sem enviar", color = TextSecondaryDark)
                 }
             }
         )

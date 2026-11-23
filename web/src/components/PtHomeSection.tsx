@@ -443,7 +443,11 @@ const PorConfirmarView: React.FC<{
                   studentPortalCode: settings.studentPortalCode,
                 });
                 await onConfirmCard(card);
-                onOpenWhatsApp(card.client.phone, msg);
+                onOpenWhatsApp(card.client.phone || null, msg);
+              }}
+              onConfirmSilently={async () => {
+                await onConfirmCard(card);
+                onBanner(`Confirmado para ${card.client.name} ✓ (sem envio de mensagem)`);
               }}
               onRejectItem={async (item) => {
                 const msg = buildMessageFromTemplate(templates, 'RECUSA', settings.siteBaseUrl, {
@@ -486,6 +490,7 @@ const PendingCardItem: React.FC<{
   templates: MessageTemplateRecord[];
   settings: StudioSettingsRecord;
   onConfirmAll: () => Promise<void>;
+  onConfirmSilently: () => Promise<void>;
   onRejectItem: (item: BookingWithSession) => Promise<void>;
   onMoveItem: (item: BookingWithSession, target: TrainingSessionRecord) => Promise<void>;
 }> = ({
@@ -497,12 +502,14 @@ const PendingCardItem: React.FC<{
   templates,
   settings,
   onConfirmAll,
+  onConfirmSilently,
   onRejectItem,
   onMoveItem,
 }) => {
   const [showPreview, setShowPreview] = useState(false);
   const [moveOpenId, setMoveOpenId] = useState<string | null>(null);
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
+  const hasPhone = Boolean(card.client.phone && card.client.phone.trim().length > 0);
 
   const previewText = buildMessageFromTemplate(
     templates,
@@ -527,7 +534,9 @@ const PendingCardItem: React.FC<{
             {card.isCancelledAll && <StatusPill tone="red">Cancelou</StatusPill>}
             {card.client.newClient && <StatusPill tone="blue">Novo</StatusPill>}
           </div>
-          <p className="text-xs text-[#A1A1AA]">{formatPhoneDisplay(card.client.phone)}</p>
+          <p className="text-xs text-[#A1A1AA]">
+            {hasPhone ? formatPhoneDisplay(card.client.phone) : 'Sem telemóvel'}
+          </p>
         </div>
         <div className="text-right">
           <p className="text-xs text-[#A1A1AA]">{formatTimeAgo(card.requestedAtMillis)}</p>
@@ -645,17 +654,34 @@ const PendingCardItem: React.FC<{
         </pre>
       )}
 
-      <div className="mt-4">
-        {isFirst ? (
-          <GoldButton fullWidth disabled={locked} onClick={onConfirmAll}>
+      <div className="mt-4 space-y-2">
+        {!hasPhone ? (
+          <GoldButton fullWidth disabled={locked} onClick={onConfirmSilently}>
             <Check className="h-4 w-4" />
-            {card.isCancelledAll ? 'Responder e abrir WhatsApp' : 'Confirmar e abrir WhatsApp'}
+            Confirmar sem mensagem
           </GoldButton>
         ) : (
-          <SecondaryButton fullWidth disabled={locked} onClick={onConfirmAll}>
-            <Check className="h-4 w-4" />
-            {card.isCancelledAll ? 'Responder e abrir WhatsApp' : 'Confirmar e abrir WhatsApp'}
-          </SecondaryButton>
+          <>
+            {isFirst ? (
+              <GoldButton fullWidth disabled={locked} onClick={onConfirmAll}>
+                <Check className="h-4 w-4" />
+                {card.isCancelledAll ? 'Responder e abrir WhatsApp' : 'Confirmar e abrir WhatsApp'}
+              </GoldButton>
+            ) : (
+              <SecondaryButton fullWidth disabled={locked} onClick={onConfirmAll}>
+                <Check className="h-4 w-4" />
+                {card.isCancelledAll ? 'Responder e abrir WhatsApp' : 'Confirmar e abrir WhatsApp'}
+              </SecondaryButton>
+            )}
+            <button
+              type="button"
+              disabled={locked}
+              onClick={onConfirmSilently}
+              className="w-full rounded-xl border border-[#323238] bg-[#242429] py-2 text-xs font-bold text-[#A1A1AA] transition hover:border-[#22C55E]/60 hover:text-[#86EFAC] disabled:opacity-40"
+            >
+              Confirmar sem enviar mensagem
+            </button>
+          </>
         )}
       </div>
     </BrandCard>

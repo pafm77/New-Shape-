@@ -109,29 +109,61 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
   );
 
   const [clientQuery, setClientQuery] = useState('');
-  const filteredClients = useMemo(() => {
-    const q = clientQuery.trim().toLowerCase();
-    if (!q) return activeClients;
-    return activeClients.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.phone.replace(/\D/g, '').includes(q.replace(/\D/g, ''))
-    );
-  }, [activeClients, clientQuery]);
-
-  const effectiveClient = useMemo(() => {
-    return (
-      activeClients.find((c) => c.id === selectedClientId) ||
-      filteredClients[0] ||
-      activeClients[0] ||
-      null
-    );
-  }, [activeClients, filteredClients, selectedClientId]);
+  const [bookingStatusFilter, setBookingStatusFilter] = useState<'ALL' | 'BOOKED' | 'UNBOOKED'>('ALL');
+  const [askMessageOnAction, setAskMessageOnAction] = useState(true);
 
   const sessionMap = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
   const weekMap = useMemo(() => new Map(weeks.map((w) => [w.weekKey, w])), [weeks]);
 
   const weekKey = activeWeek?.weekKey || '';
+
+  const clientWeekBookingCounts = useMemo(() => {
+    const map = new Map<string, { confirmed: number; pending: number }>();
+    if (!weekKey) return map;
+    bookings.forEach((b) => {
+      if (b.weekKey !== weekKey || b.status === 'CANCELLED') return;
+      const cur = map.get(b.clientId) || { confirmed: 0, pending: 0 };
+      if (b.status === 'CONFIRMED') cur.confirmed += 1;
+      else cur.pending += 1;
+      map.set(b.clientId, cur);
+    });
+    return map;
+  }, [bookings, weekKey]);
+
+  const bookedClientsCount = useMemo(
+    () =>
+      activeClients.filter((c) => {
+        const st = clientWeekBookingCounts.get(c.id);
+        return (st?.confirmed ?? 0) + (st?.pending ?? 0) > 0;
+      }).length,
+    [activeClients, clientWeekBookingCounts]
+  );
+  const unbookedClientsCount = activeClients.length - bookedClientsCount;
+
+  const filteredClients = useMemo(() => {
+    const q = clientQuery.trim().toLowerCase();
+    return activeClients.filter((c) => {
+      const st = clientWeekBookingCounts.get(c.id);
+      const totalBooked = (st?.confirmed ?? 0) + (st?.pending ?? 0);
+      if (bookingStatusFilter === 'BOOKED' && totalBooked === 0) return false;
+      if (bookingStatusFilter === 'UNBOOKED' && totalBooked > 0) return false;
+      if (!q) return true;
+      return (
+        c.name.toLowerCase().includes(q) ||
+        (c.phone && c.phone.replace(/\D/g, '').includes(q.replace(/\D/g, '')))
+      );
+    });
+  }, [activeClients, clientQuery, bookingStatusFilter, clientWeekBookingCounts]);
+
+  const effectiveClient = useMemo(() => {
+    return (
+      filteredClients.find((c) => c.id === selectedClientId) ||
+      filteredClients[0] ||
+      activeClients.find((c) => c.id === selectedClientId) ||
+      activeClients[0] ||
+      null
+    );
+  }, [activeClients, filteredClients, selectedClientId]);
 
   const weekSessions = useMemo(
     () =>
@@ -267,33 +299,38 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
     return `${base}\n\n🔄 Troca efetuada:\n• Antes: ${oldStr}\n• Novo horário: ${newStr}`;
   };
 
+  const shouldPromptMessage = (client: ClientRecord) =>
+    askMessageOnAction && Boolean(client.phone && client.phone.trim().length > 0);
+
   const handleBookForStudent = async (session: TrainingSessionRecord) => {
     if (!effectiveClient) return;
     setBusyKey(session.id);
     try {
       await repo.addManualBooking(uid, session.id, session.weekKey, effectiveClient.id);
-      const targetWeek = weekMap.get(session.weekKey) || activeWeek;
-      const singleMsg = buildConfirmMessage(effectiveClient, [session], targetWeek);
+      onBanner(`Treino marcado para ${effectiveClient.name} (${session.dateLabel} · ${session.timeLabel}) ✓`);
+      if (shouldPromptMessage(effectiveClient)) {
+        const targetWeek = weekMap.get(session.weekKey) || activeWeek;
+        const singleMsg = buildConfirmMessage(effectiveClient, [session], targetWeek);
 
-      const allWeekConfirmed = [
-        ...studentWeekBookings
-          .filter((x) => x.booking.status === 'CONFIRMED' && x.session.id !== session.id)
-          .map((x) => x.session),
-        session,
-      ].sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
-      const weekSummary =
-        allWeekConfirmed.length > 1
-          ? buildConfirmMessage(effectiveClient, allWeekConfirmed, targetWeek)
-          : undefined;
+        const allWeekConfirmed = [
+          ...studentWeekBookings
+            .filter((x) => x.booking.status === 'CONFIRMED' && x.session.id !== session.id)
+            .map((x) => x.session),
+          session,
+        ].sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
+        const weekSummary =
+          allWeekConfirmed.length > 1
+            ? buildConfirmMessage(effectiveClient, allWeekConfirmed, targetWeek)
+            : undefined;
 
-      onBanner(`Treino marcado para ${effectiveClient.name} (${session.dateLabel} · ${session.timeLabel}).`);
-      setMessageModal({
-        title: 'Treino marcado · Enviar mensagem',
-        subtitle: `${effectiveClient.name} · ${session.dateLabel} às ${session.timeLabel}`,
-        client: effectiveClient,
-        message: singleMsg,
-        weekSummaryMessage: weekSummary,
-      });
+        setMessageModal({
+          title: 'Treino marcado · Enviar mensagem',
+          subtitle: `${effectiveClient.name} · ${session.dateLabel} às ${session.timeLabel}`,
+          client: effectiveClient,
+          message: singleMsg,
+          weekSummaryMessage: weekSummary,
+        });
+      }
     } catch (e) {
       onBanner((e as Error).message || 'Erro ao marcar treino.');
     } finally {
@@ -306,15 +343,17 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
     setBusyKey(booking.id);
     try {
       await repo.confirmClientBookings(uid, [booking]);
-      const targetWeek = weekMap.get(session.weekKey) || activeWeek;
-      const msg = buildConfirmMessage(effectiveClient, [session], targetWeek);
-      onBanner(`Horário de ${effectiveClient.name} confirmado.`);
-      setMessageModal({
-        title: 'Marcação confirmada · Enviar mensagem',
-        subtitle: `${effectiveClient.name} · ${session.dateLabel} às ${session.timeLabel}`,
-        client: effectiveClient,
-        message: msg,
-      });
+      onBanner(`Horário de ${effectiveClient.name} confirmado ✓`);
+      if (shouldPromptMessage(effectiveClient)) {
+        const targetWeek = weekMap.get(session.weekKey) || activeWeek;
+        const msg = buildConfirmMessage(effectiveClient, [session], targetWeek);
+        setMessageModal({
+          title: 'Marcação confirmada · Enviar mensagem',
+          subtitle: `${effectiveClient.name} · ${session.dateLabel} às ${session.timeLabel}`,
+          client: effectiveClient,
+          message: msg,
+        });
+      }
     } catch (e) {
       onBanner((e as Error).message || 'Erro ao confirmar marcação.');
     } finally {
@@ -329,40 +368,42 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
       const { booking: oldBooking, session: oldSession } = swappingTarget;
       await repo.swapBookingToSession(uid, oldBooking, newSession);
 
-      const targetWeek = weekMap.get(newSession.weekKey) || activeWeek;
-      const updatedWeekConfirmed = bookings
-        .filter(
-          (b) =>
-            b.clientId === effectiveClient.id &&
-            b.weekKey === newSession.weekKey &&
-            b.status === 'CONFIRMED' &&
-            b.id !== oldBooking.id
-        )
-        .map((b) => sessionMap.get(b.sessionId))
-        .filter((s): s is TrainingSessionRecord => Boolean(s));
-
-      const merged = [
-        ...updatedWeekConfirmed.filter((s) => s.id !== newSession.id),
-        newSession,
-      ].sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
-
-      const swapMsg = buildSwapMessage(effectiveClient, oldSession, newSession, [newSession], targetWeek);
-      const weekSummary =
-        merged.length > 1
-          ? buildSwapMessage(effectiveClient, oldSession, newSession, merged, targetWeek)
-          : undefined;
-
       setSwappingTarget(null);
       onBanner(
-        `Horário de ${effectiveClient.name} trocado para ${newSession.dateLabel} às ${newSession.timeLabel}.`
+        `Horário de ${effectiveClient.name} trocado para ${newSession.dateLabel} às ${newSession.timeLabel} ✓`
       );
-      setMessageModal({
-        title: 'Horário trocado · Enviar mensagem',
-        subtitle: `${effectiveClient.name} · Novo: ${newSession.dateLabel} às ${newSession.timeLabel}`,
-        client: effectiveClient,
-        message: swapMsg,
-        weekSummaryMessage: weekSummary,
-      });
+      if (shouldPromptMessage(effectiveClient)) {
+        const targetWeek = weekMap.get(newSession.weekKey) || activeWeek;
+        const updatedWeekConfirmed = bookings
+          .filter(
+            (b) =>
+              b.clientId === effectiveClient.id &&
+              b.weekKey === newSession.weekKey &&
+              b.status === 'CONFIRMED' &&
+              b.id !== oldBooking.id
+          )
+          .map((b) => sessionMap.get(b.sessionId))
+          .filter((s): s is TrainingSessionRecord => Boolean(s));
+
+        const merged = [
+          ...updatedWeekConfirmed.filter((s) => s.id !== newSession.id),
+          newSession,
+        ].sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
+
+        const swapMsg = buildSwapMessage(effectiveClient, oldSession, newSession, [newSession], targetWeek);
+        const weekSummary =
+          merged.length > 1
+            ? buildSwapMessage(effectiveClient, oldSession, newSession, merged, targetWeek)
+            : undefined;
+
+        setMessageModal({
+          title: 'Horário trocado · Enviar mensagem',
+          subtitle: `${effectiveClient.name} · Novo: ${newSession.dateLabel} às ${newSession.timeLabel}`,
+          client: effectiveClient,
+          message: swapMsg,
+          weekSummaryMessage: weekSummary,
+        });
+      }
     } catch (e) {
       onBanner((e as Error).message || 'Erro ao trocar horário.');
     } finally {
@@ -378,15 +419,17 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
       if (swappingTarget?.booking.id === booking.id) {
         setSwappingTarget(null);
       }
-      const firstName = effectiveClient.name.trim().split(/\s+/)[0] || effectiveClient.name;
-      const cancelMsg = `Olá ${firstName}, o teu treino de ${session.dateLabel} às ${session.timeLabel.replace(':', 'h')} foi desmarcado. Diz-me quando preferes reagendar! 💪 New Shape`;
       onBanner(`Treino de ${effectiveClient.name} desmarcado.`);
-      setMessageModal({
-        title: 'Treino desmarcado · Avisar aluno',
-        subtitle: `${effectiveClient.name} · ${session.dateLabel} às ${session.timeLabel}`,
-        client: effectiveClient,
-        message: cancelMsg,
-      });
+      if (shouldPromptMessage(effectiveClient)) {
+        const firstName = effectiveClient.name.trim().split(/\s+/)[0] || effectiveClient.name;
+        const cancelMsg = `Olá ${firstName}, o teu treino de ${session.dateLabel} às ${session.timeLabel.replace(':', 'h')} foi desmarcado. Diz-me quando preferes reagendar! 💪 New Shape`;
+        setMessageModal({
+          title: 'Treino desmarcado · Avisar aluno',
+          subtitle: `${effectiveClient.name} · ${session.dateLabel} às ${session.timeLabel}`,
+          client: effectiveClient,
+          message: cancelMsg,
+        });
+      }
     } catch (e) {
       onBanner((e as Error).message || 'Erro ao desmarcar treino.');
     } finally {
@@ -414,7 +457,7 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
               Marcar ou Trocar Treino pelo Aluno
             </p>
             <p className="text-xs text-[#A1A1AA]">
-              Escolhe o aluno, marca ou troca o horário e envia logo a mensagem de confirmação.
+              Escolhe o aluno, vê se já tem treinos marcados e marca/troca horários (mensagem opcional).
             </p>
           </div>
           {effectiveClient && (
@@ -422,6 +465,41 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
               {effectiveClient.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
             </StatusPill>
           )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: 'ALL' as const, label: `Todos (${activeClients.length})` },
+                { id: 'BOOKED' as const, label: `Já marcados (${bookedClientsCount})` },
+                { id: 'UNBOOKED' as const, label: `Por marcar (${unbookedClientsCount})` },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setBookingStatusFilter(opt.id)}
+                className={`rounded-xl border px-2.5 py-1 text-xs font-bold transition ${
+                  bookingStatusFilter === opt.id
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-[#A1A1AA]">
+            <input
+              type="checkbox"
+              checked={askMessageOnAction}
+              onChange={(e) => setAskMessageOnAction(e.target.checked)}
+              className="h-4 w-4 accent-[#EAB308]"
+            />
+            Pedir envio de mensagem ao marcar
+          </label>
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -448,12 +526,23 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
               {filteredClients.length === 0 ? (
                 <option value="">Nenhum aluno encontrado</option>
               ) : (
-                filteredClients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.phone ? ` · ${formatPhoneDisplay(c.phone)}` : ''}
-                  </option>
-                ))
+                filteredClients.map((c) => {
+                  const st = clientWeekBookingCounts.get(c.id);
+                  const conf = st?.confirmed ?? 0;
+                  const pend = st?.pending ?? 0;
+                  const statusStr =
+                    conf > 0
+                      ? `✓ ${conf} marcado${conf > 1 ? 's' : ''}`
+                      : pend > 0
+                      ? `${pend} por confirmar`
+                      : 'Por marcar';
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {c.name} · {statusStr}
+                      {!c.phone ? ' (sem tel.)' : ''}
+                    </option>
+                  );
+                })
               )}
             </select>
           </div>
@@ -464,19 +553,21 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
             <div className="min-w-0">
               <p className="text-sm font-bold text-[#F4F4F5]">{effectiveClient.name}</p>
               <p className="text-xs text-[#A1A1AA]">
-                {effectiveClient.phone ? formatPhoneDisplay(effectiveClient.phone) : 'Sem telemóvel'}
+                {effectiveClient.phone ? formatPhoneDisplay(effectiveClient.phone) : 'Sem telemóvel (marcação direta sem mensagem)'}
                 {effectiveClient.weeklySessionLimit && effectiveClient.weeklySessionLimit > 0
                   ? ` · Pacote ${effectiveClient.weeklySessionLimit}×/semana`
                   : ''}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <StatusPill tone={confirmedCountInWeek > 0 ? 'green' : 'neutral'}>
-                {confirmedCountInWeek}
-                {effectiveClient.weeklySessionLimit && effectiveClient.weeklySessionLimit > 0
-                  ? `/${effectiveClient.weeklySessionLimit}`
-                  : ''}{' '}
-                confirmado(s)
+              <StatusPill tone={confirmedCountInWeek > 0 ? 'green' : 'amber'}>
+                {confirmedCountInWeek > 0
+                  ? `✓ ${confirmedCountInWeek}${
+                      effectiveClient.weeklySessionLimit && effectiveClient.weeklySessionLimit > 0
+                        ? `/${effectiveClient.weeklySessionLimit}`
+                        : ''
+                    } marcado${confirmedCountInWeek > 1 ? 's' : ''}`
+                  : 'Sem treinos marcados'}
               </StatusPill>
             </div>
           </div>
@@ -942,6 +1033,17 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                   {copiedMsg ? 'Copiada ✓' : 'Copiar'}
                 </SecondaryButton>
               </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMessageModal(null);
+                  setCopiedMsg(false);
+                }}
+                className="w-full rounded-xl border border-[#323238] bg-transparent py-2 text-xs font-semibold text-[#A1A1AA] transition hover:bg-[#242429] hover:text-white"
+              >
+                Concluir sem enviar mensagem
+              </button>
             </div>
           </div>
         </Modal>

@@ -305,6 +305,9 @@ private fun PorConfirmarSection(
                         viewModel.confirmCardAndNotify(card)
                         openWhatsApp(context, card.client.phone, msg, state.settings.whatsappWebMode)
                     },
+                    onConfirmSilently = {
+                        viewModel.confirmCardSilently(card)
+                    },
                     onRejectItem = { item ->
                         val msg = viewModel.buildMessage(
                             templateKey = "RECUSA",
@@ -340,6 +343,7 @@ private fun PendingConfirmationCardView(
     allBookings: List<BookingRecord>,
     buildMessage: (String, List<TrainingSessionRecord>) -> String,
     onConfirmAll: () -> Unit,
+    onConfirmSilently: () -> Unit,
     onRejectItem: (BookingWithSession) -> Unit,
     onMoveItem: (BookingWithSession, TrainingSessionRecord) -> Unit
 ) {
@@ -372,7 +376,7 @@ private fun PendingConfirmationCardView(
                     }
                 }
                 Text(
-                    text = card.client.phone,
+                    text = card.client.phone.ifBlank { "Sem telemóvel" },
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondaryDark
                 )
@@ -539,23 +543,60 @@ private fun PendingConfirmationCardView(
         }
 
         Spacer(Modifier.height(6.dp))
-        val ctaLabel = if (card.isCancelledAll) "Responder e abrir WhatsApp" else "Confirmar e abrir WhatsApp"
-        if (isFirst) {
-            GoldPrimaryButton(
-                text = ctaLabel,
-                icon = Icons.Default.Check,
-                enabled = !isLockedByWhatsApp,
-                onClick = onConfirmAll,
-                modifier = Modifier.fillMaxWidth(),
-                testTag = "confirm_first_card_button"
-            )
+        val hasPhone = card.client.phone.isNotBlank()
+        if (!hasPhone) {
+            val silentLabel = if (card.isCancelledAll) "Concluir sem mensagem" else "Confirmar sem mensagem"
+            if (isFirst) {
+                GoldPrimaryButton(
+                    text = silentLabel,
+                    icon = Icons.Default.Check,
+                    onClick = onConfirmSilently,
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "confirm_first_card_silent_button"
+                )
+            } else {
+                DarkSecondaryButton(
+                    text = silentLabel,
+                    icon = Icons.Default.Check,
+                    onClick = onConfirmSilently,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         } else {
-            DarkSecondaryButton(
-                text = ctaLabel,
-                icon = Icons.Default.Check,
-                onClick = { if (!isLockedByWhatsApp) onConfirmAll() },
-                modifier = Modifier.fillMaxWidth()
-            )
+            val ctaLabel = if (card.isCancelledAll) "Responder e abrir WhatsApp" else "Confirmar e abrir WhatsApp"
+            if (isFirst) {
+                GoldPrimaryButton(
+                    text = ctaLabel,
+                    icon = Icons.Default.Check,
+                    enabled = !isLockedByWhatsApp,
+                    onClick = onConfirmAll,
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "confirm_first_card_button"
+                )
+            } else {
+                DarkSecondaryButton(
+                    text = ctaLabel,
+                    icon = Icons.Default.Check,
+                    onClick = { if (!isLockedByWhatsApp) onConfirmAll() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = onConfirmSilently,
+                border = BorderStroke(1.dp, HairlineBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("confirm_card_silent_${card.client.id}")
+            ) {
+                Icon(Icons.Default.Done, contentDescription = null, tint = TextSecondaryDark, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (card.isCancelledAll) "Concluir sem enviar mensagem" else "Confirmar sem enviar mensagem",
+                    color = TextSecondaryDark,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
         }
     }
 }

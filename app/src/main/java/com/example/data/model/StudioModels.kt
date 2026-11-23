@@ -251,6 +251,8 @@ data class ChatMessageRecord(
     val senderRole: String = "PT",
     val text: String = "",
     val timestampMillis: Long = 0L,
+    val deliveredAtMillis: Long = 0L,
+    val readAtMillis: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

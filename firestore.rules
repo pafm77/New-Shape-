@@ -179,7 +179,9 @@ service cloud.firestore {
              data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
              data.senderRole in ['PT', 'STUDENT'] &&
              data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
-             data.timestampMillis is int;
+             data.timestampMillis is int &&
+             (!('deliveredAtMillis' in data) || (data.deliveredAtMillis is int && data.deliveredAtMillis >= 0)) &&
+             (!('readAtMillis' in data) || (data.readAtMillis is int && data.readAtMillis >= 0));
     }
 
     function isValidMessageTemplate(data) {
@@ -218,7 +220,7 @@ service cloud.firestore {
       return data.userId is string && data.userId.size() <= 128 &&
              data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
              data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 100 &&
-             data.type in ['CANCELLED', 'ALTERED', 'UNAVAILABLE', 'ASSESSMENT'] &&
+             data.type in ['CANCELLED', 'ALTERED', 'UNAVAILABLE', 'ASSESSMENT', 'CHAT'] &&
              data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 400 &&
              data.weekKey is string && data.weekKey.size() <= 30 &&
              data.read is bool &&
@@ -522,10 +524,20 @@ service cloud.firestore {
                          incoming().userId == userId &&
                          (isOwner(userId) || incoming().senderRole == 'STUDENT') &&
                          incoming().keys().hasAll(['userId', 'clientId', 'senderRole', 'text', 'timestampMillis', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'clientId', 'senderRole', 'text', 'timestampMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'senderRole', 'text', 'timestampMillis', 'deliveredAtMillis', 'readAtMillis', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidChatMessage(incoming());
-        allow update: if false;
+        allow update: if canAccessStudio(userId) && isValidId(messageId) &&
+                         isValidChatMessage(incoming()) &&
+                         (isOwner(userId) || existing().senderRole == 'PT') &&
+                         incoming().userId == existing().userId &&
+                         incoming().clientId == existing().clientId &&
+                         incoming().senderRole == existing().senderRole &&
+                         incoming().text == existing().text &&
+                         incoming().timestampMillis == existing().timestampMillis &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['deliveredAtMillis', 'readAtMillis', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(messageId);
       }
 

@@ -318,6 +318,32 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     [chatMessages, client.id]
   );
 
+  const unreadChatCount = useMemo(
+    () => clientMessages.filter((m) => m.senderRole === 'PT' && !m.readAtMillis).length,
+    [clientMessages]
+  );
+
+  const deliveredPtMsgIdsRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const undelivered = clientMessages.filter(
+      (m) =>
+        m.senderRole === 'PT' &&
+        !m.deliveredAtMillis &&
+        !m.readAtMillis &&
+        !deliveredPtMsgIdsRef.current.has(m.id)
+    );
+    if (undelivered.length === 0) return;
+    undelivered.forEach((m) => deliveredPtMsgIdsRef.current.add(m.id));
+    void repo
+      .markChatMessagesDelivered(
+        uid,
+        undelivered.map((m) => m.id)
+      )
+      .catch(() => {
+        undelivered.forEach((m) => deliveredPtMsgIdsRef.current.delete(m.id));
+      });
+  }, [uid, clientMessages]);
+
   const navItems: {
     id: StudentTab;
     label: string;
@@ -360,7 +386,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       label: 'Chat',
       mobileLabel: 'Chat',
       icon: <MessageCircle className="h-4 w-4" />,
-      badge: clientMessages.length > 0 ? clientMessages.length : undefined,
+      badge: unreadChatCount > 0 ? unreadChatCount : undefined,
     },
   ];
 
@@ -926,6 +952,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 uid={uid}
                 clientId={client.id}
                 clientName="Personal Trainer"
+                senderClientName={client.name}
                 viewerRole="STUDENT"
                 messages={clientMessages}
               />

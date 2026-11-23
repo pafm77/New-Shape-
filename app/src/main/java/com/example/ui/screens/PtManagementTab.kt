@@ -43,7 +43,7 @@ fun PtManagementTab(
     initialSubTab: Int = 0,
     initialChatClientId: String? = null
 ) {
-    val subTabs = remember(state.isSuperAdmin, state.pendingPtApprovalsCount) {
+    val subTabs = remember(state.isSuperAdmin, state.pendingPtApprovalsCount, state.unreadPtChatCount) {
         if (state.isSuperAdmin) {
             val teamTitle = if (state.pendingPtApprovalsCount > 0) "Equipa PT (${state.pendingPtApprovalsCount})" else "Equipa PT"
             listOf(
@@ -88,11 +88,21 @@ fun PtManagementTab(
                         },
                         modifier = Modifier.testTag("pt_mgmt_subtab_$key"),
                         text = {
-                            Text(
-                                text = title,
-                                fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
-                                color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = title,
+                                    fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
+                                )
+                                if (key == "CHAT" && state.unreadPtChatCount > 0) {
+                                    Badge(containerColor = DangerRed, contentColor = TextPrimaryDark) {
+                                        Text(state.unreadPtChatCount.toString())
+                                    }
+                                }
+                            }
                         }
                     )
                 }
@@ -113,11 +123,21 @@ fun PtManagementTab(
                         },
                         modifier = Modifier.testTag("pt_mgmt_subtab_$key"),
                         text = {
-                            Text(
-                                text = title,
-                                fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
-                                color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = title,
+                                    fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
+                                )
+                                if (key == "CHAT" && state.unreadPtChatCount > 0) {
+                                    Badge(containerColor = DangerRed, contentColor = TextPrimaryDark) {
+                                        Text(state.unreadPtChatCount.toString())
+                                    }
+                                }
+                            }
                         }
                     )
                 }
@@ -1114,23 +1134,60 @@ private fun PtChatSection(
             messages = threadMessages,
             viewerRole = "PT",
             onSendMessage = { text -> viewModel.sendChatMessage(activeClient.id, "PT", text) },
+            onMarkRead = { viewModel.markChatThreadRead(activeClient.id, "PT") },
             onBack = { onSelectClient(null) }
         )
         return
     }
 
-    val activeClients = remember(state.clients) { state.clients.filter { it.active } }
+    val sortedThreads = remember(state.clients, state.chatMessages) {
+        val activeClients = state.clients.filter { it.active }
+        val msgsByClient = state.chatMessages.groupBy { it.clientId }
+        activeClients
+            .map { client ->
+                val msgs = msgsByClient[client.id].orEmpty()
+                val unreadMsgs = msgs.filter { it.senderRole == "STUDENT" && it.readAtMillis == 0L }
+                val lastMsg = msgs.lastOrNull()
+                val latestUnreadTs = unreadMsgs.lastOrNull()?.timestampMillis ?: 0L
+                val latestMsgTs = lastMsg?.timestampMillis ?: 0L
+                Triple(client, unreadMsgs.size, Triple(lastMsg, latestUnreadTs, latestMsgTs))
+            }
+            .sortedWith(
+                compareByDescending<Triple<ClientRecord, Int, Triple<com.example.data.model.ChatMessageRecord?, Long, Long>>> {
+                    if (it.second > 0) 1 else 0
+                }
+                    .thenByDescending { it.third.second }
+                    .thenByDescending { it.third.third }
+                    .thenBy { it.first.name.lowercase() }
+            )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Text("Chat Privado com Alunos", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-            Text("Seleciona um aluno para abrir a conversa privada.", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Chat Privado com Alunos", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                    Text("Mensagens por ler aparecem automaticamente no topo.", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                }
+                if (state.unreadPtChatCount > 0) {
+                    StatusPill(
+                        text = "${state.unreadPtChatCount} por ler",
+                        textColor = DangerRed,
+                        containerColor = DangerRedContainer
+                    )
+                }
+            }
         }
 
-        if (activeClients.isEmpty()) {
+        if (sortedThreads.isEmpty()) {
             item {
                 EmptyStateBox(
                     icon = Icons.AutoMirrored.Filled.Chat,
@@ -1139,13 +1196,13 @@ private fun PtChatSection(
                 )
             }
         } else {
-            items(activeClients, key = { it.id }) { client ->
-                val clientMsgs = state.chatMessages.filter { it.clientId == client.id }
-                val lastMsg = clientMsgs.lastOrNull()
+            items(sortedThreads, key = { it.first.id }) { (client, unreadCount, meta) ->
+                val lastMsg = meta.first
+                val hasUnread = unreadCount > 0
                 Surface(
-                    color = CharcoalSurface,
+                    color = if (hasUnread) ElevatedCharcoal else CharcoalSurface,
                     shape = MaterialTheme.shapes.medium,
-                    border = BorderStroke(1.dp, HairlineBorder),
+                    border = BorderStroke(1.dp, if (hasUnread) NewShapeGold else HairlineBorder),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(MaterialTheme.shapes.medium)
@@ -1158,16 +1215,57 @@ private fun PtChatSection(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(client.name, style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
                             Text(
-                                text = lastMsg?.text ?: "Tocar para enviar mensagem...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (lastMsg != null) TextSecondaryDark else NewShapeGold,
-                                maxLines = 1
+                                text = client.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.SemiBold,
+                                color = TextPrimaryDark
                             )
+                            Spacer(Modifier.height(2.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (lastMsg != null && lastMsg.senderRole == "PT") {
+                                    ChatReceiptStatusIcon(message = lastMsg, onGoldBubble = false)
+                                }
+                                Text(
+                                    text = when {
+                                        lastMsg == null -> "Tocar para enviar mensagem..."
+                                        lastMsg.senderRole == "PT" -> "Tu: ${lastMsg.text}"
+                                        else -> lastMsg.text
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = when {
+                                        hasUnread -> TextPrimaryDark
+                                        lastMsg != null -> TextSecondaryDark
+                                        else -> NewShapeGold
+                                    },
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        if (clientMsgs.isNotEmpty()) {
-                            StatusPill("${clientMsgs.size}", NewShapeGoldBright, NewShapeGoldMuted)
+                        Spacer(Modifier.width(10.dp))
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (lastMsg != null) {
+                                Text(
+                                    text = formatTimeAgo(lastMsg.timestampMillis),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (hasUnread) NewShapeGoldBright else TextSecondaryDark
+                                )
+                            }
+                            if (hasUnread) {
+                                Badge(
+                                    containerColor = DangerRed,
+                                    contentColor = TextPrimaryDark
+                                ) {
+                                    Text(unreadCount.toString())
+                                }
+                            }
                         }
                     }
                 }

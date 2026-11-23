@@ -115,6 +115,35 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
     return map;
   }, [clients, fidelizacoes]);
 
+  const clientUpcomingBookingsMap = useMemo(() => {
+    const sessionById = new Map(sessions.map((s) => [s.id, s]));
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const minMillis = todayStart.getTime();
+    const map = new Map<string, { confirmed: number; pending: number; nextLabel: string }>();
+
+    const grouped = new Map<string, Array<{ booking: BookingRecord; session: TrainingSessionRecord }>>();
+    bookings.forEach((b) => {
+      if (b.status === 'CANCELLED') return;
+      const ses = sessionById.get(b.sessionId);
+      if (!ses || ses.startMillis < minMillis) return;
+      const list = grouped.get(b.clientId) || [];
+      list.push({ booking: b, session: ses });
+      grouped.set(b.clientId, list);
+    });
+
+    grouped.forEach((items, clientId) => {
+      items.sort((a, b) => a.session.startMillis - b.session.startMillis);
+      const confirmed = items.filter((i) => i.booking.status === 'CONFIRMED').length;
+      const pending = items.filter((i) => i.booking.status !== 'CONFIRMED').length;
+      const next = items[0]?.session;
+      const nextLabel = next ? `${next.dateLabel} · ${next.timeLabel.replace(':', 'h')}` : '';
+      map.set(clientId, { confirmed, pending, nextLabel });
+    });
+
+    return map;
+  }, [bookings, sessions]);
+
   if (selectedClient) {
     return (
       <ClientProfileView
@@ -276,6 +305,9 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                 !isExtraFeePayment(p.note)
             );
             const effectiveFid = clientFidMonthsMap.get(c.id) || 0;
+            const upcomingInfo = clientUpcomingBookingsMap.get(c.id);
+            const hasBookedTrainings = (upcomingInfo?.confirmed ?? 0) > 0;
+            const hasPendingTrainings = (upcomingInfo?.pending ?? 0) > 0;
             return (
               <div
                 key={c.id}
@@ -292,10 +324,24 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       {(c.weeklySessionLimit ?? 0) > 0 && (
                         <StatusPill tone="neutral">{c.weeklySessionLimit}x/sem</StatusPill>
                       )}
+                      {hasBookedTrainings ? (
+                        <StatusPill tone="green">
+                          ✓ {upcomingInfo!.confirmed} marcado{upcomingInfo!.confirmed > 1 ? 's' : ''}
+                        </StatusPill>
+                      ) : hasPendingTrainings ? (
+                        <StatusPill tone="amber">
+                          {upcomingInfo!.pending} por confirmar
+                        </StatusPill>
+                      ) : (
+                        <StatusPill tone="neutral">Por marcar</StatusPill>
+                      )}
                       {c.newClient && <StatusPill tone="blue">Novo</StatusPill>}
                       {!c.active && <StatusPill>Inativo</StatusPill>}
                     </div>
-                    <p className="text-xs text-[#A1A1AA]">{formatPhoneDisplay(c.phone)}</p>
+                    <p className="text-xs text-[#A1A1AA]">
+                      {c.phone ? formatPhoneDisplay(c.phone) : 'Sem telemóvel'}
+                      {upcomingInfo?.nextLabel ? ` · Próx.: ${upcomingInfo.nextLabel}` : ''}
+                    </p>
                     {((isSuperAdmin && c.monthlyFeeEur > 0) || effectiveFid > 0) && (
                       <p className="mt-1 text-xs font-semibold text-[#EAB308]">
                         {[
@@ -478,6 +524,20 @@ const ClientProfileView: React.FC<{
           Boolean(item.session)
       )
       .sort((a, b) => b.session.startMillis - a.session.startMillis);
+  }, [bookings, sessionMap]);
+
+  const upcomingBookings = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const minMs = todayStart.getTime();
+    return bookings
+      .filter((b) => b.status !== 'CANCELLED')
+      .map((b) => ({ booking: b, session: sessionMap.get(b.sessionId) }))
+      .filter(
+        (item): item is { booking: BookingRecord; session: TrainingSessionRecord } =>
+          Boolean(item.session && item.session.startMillis >= minMs)
+      )
+      .sort((a, b) => a.session.startMillis - b.session.startMillis);
   }, [bookings, sessionMap]);
 
   const presentCount = confirmedHistory.filter((i) => i.booking.attendanceStatus === 'PRESENT').length;
@@ -728,6 +788,41 @@ const ClientProfileView: React.FC<{
         </div>
       ) : (
         <>
+      <BrandCard highlight={upcomingBookings.length > 0}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CalendarCheck className="h-4 w-4 text-[#EAB308]" />
+            <h3 className="text-base font-bold text-[#F4F4F5]">Próximos Treinos Marcados</h3>
+          </div>
+          <StatusPill tone={upcomingBookings.length > 0 ? 'green' : 'neutral'}>
+            {upcomingBookings.length > 0
+              ? `${upcomingBookings.length} marcado${upcomingBookings.length > 1 ? 's' : ''}`
+              : 'Sem marcações'}
+          </StatusPill>
+        </div>
+        {upcomingBookings.length === 0 ? (
+          <p className="mt-2 text-xs text-[#A1A1AA]">
+            Este aluno ainda não tem treinos marcados para hoje ou próximos dias.
+          </p>
+        ) : (
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {upcomingBookings.map(({ booking, session }) => (
+              <div
+                key={booking.id}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-semibold ${
+                  booking.status === 'CONFIRMED'
+                    ? 'border-[#22C55E]/40 bg-[#143524]/40 text-[#86EFAC]'
+                    : 'border-[#F59E0B]/40 bg-[#3F2A10]/40 text-[#FDE68A]'
+                }`}
+              >
+                {session.dateLabel} · {session.timeLabel.replace(':', 'h')}{' '}
+                {booking.status === 'CONFIRMED' ? '✓' : '(por confirmar)'}
+              </div>
+            ))}
+          </div>
+        )}
+      </BrandCard>
+
       <BrandCard>
         <h3 className="text-base font-bold text-[#FACC15]">Dados do Perfil & Plano</h3>
         <div className="mt-3 space-y-3">
@@ -780,8 +875,12 @@ const ClientProfileView: React.FC<{
           </div>
           <div className={`grid grid-cols-1 ${isSuperAdmin ? 'sm:grid-cols-2' : ''} gap-3`}>
             <div>
-              <FieldLabel>Telemóvel WhatsApp</FieldLabel>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <FieldLabel>Telemóvel WhatsApp (opcional)</FieldLabel>
+              <Input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Sem telemóvel"
+              />
             </div>
             {isSuperAdmin && (
               <div>
@@ -1034,13 +1133,16 @@ const NewClientModal: React.FC<{
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Marta Dias" />
         </div>
         <div>
-          <FieldLabel>Telemóvel (9 dígitos)</FieldLabel>
+          <FieldLabel>Telemóvel (opcional · 9 dígitos)</FieldLabel>
           <Input
             type="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            placeholder="914 000 001"
+            placeholder="Opcional — podes deixar vazio"
           />
+          <p className="mt-1 text-[11px] text-[#A1A1AA]">
+            Podes adicionar o cliente apenas com o nome e preencher o telemóvel mais tarde.
+          </p>
         </div>
         <div>
           <FieldLabel>Tipo de Treino</FieldLabel>
@@ -1137,9 +1239,9 @@ const ImportClientsModal: React.FC<{
     <Modal open title="Importar lista ou CSV" onClose={onClose}>
       <div className="space-y-3">
         <p className="text-xs text-[#A1A1AA]">
-          Cola uma pessoa por linha com nome e telemóvel separados por ponto e vírgula (
-          <code className="text-[#FACC15]">Ana Ribeiro;912 345 678</code>) ou escolhe um ficheiro
-          CSV.
+          Cola uma pessoa por linha com nome e telemóvel opcional separados por ponto e vírgula (
+          <code className="text-[#FACC15]">Ana Ribeiro;912 345 678</code> ou apenas{' '}
+          <code className="text-[#FACC15]">Marta Dias</code>) ou escolhe um ficheiro CSV.
         </p>
         <input
           type="file"

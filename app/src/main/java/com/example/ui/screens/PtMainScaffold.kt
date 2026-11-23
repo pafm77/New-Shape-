@@ -43,6 +43,15 @@ fun PtMainScaffold(
     var showNotificationsDialog by remember { mutableStateOf(false) }
     var seenNotificationIds by remember { mutableStateOf<Set<String>?>(null) }
 
+    LaunchedEffect(state.chatMessages) {
+        val undeliveredIds = state.chatMessages
+            .filter { it.senderRole == "STUDENT" && it.deliveredAtMillis == 0L && it.readAtMillis == 0L }
+            .map { it.id }
+        if (undeliveredIds.isNotEmpty()) {
+            viewModel.markChatMessagesDelivered(undeliveredIds)
+        }
+    }
+
     LaunchedEffect(state.ptNotifications) {
         val currentIds = state.ptNotifications.map { it.id }.toSet()
         val prev = seenNotificationIds
@@ -59,6 +68,7 @@ fun PtMainScaffold(
                         "CANCELLED" -> "Treino cancelado · ${n.clientName}"
                         "UNAVAILABLE" -> "Aluno indisponível · ${n.clientName}"
                         "ASSESSMENT" -> "Nova avaliação física · ${n.clientName}"
+                        "CHAT" -> "Nova mensagem · ${n.clientName}"
                         else -> "Horário alterado · ${n.clientName}"
                     }
                     WorkoutNotificationHelper.showImmediateNotification(
@@ -257,7 +267,7 @@ fun PtMainScaffold(
                         navItems.forEachIndexed { idx, (label, icon, tag) ->
                             val badgeCount = when (idx) {
                                 0 -> state.pendingQueue.size
-                                5 -> if (state.isSuperAdmin) state.pendingPtApprovalsCount else 0
+                                5 -> (if (state.isSuperAdmin) state.pendingPtApprovalsCount else 0) + state.unreadPtChatCount
                                 else -> 0
                             }
                             NavigationBarItem(
@@ -308,7 +318,7 @@ fun PtMainScaffold(
                         navItems.forEachIndexed { idx, (label, icon, tag) ->
                             val badgeCount = when (idx) {
                                 0 -> state.pendingQueue.size
-                                5 -> if (state.isSuperAdmin) state.pendingPtApprovalsCount else 0
+                                5 -> (if (state.isSuperAdmin) state.pendingPtApprovalsCount else 0) + state.unreadPtChatCount
                                 else -> 0
                             }
                             NavigationRailItem(
@@ -402,6 +412,12 @@ fun PtMainScaffold(
             onOpenAssessment = {
                 showNotificationsDialog = false
                 selectedTab = 4
+            },
+            onOpenChat = { clientId ->
+                showNotificationsDialog = false
+                mgmtInitialSubTab = if (state.isSuperAdmin) 2 else 1
+                mgmtChatClientId = clientId
+                selectedTab = 5
             }
         )
     }
@@ -414,8 +430,15 @@ private fun PtNotificationsDialog(
     onMarkRead: (String) -> Unit,
     onMarkAllRead: () -> Unit,
     onDelete: (String) -> Unit,
-    onOpenAssessment: () -> Unit
+    onOpenAssessment: () -> Unit,
+    onOpenChat: (String) -> Unit
 ) {
+    val sortedNotifs = remember(notifications) {
+        notifications.sortedWith(
+            compareBy<PtNotificationRecord> { it.read }
+                .thenByDescending { it.timestampMillis }
+        )
+    }
     val hasUnread = notifications.any { !it.read }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -438,9 +461,9 @@ private fun PtNotificationsDialog(
             }
         },
         text = {
-            if (notifications.isEmpty()) {
+            if (sortedNotifs.isEmpty()) {
                 Text(
-                    "Sem notificações de avaliações, cancelamentos ou alterações de horário.",
+                    "Sem notificações de mensagens, avaliações, cancelamentos ou alterações.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondaryDark
                 )
@@ -449,9 +472,10 @@ private fun PtNotificationsDialog(
                     modifier = Modifier.heightIn(max = 360.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(notifications, key = { it.id }) { notif ->
+                    items(sortedNotifs, key = { it.id }) { notif ->
                         val isCancel = notif.type == "CANCELLED" || notif.type == "UNAVAILABLE"
                         val isAssessment = notif.type == "ASSESSMENT"
+                        val isChat = notif.type == "CHAT"
                         Surface(
                             color = if (!notif.read) ElevatedCharcoal else ObsidianBg,
                             shape = RoundedCornerShape(10.dp),
@@ -461,14 +485,15 @@ private fun PtNotificationsDialog(
                                     notif.read -> HairlineBorder
                                     isCancel -> DangerRed
                                     isAssessment -> ConfirmedGreen
+                                    isChat -> InfoBlue
                                     else -> PendingAmber
                                 }
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = isAssessment) {
+                                .clickable(enabled = isAssessment || (isChat && notif.clientId.isNotBlank())) {
                                     if (!notif.read) onMarkRead(notif.id)
-                                    onOpenAssessment()
+                                    if (isChat) onOpenChat(notif.clientId) else onOpenAssessment()
                                 }
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -492,16 +517,19 @@ private fun PtNotificationsDialog(
                                                 "CANCELLED" -> "Cancelou"
                                                 "UNAVAILABLE" -> "Indisponível"
                                                 "ASSESSMENT" -> "Avaliação física"
+                                                "CHAT" -> "Mensagem"
                                                 else -> "Alterou"
                                             },
                                             textColor = when {
                                                 isCancel -> DangerRed
                                                 isAssessment -> ConfirmedGreen
+                                                isChat -> InfoBlue
                                                 else -> PendingAmber
                                             },
                                             containerColor = when {
                                                 isCancel -> DangerRedContainer
                                                 isAssessment -> ConfirmedGreenContainer
+                                                isChat -> InfoBlueContainer
                                                 else -> PendingAmberContainer
                                             }
                                         )
@@ -521,6 +549,16 @@ private fun PtNotificationsDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.End
                                 ) {
+                                    if (isChat && notif.clientId.isNotBlank()) {
+                                        TextButton(
+                                            onClick = {
+                                                if (!notif.read) onMarkRead(notif.id)
+                                                onOpenChat(notif.clientId)
+                                            }
+                                        ) {
+                                            Text("Responder", color = InfoBlue, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
                                     if (!notif.read) {
                                         TextButton(onClick = { onMarkRead(notif.id) }) {
                                             Text("Marcar lida", color = NewShapeGold, style = MaterialTheme.typography.labelSmall)

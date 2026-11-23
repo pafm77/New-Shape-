@@ -31,7 +31,7 @@ export interface PtAccountRecord {
   reviewedAtMillis: number;
 }
 
-export type PtNotificationType = 'CANCELLED' | 'ALTERED' | 'UNAVAILABLE' | 'ASSESSMENT';
+export type PtNotificationType = 'CANCELLED' | 'ALTERED' | 'UNAVAILABLE' | 'ASSESSMENT' | 'CHAT';
 
 export interface PtNotificationRecord {
   id: string;
@@ -214,6 +214,8 @@ export interface ChatMessageRecord {
   senderRole: 'PT' | 'STUDENT';
   text: string;
   timestampMillis: number;
+  deliveredAtMillis?: number;
+  readAtMillis?: number;
 }
 
 export interface MessageTemplateRecord {

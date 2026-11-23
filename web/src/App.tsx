@@ -479,6 +479,8 @@ export function App() {
                 ? 'Aluno indisponível · New Shape'
                 : first.type === 'ASSESSMENT'
                 ? `Nova avaliação física · ${first.clientName}`
+                : first.type === 'CHAT'
+                ? `Nova mensagem · ${first.clientName}`
                 : 'Horário alterado · New Shape';
             void dispatchLocalPushNotification(title, first.summary, first.id, '/painel');
           }
@@ -505,6 +507,28 @@ export function App() {
     isExternalStudentPortal,
     externalScopedClientId,
   ]);
+
+  const deliveredStudentMsgIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!studioUid || !isStudioOwner || role !== 'PT') return;
+    const undelivered = chatMessages.filter(
+      (m) =>
+        m.senderRole === 'STUDENT' &&
+        !m.deliveredAtMillis &&
+        !m.readAtMillis &&
+        !deliveredStudentMsgIdsRef.current.has(m.id)
+    );
+    if (undelivered.length === 0) return;
+    undelivered.forEach((m) => deliveredStudentMsgIdsRef.current.add(m.id));
+    void repo
+      .markChatMessagesDelivered(
+        studioUid,
+        undelivered.map((m) => m.id)
+      )
+      .catch(() => {
+        undelivered.forEach((m) => deliveredStudentMsgIdsRef.current.delete(m.id));
+      });
+  }, [studioUid, isStudioOwner, role, chatMessages]);
 
   const effectiveSettings: StudioSettingsRecord = useMemo(
     () =>
@@ -981,6 +1005,9 @@ export function App() {
   }
 
   const unreadNotifCount = ptNotifications.filter((n) => !n.read).length;
+  const unreadChatCount = chatMessages.filter(
+    (m) => m.senderRole === 'STUDENT' && !m.readAtMillis
+  ).length;
   const pendingPtCount = isSuperAdmin
     ? allPtAccounts.filter((a) => !a.isAdmin && a.status === 'PENDING').length
     : 0;
@@ -1005,7 +1032,7 @@ export function App() {
       id: 'management',
       label: 'Gestão',
       icon: <Briefcase className="h-4 w-4" />,
-      badge: pendingPtCount > 0 ? pendingPtCount : undefined,
+      badge: pendingPtCount + unreadChatCount > 0 ? pendingPtCount + unreadChatCount : undefined,
     },
   ];
 
@@ -1298,6 +1325,7 @@ export function App() {
               payments={payments}
               fidelizacoes={fidelizacoes}
               chatMessages={chatMessages}
+              ptNotifications={ptNotifications}
               ptAccounts={allPtAccounts}
               settings={effectiveSettings}
               whatsappWebMode={effectiveSettings.whatsappWebMode}
@@ -1340,7 +1368,7 @@ export function App() {
         <Modal
           open
           title="Notificações do Estúdio"
-          subtitle="Avaliações físicas, cancelamentos e alterações de horário feitos pelos alunos"
+          subtitle="Mensagens de chat, avaliações físicas, cancelamentos e alterações de horário"
           onClose={() => setShowNotifModal(false)}
         >
           <div className="space-y-3">
@@ -1364,7 +1392,12 @@ export function App() {
               </p>
             ) : (
               <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                {ptNotifications.map((n) => (
+                {[...ptNotifications]
+                  .sort((a, b) => {
+                    if (a.read !== b.read) return a.read ? 1 : -1;
+                    return b.timestampMillis - a.timestampMillis;
+                  })
+                  .map((n) => (
                   <div
                     key={n.id}
                     className={`rounded-xl border p-3 ${
@@ -1385,6 +1418,8 @@ export function App() {
                                 ? 'amber'
                                 : n.type === 'ASSESSMENT'
                                 ? 'green'
+                                : n.type === 'CHAT'
+                                ? 'blue'
                                 : 'gold'
                             }
                           >
@@ -1394,6 +1429,8 @@ export function App() {
                               ? 'Indisponível'
                               : n.type === 'ASSESSMENT'
                               ? 'Avaliação física'
+                              : n.type === 'CHAT'
+                              ? 'Mensagem'
                               : 'Alterou'}
                           </StatusPill>
                           <span className="text-[11px] text-[#A1A1AA]">
@@ -1401,6 +1438,23 @@ export function App() {
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-[#D4D4D8]">{n.summary}</p>
+                        {n.type === 'CHAT' && n.clientId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!n.read) {
+                                void repo.markPtNotificationRead(studioUid, n.id);
+                              }
+                              setJumpClientId(n.clientId);
+                              setMgmtSubTab('chat');
+                              setPtTab('management');
+                              setShowNotifModal(false);
+                            }}
+                            className="mt-2 inline-flex items-center rounded-lg border border-[#38BDF8]/50 bg-[#0C2D48]/50 px-2.5 py-1 text-[11px] font-bold text-[#38BDF8] hover:bg-[#0C2D48]"
+                          >
+                            Responder no Chat →
+                          </button>
+                        )}
                         {n.type === 'ASSESSMENT' && n.clientId && (
                           <button
                             type="button"

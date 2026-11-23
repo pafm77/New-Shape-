@@ -11,10 +11,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ChatMessageRecord
@@ -25,12 +28,47 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private val ReadReceiptBlueOnGold = Color(0xFF1E40AF)
+private val ReadReceiptBlueOnDark = Color(0xFF38BDF8)
+
+@Composable
+internal fun ChatReceiptStatusIcon(
+    message: ChatMessageRecord,
+    onGoldBubble: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    val isRead = message.readAtMillis > 0L
+    val isDelivered = message.deliveredAtMillis > 0L
+
+    when {
+        isRead -> Icon(
+            imageVector = Icons.Default.DoneAll,
+            contentDescription = "Mensagem lida",
+            tint = if (onGoldBubble) ReadReceiptBlueOnGold else ReadReceiptBlueOnDark,
+            modifier = modifier.size(15.dp)
+        )
+        isDelivered -> Icon(
+            imageVector = Icons.Default.DoneAll,
+            contentDescription = "Mensagem entregue",
+            tint = if (onGoldBubble) TextOnGold.copy(alpha = 0.72f) else TextSecondaryDark,
+            modifier = modifier.size(15.dp)
+        )
+        else -> Icon(
+            imageVector = Icons.Default.Done,
+            contentDescription = "Mensagem enviada",
+            tint = if (onGoldBubble) TextOnGold.copy(alpha = 0.56f) else TextSecondaryDark.copy(alpha = 0.7f),
+            modifier = modifier.size(15.dp)
+        )
+    }
+}
+
 @Composable
 fun PrivateChatScreen(
     client: ClientRecord,
     messages: List<ChatMessageRecord>,
     viewerRole: String, // "PT" or "STUDENT"
     onSendMessage: (String) -> Unit,
+    onMarkRead: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null
 ) {
     if (onBack != null) {
@@ -40,6 +78,14 @@ fun PrivateChatScreen(
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+
+    val hasUnreadIncoming = remember(messages, viewerRole) {
+        messages.any { it.senderRole != viewerRole && it.readAtMillis == 0L }
+    }
+
+    LaunchedEffect(client.id, hasUnreadIncoming, messages.size) {
+        onMarkRead?.invoke()
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -53,28 +99,70 @@ fun PrivateChatScreen(
             .background(ObsidianBg)
     ) {
         Surface(color = CharcoalSurface, tonalElevation = 2.dp) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (onBack != null) {
-                    IconButton(onClick = onBack, modifier = Modifier.testTag("chat_back_button")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = TextPrimaryDark)
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack, modifier = Modifier.testTag("chat_back_button")) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = TextPrimaryDark)
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f).padding(start = if (onBack == null) 8.dp else 4.dp)) {
+                        Text(
+                            text = if (viewerRole == "PT") client.name else "Personal Trainer · New Shape",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimaryDark
+                        )
+                        val subtitle = if (viewerRole == "PT") {
+                            "Chat privado · ${client.phone.ifBlank { "Sem telemóvel" }}"
+                        } else {
+                            "Conversa privada direta com o teu PT"
+                        }
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
                     }
                 }
-                Column(modifier = Modifier.weight(1f).padding(start = if (onBack == null) 8.dp else 4.dp)) {
-                    Text(
-                        text = if (viewerRole == "PT") client.name else "Personal Trainer · New Shape",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimaryDark
+                HorizontalDivider(color = HairlineBorder)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Done,
+                        contentDescription = null,
+                        tint = TextSecondaryDark.copy(alpha = 0.7f),
+                        modifier = Modifier.size(13.dp)
                     )
-                    Text(
-                        text = if (viewerRole == "PT") "Chat privado · ${client.phone}" else "Conversa privada direta com o teu PT",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondaryDark
+                    Spacer(Modifier.width(3.dp))
+                    Text("Enviada", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                    Spacer(Modifier.width(10.dp))
+                    Icon(
+                        Icons.Default.DoneAll,
+                        contentDescription = null,
+                        tint = TextSecondaryDark,
+                        modifier = Modifier.size(13.dp)
                     )
+                    Spacer(Modifier.width(3.dp))
+                    Text("Entregue", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                    Spacer(Modifier.width(10.dp))
+                    Icon(
+                        Icons.Default.DoneAll,
+                        contentDescription = null,
+                        tint = ReadReceiptBlueOnDark,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text("Lida", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
                 }
             }
         }
@@ -120,12 +208,20 @@ fun PrivateChatScreen(
                                     color = if (isMine) TextOnGold else TextPrimaryDark
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = timeFormat.format(Date(msg.timestampMillis)),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (isMine) TextOnGold.copy(alpha = 0.7f) else TextSecondaryDark,
-                                    modifier = Modifier.align(Alignment.End)
-                                )
+                                Row(
+                                    modifier = Modifier.align(Alignment.End),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = timeFormat.format(Date(msg.timestampMillis)),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isMine) TextOnGold.copy(alpha = 0.72f) else TextSecondaryDark
+                                    )
+                                    if (isMine) {
+                                        ChatReceiptStatusIcon(message = msg, onGoldBubble = true)
+                                    }
+                                }
                             }
                         }
                     }

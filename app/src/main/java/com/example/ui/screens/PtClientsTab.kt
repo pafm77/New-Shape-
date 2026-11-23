@@ -40,6 +40,12 @@ import com.example.ui.theme.*
 import java.util.Calendar
 import java.util.TimeZone
 
+private data class ClientUpcomingBookingInfo(
+    val confirmed: Int,
+    val pending: Int,
+    val nextLabel: String
+)
+
 @Composable
 fun PtClientsTab(
     state: StudioUiState,
@@ -78,6 +84,30 @@ fun PtClientsTab(
         state.clients.associate { client ->
             val eff = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, state.fidelizacoes)
             client.id to if (eff == 6 || eff == 12) eff else 0
+        }
+    }
+    val clientUpcomingBookingsMap = remember(state.bookings, state.sessions) {
+        val startOfToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val sessionById = state.sessions.associateBy { it.id }
+        val grouped = mutableMapOf<String, MutableList<Pair<com.example.data.model.BookingRecord, com.example.data.model.TrainingSessionRecord>>>()
+        state.bookings.forEach { b ->
+            if (b.status == BookingStatus.CANCELLED.name) return@forEach
+            val s = sessionById[b.sessionId] ?: return@forEach
+            if (s.startMillis < startOfToday) return@forEach
+            grouped.getOrPut(b.clientId) { mutableListOf() }.add(b to s)
+        }
+        grouped.mapValues { (_, list) ->
+            val sorted = list.sortedWith(compareBy<Pair<com.example.data.model.BookingRecord, com.example.data.model.TrainingSessionRecord>> { it.second.startMillis }.thenBy { it.second.timeLabel })
+            val confirmed = sorted.count { it.first.status == BookingStatus.CONFIRMED.name }
+            val pending = sorted.count { it.first.status != BookingStatus.CONFIRMED.name }
+            val next = sorted.firstOrNull()?.second
+            val nextLabel = if (next != null) "${next.dateLabel} · ${next.timeLabel}" else ""
+            ClientUpcomingBookingInfo(confirmed = confirmed, pending = pending, nextLabel = nextLabel)
         }
     }
     val personalizadoCount = remember(baseVisibleClients) {
@@ -297,9 +327,53 @@ fun PtClientsTab(
                                         StatusPill("Inativo", TextSecondaryDark, ElevatedCharcoal)
                                     }
                                 }
-                                Text(client.phone, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                                val upcomingInfo = clientUpcomingBookingsMap[client.id]
+                                val phoneDisplay = client.phone.ifBlank { "Sem telemóvel" }
+                                val nextSuffix = if (!upcomingInfo?.nextLabel.isNullOrBlank()) " · Próx.: ${upcomingInfo!!.nextLabel}" else ""
+                                Text(
+                                    text = "$phoneDisplay$nextSuffix",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    when {
+                                        (upcomingInfo?.confirmed ?: 0) > 0 -> {
+                                            StatusPill(
+                                                text = "✓ ${upcomingInfo!!.confirmed} marcado(s)",
+                                                textColor = ConfirmedGreen,
+                                                containerColor = ConfirmedGreenContainer
+                                            )
+                                        }
+                                        (upcomingInfo?.pending ?: 0) > 0 -> {
+                                            StatusPill(
+                                                text = "${upcomingInfo!!.pending} por confirmar",
+                                                textColor = PendingAmber,
+                                                containerColor = PendingAmberContainer
+                                            )
+                                        }
+                                        else -> {
+                                            StatusPill(
+                                                text = "Por marcar",
+                                                textColor = TextSecondaryDark,
+                                                containerColor = ElevatedCharcoal
+                                            )
+                                        }
+                                    }
+                                    if ((upcomingInfo?.confirmed ?: 0) > 0 && (upcomingInfo?.pending ?: 0) > 0) {
+                                        StatusPill(
+                                            text = "+${upcomingInfo!!.pending} pendente",
+                                            textColor = PendingAmber,
+                                            containerColor = PendingAmberContainer
+                                        )
+                                    }
+                                }
                                 val effectiveFid = clientFidMonthsMap[client.id] ?: 0
                                 if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || effectiveFid > 0 || client.weeklySessionLimit > 0) {
+                                    Spacer(Modifier.height(4.dp))
                                     val feeStr = if (state.isSuperAdmin && client.monthlyFeeEur > 0.0) "€${String.format("%.0f", client.monthlyFeeEur)}/mês" else ""
                                     val fidStr = if (effectiveFid > 0) "Fidelização ${effectiveFid}m" else ""
                                     val limitStr = if (client.weeklySessionLimit > 0) "${client.weeklySessionLimit}x/sem" else ""
@@ -457,6 +531,19 @@ fun PtClientProfileScreen(
             .mapNotNull { b -> sessionMap[b.sessionId]?.let { s -> b to s } }
             .sortedByDescending { it.second.startMillis }
     }
+    val upcomingBookings = remember(state.bookings, sessionMap, client.id) {
+        val startOfToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        state.bookings
+            .filter { it.clientId == client.id && it.status != BookingStatus.CANCELLED.name }
+            .mapNotNull { b -> sessionMap[b.sessionId]?.let { s -> b to s } }
+            .filter { (_, s) -> s.startMillis >= startOfToday }
+            .sortedWith(compareBy<Pair<com.example.data.model.BookingRecord, com.example.data.model.TrainingSessionRecord>> { it.second.startMillis }.thenBy { it.second.timeLabel })
+    }
     val presentCount = confirmedBookings.count { it.first.attendanceStatus == "PRESENT" }
     val absentCount = confirmedBookings.count { it.first.attendanceStatus == "ABSENT" }
     val markedCount = presentCount + absentCount
@@ -581,6 +668,76 @@ fun PtClientProfileScreen(
                     }
                 }
 
+                // Upcoming Booked Trainings Card
+                item {
+                    BrandCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Próximos Treinos Marcados",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = NewShapeGoldBright
+                            )
+                            val confirmedUp = upcomingBookings.count { it.first.status == BookingStatus.CONFIRMED.name }
+                            StatusPill(
+                                text = if (upcomingBookings.isNotEmpty()) "$confirmedUp confirmado(s)" else "Por marcar",
+                                textColor = if (confirmedUp > 0) ConfirmedGreen else TextSecondaryDark,
+                                containerColor = if (confirmedUp > 0) ConfirmedGreenContainer else ElevatedCharcoal
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (upcomingBookings.isEmpty()) {
+                            Text(
+                                text = "Sem treinos marcados para hoje ou próximos dias. Podes marcar diretamente em Treino → Marcações sem precisar de enviar mensagem.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                upcomingBookings.take(6).forEach { (booking, session) ->
+                                    val isConfirmed = booking.status == BookingStatus.CONFIRMED.name
+                                    Surface(
+                                        color = ElevatedCharcoal,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, HairlineBorder),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "${session.dateLabel} · ${session.timeLabel}",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TextPrimaryDark
+                                                )
+                                                if (session.note.isNotBlank()) {
+                                                    Text(
+                                                        text = session.note,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = TextSecondaryDark
+                                                    )
+                                                }
+                                            }
+                                            StatusPill(
+                                                text = if (isConfirmed) "Marcado ✓" else "Por confirmar",
+                                                textColor = if (isConfirmed) ConfirmedGreen else PendingAmber,
+                                                containerColor = if (isConfirmed) ConfirmedGreenContainer else PendingAmberContainer
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Personal Details & Agreed Monthly Plan Card
                 item {
                     BrandCard {
@@ -616,7 +773,7 @@ fun PtClientProfileScreen(
                             OutlinedTextField(
                                 value = phone,
                                 onValueChange = { phone = it.filter { c -> c.isDigit() }.take(9) },
-                                label = { Text("Telemóvel WhatsApp") },
+                                label = { Text("Telemóvel (opcional)") },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                 modifier = Modifier.weight(1f),
@@ -1221,9 +1378,11 @@ private fun NewClientDialog(
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it.filter { c -> c.isDigit() }.take(9) },
-                    label = { Text("Telemóvel (9 dígitos)") },
+                    label = { Text("Telemóvel (opcional · 9 dígitos)") },
+                    supportingText = { Text("Podes adicionar apenas com o nome.", color = TextSecondaryDark) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.testTag("new_client_phone_input"),
                     colors = darkFieldColors()
                 )
                 Text("Tipo de Treino", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
@@ -1315,7 +1474,7 @@ private fun ImportClientsDialog(
     onDismiss: () -> Unit,
     onImport: (String, (com.example.data.ImportResult) -> Unit) -> Unit
 ) {
-    var rawText by remember { mutableStateOf("Nome;Telemovel\nSofia Mendes;914555111\nDiogo Nunes;918222333") }
+    var rawText by remember { mutableStateOf("Nome;Telemovel\nSofia Mendes;914555111\nDiogo Nunes") }
     var resultText by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
@@ -1325,7 +1484,7 @@ private fun ImportClientsDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Cola uma lista no formato Nome;912345678 (uma pessoa por linha).",
+                    "Cola uma lista no formato Nome;912345678 ou apenas Nome (o telemóvel é opcional).",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondaryDark
                 )

@@ -83,6 +83,12 @@ data class StudioUiState(
     val unreadPtNotificationsCount: Int
         get() = ptNotifications.count { !it.read }
 
+    val unreadPtChatCount: Int
+        get() = chatMessages.count { it.senderRole == "STUDENT" && it.readAtMillis == 0L }
+
+    fun unreadStudentChatCount(clientId: String): Int =
+        chatMessages.count { it.clientId == clientId && it.senderRole == "PT" && it.readAtMillis == 0L }
+
     val pendingPtApprovalsCount: Int
         get() = allPtAccounts.count { it.status == "PENDING" }
 
@@ -529,6 +535,23 @@ class NewShapeViewModel(
             repository.confirmClientBookings(snapshots)
                 .onSuccess {
                     _waitingWhatsApp.value = true
+                    _undoSnapshot.value = UndoConfirmationSnapshot(card.client.name, snapshots)
+                    undoTimerJob?.cancel()
+                    undoTimerJob = viewModelScope.launch {
+                        delay(10_000L)
+                        _undoSnapshot.value = null
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun confirmCardSilently(card: PendingConfirmationCard) {
+        viewModelScope.launch {
+            val snapshots = card.items.map { it.booking }
+            repository.confirmClientBookings(snapshots)
+                .onSuccess {
+                    _statusBanner.value = "Confirmado para ${card.client.name} ✓ (sem envio de mensagem)"
                     _undoSnapshot.value = UndoConfirmationSnapshot(card.client.name, snapshots)
                     undoTimerJob?.cancel()
                     undoTimerJob = viewModelScope.launch {
@@ -1122,10 +1145,50 @@ class NewShapeViewModel(
     }
 
     // --- Chat ---
+    private val deliveredChatIds = mutableSetOf<String>()
+    private val readChatIds = mutableSetOf<String>()
+
     fun sendChatMessage(clientId: String, senderRole: String, text: String) {
+        val clientName = currentData?.clients?.find { it.id == clientId }?.name.orEmpty()
         viewModelScope.launch {
-            repository.sendChatMessage(clientId, senderRole, text)
+            repository.sendChatMessage(clientId, senderRole, text, clientName)
                 .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun markChatMessagesDelivered(messageIds: List<String>) {
+        val toMark = messageIds.filter { it.isNotBlank() && deliveredChatIds.add(it) }
+        if (toMark.isEmpty()) return
+        viewModelScope.launch {
+            repository.markChatMessagesDelivered(toMark)
+                .onFailure { deliveredChatIds.removeAll(toMark.toSet()) }
+        }
+    }
+
+    fun markChatThreadRead(clientId: String, viewerRole: String) {
+        val data = currentData ?: return
+        val unreadIncoming = data.chatMessages.filter { msg ->
+            msg.clientId == clientId &&
+                msg.senderRole != viewerRole &&
+                msg.readAtMillis == 0L &&
+                readChatIds.add(msg.id)
+        }
+        val unreadChatNotifIds = if (viewerRole == "PT") {
+            data.ptNotifications
+                .filter { !it.read && it.type == "CHAT" && it.clientId == clientId }
+                .map { it.id }
+        } else emptyList()
+
+        if (unreadIncoming.isEmpty() && unreadChatNotifIds.isEmpty()) return
+
+        viewModelScope.launch {
+            if (unreadIncoming.isNotEmpty()) {
+                repository.markChatMessagesRead(unreadIncoming)
+                    .onFailure { readChatIds.removeAll(unreadIncoming.map { m -> m.id }.toSet()) }
+            }
+            if (unreadChatNotifIds.isNotEmpty()) {
+                repository.markAllPtNotificationsRead(unreadChatNotifIds)
+            }
         }
     }
 

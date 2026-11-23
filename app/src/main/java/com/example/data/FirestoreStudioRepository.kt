@@ -872,7 +872,11 @@ class FirestoreStudioRepository(
 
     suspend fun importClientsCsv(rawText: String, existingClients: List<ClientRecord>): Result<ImportResult> = try {
         val uid = requireUserId()
-        val existingPhones = existingClients.map { it.phone }.toMutableSet()
+        val existingPhones = existingClients.mapNotNull { it.phone.takeIf { p -> p.isNotBlank() } }.toMutableSet()
+        val existingNoPhoneNames = existingClients
+            .filter { it.phone.isBlank() }
+            .map { it.name.trim().lowercase() }
+            .toMutableSet()
         var added = 0
         var ignored = 0
         val errors = mutableListOf<String>()
@@ -880,24 +884,35 @@ class FirestoreStudioRepository(
         val batch = db.batch()
 
         for ((index, line) in lines.withIndex()) {
-            if (index == 0 && line.lowercase().contains("nome") && line.lowercase().contains("telem")) continue
+            val lower = line.lowercase()
+            if (index == 0 && (lower == "nome" || (lower.contains("nome") && lower.contains("telem")))) continue
             val delimiter = if (line.contains(';')) ';' else ','
             val parts = line.split(delimiter).map { it.trim() }
-            if (parts.size < 2) {
-                errors.add("Linha ${index + 1}: formato inválido")
+            val name = parts.getOrNull(0).orEmpty().take(100)
+            if (name.isBlank()) {
+                errors.add("Linha ${index + 1}: nome em falta")
                 continue
             }
-            val name = parts[0].take(100)
-            val phone = normalizePortuguesePhone(parts[1])
-            if (name.isBlank() || phone.length != 9 || (!phone.startsWith("9") && !phone.startsWith("2"))) {
-                errors.add("Linha ${index + 1}: telemóvel inválido (${parts[1]})")
+            val rawPhone = parts.getOrNull(1).orEmpty().trim()
+            val phone = if (rawPhone.isNotBlank()) normalizePortuguesePhone(rawPhone) else ""
+            if (rawPhone.isNotBlank() && (phone.length != 9 || (!phone.startsWith("9") && !phone.startsWith("2")))) {
+                errors.add("Linha ${index + 1}: telemóvel inválido ($rawPhone)")
                 continue
             }
-            if (phone in existingPhones) {
-                ignored++
-                continue
+            if (phone.isNotBlank()) {
+                if (phone in existingPhones) {
+                    ignored++
+                    continue
+                }
+                existingPhones.add(phone)
+            } else {
+                val key = name.lowercase()
+                if (key in existingNoPhoneNames) {
+                    ignored++
+                    continue
+                }
+                existingNoPhoneNames.add(key)
             }
-            existingPhones.add(phone)
             val docRef = userDoc(uid).collection("clients").document()
             batch.set(
                 docRef,
@@ -2201,26 +2216,101 @@ class FirestoreStudioRepository(
     }
 
     // --- Chat ---
-    suspend fun sendChatMessage(clientId: String, senderRole: String, text: String): Result<Unit> = try {
+    suspend fun sendChatMessage(
+        clientId: String,
+        senderRole: String,
+        text: String,
+        senderClientName: String = ""
+    ): Result<Unit> = try {
         val uid = requireUserId()
         val cleanText = text.trim().take(2000)
         require(cleanText.isNotEmpty())
+        val now = System.currentTimeMillis()
         userDoc(uid).collection("chat_messages").document().set(
             mapOf(
                 "userId" to uid,
                 "clientId" to clientId,
                 "senderRole" to senderRole,
                 "text" to cleanText,
-                "timestampMillis" to System.currentTimeMillis(),
+                "timestampMillis" to now,
+                "deliveredAtMillis" to 0L,
+                "readAtMillis" to 0L,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
         ).await()
+        if (senderRole == "STUDENT") {
+            runCatching {
+                val preview = if (cleanText.length > 140) "${cleanText.take(137)}..." else cleanText
+                createPtNotification(
+                    clientId = clientId,
+                    clientName = senderClientName.ifBlank { "Aluno" },
+                    type = "CHAT",
+                    summary = preview,
+                    weekKey = ""
+                )
+            }
+        }
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/chat_messages")
+        Result.failure(e)
+    }
+
+    suspend fun markChatMessagesDelivered(messageIds: List<String>): Result<Unit> = try {
+        val uid = requireUserId()
+        if (messageIds.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            messageIds.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { id ->
+                    batch.update(
+                        userDoc(uid).collection("chat_messages").document(id),
+                        mapOf(
+                            "deliveredAtMillis" to now,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                batch.commit().await()
+            }
+        }
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/chat_messages")
+        Result.failure(e)
+    }
+
+    suspend fun markChatMessagesRead(messages: List<ChatMessageRecord>): Result<Unit> = try {
+        val uid = requireUserId()
+        val unread = messages.filter { it.readAtMillis == 0L }
+        if (unread.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            unread.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { msg ->
+                    val delivered = if (msg.deliveredAtMillis > 0L) msg.deliveredAtMillis else now
+                    batch.update(
+                        userDoc(uid).collection("chat_messages").document(msg.id),
+                        mapOf(
+                            "deliveredAtMillis" to delivered,
+                            "readAtMillis" to now,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                batch.commit().await()
+            }
+        }
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/chat_messages")
         Result.failure(e)
     }
 
