@@ -49,8 +49,8 @@ export async function dispatchLocalPushNotification(
     if (reg && 'showNotification' in reg) {
       await reg.showNotification(title, {
         body,
-        icon: '/favicon.svg',
-        badge: '/favicon.svg',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
         tag: tag || `newshape-${Date.now()}`,
         data: { url },
       });
@@ -58,7 +58,7 @@ export async function dispatchLocalPushNotification(
     }
     new Notification(title, {
       body,
-      icon: '/favicon.svg',
+      icon: '/icon-192.png',
       tag: tag || `newshape-${Date.now()}`,
     });
     return true;

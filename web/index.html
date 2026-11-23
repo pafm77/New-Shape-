@@ -4,9 +4,72 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#121214" />
-    <title>New Shape · Treinos, Nutrição & Marcações</title>
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="New Shape" />
+    <title>New Shape · Treinos, Nutrição &amp; Marcações</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <script>
+      (function () {
+        try {
+          var p = window.location.pathname.toLowerCase();
+          var sp = new URLSearchParams(window.location.search);
+          var urlPt = (sp.get('pt') || '').trim();
+          var urlCode = (sp.get('code') || '').trim();
+          var urlCid = (sp.get('cid') || '').trim();
+          if (urlPt) localStorage.setItem('newshape_portal_pt_uid', urlPt);
+          if (urlCode) localStorage.setItem('newshape_portal_code', urlCode);
+          if (urlCid) localStorage.setItem('newshape_student_id', urlCid);
+
+          var pt = urlPt || localStorage.getItem('newshape_portal_pt_uid') || '';
+          var code = urlCode || localStorage.getItem('newshape_portal_code') || '';
+          var cid = urlCid || localStorage.getItem('newshape_student_id') || '';
+          var lastMode = localStorage.getItem('newshape_last_mode') || '';
+
+          var isPtRoute = p.indexOf('/painel') === 0;
+          var isExplicitStudentRoute =
+            p.indexOf('/aluno') === 0 ||
+            p.indexOf('/s/') === 0 ||
+            (!isPtRoute && Boolean(urlPt && urlCode));
+          var isSavedStudentRoot =
+            !isPtRoute &&
+            (p === '/' || p === '') &&
+            Boolean(pt && code) &&
+            lastMode === 'STUDENT';
+
+          if (isExplicitStudentRoute && pt && code) {
+            localStorage.setItem('newshape_last_mode', 'STUDENT');
+          } else if (isPtRoute) {
+            localStorage.setItem('newshape_last_mode', 'PT');
+          }
+
+          var manifestHref = '/manifest.webmanifest';
+          if ((isExplicitStudentRoute || isSavedStudentRoot) && pt && code) {
+            var q = new URLSearchParams({ mode: 'student', pt: pt, code: code });
+            if (cid) q.set('cid', cid);
+            manifestHref = '/api/manifest?' + q.toString();
+            document.title = 'New Shape · Aluno';
+          } else if (isPtRoute) {
+            manifestHref = '/api/manifest?mode=pt';
+            document.title = 'New Shape · Painel PT';
+          }
+
+          var link = document.createElement('link');
+          link.id = 'app-manifest';
+          link.rel = 'manifest';
+          link.href = manifestHref;
+          document.head.appendChild(link);
+        } catch (e) {
+          var fallback = document.createElement('link');
+          fallback.id = 'app-manifest';
+          fallback.rel = 'manifest';
+          fallback.href = '/manifest.webmanifest';
+          document.head.appendChild(fallback);
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

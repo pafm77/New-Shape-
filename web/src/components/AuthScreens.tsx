@@ -18,6 +18,7 @@ import {
   normalizePortuguesePhone,
 } from '../data/seedCatalog';
 import { NewShapeLogo } from './NewShapeLogo';
+import { StudentInstallBanner } from './StudentInstallBanner';
 import { BrandCard, FieldLabel, GoldButton, Input, SecondaryButton } from './UiPrimitives';
 
 export const PtEmailSignInScreen: React.FC<{
@@ -564,6 +565,8 @@ export const AuthRoleScreen: React.FC<{
             </form>
           </BrandCard>
         )}
+
+        {lockedStudentOnly && <StudentInstallBanner compact />}
       </div>
     </div>
   );

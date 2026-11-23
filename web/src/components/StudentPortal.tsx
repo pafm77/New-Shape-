@@ -71,6 +71,7 @@ import { AddFoodToMealModal, DailyMacrosSummaryCard } from './PtNutritionSection
 import { AssessmentDashboard, NewAssessmentModal } from './PtAssessmentSection';
 import { PrivateChatPanel } from './PtManagementSection';
 import { ExerciseProgressModal } from './ExerciseProgressModal';
+import { StudentInstallBanner } from './StudentInstallBanner';
 import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 
 interface StudentPortalProps {
@@ -92,6 +93,7 @@ interface StudentPortalProps {
   chatMessages: ChatMessageRecord[];
   settings: StudioSettingsRecord;
   initialWeekSlug?: string;
+  showInstallPrompt?: boolean;
   onSwitchStudent: () => void;
   onSwitchToPt?: () => void;
   onSignOut: () => void;
@@ -119,6 +121,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   chatMessages,
   settings,
   initialWeekSlug,
+  showInstallPrompt = false,
   onSwitchStudent,
   onSwitchToPt,
   onSignOut,
@@ -512,6 +515,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         </header>
 
         <main className="mx-auto max-w-5xl px-4 py-5 space-y-4">
+          {showInstallPrompt && (
+            <StudentInstallBanner
+              onInstalled={() =>
+                onBanner('App do Aluno adicionada ao ecrã principal!')
+              }
+            />
+          )}
           {tab === 'agenda' && (
             <StudentAgendaSection
               uid={uid}

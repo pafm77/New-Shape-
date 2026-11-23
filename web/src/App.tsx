@@ -65,6 +65,10 @@ import {
   getPtAlertsPreference,
   registerNotificationServiceWorker,
 } from './services/notificationService';
+import {
+  syncPtPwaManifest,
+  syncStudentPwaUrlAndManifest,
+} from './services/pwaInstall';
 import { NewShapeLogo } from './components/NewShapeLogo';
 import { AuthRoleScreen, PtEmailSignInScreen } from './components/AuthScreens';
 import { PtHomeSection } from './components/PtHomeSection';
@@ -81,6 +85,7 @@ type PtMainTab = 'home' | 'clients' | 'training' | 'nutrition' | 'assessment' | 
 const LS_PORTAL_PT_UID = 'newshape_portal_pt_uid';
 const LS_PORTAL_CODE = 'newshape_portal_code';
 const LS_PORTAL_CRED = 'newshape_portal_cred';
+const LS_LAST_MODE = 'newshape_last_mode';
 
 function generatePortalCredential(): { email: string; password: string } {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -125,34 +130,58 @@ export function App() {
     const search = new URLSearchParams(window.location.search);
     const urlPt = search.get('pt')?.trim() || '';
     const urlCode = search.get('code')?.trim() || '';
+    const urlCid = search.get('cid')?.trim() || '';
     if (urlPt) localStorage.setItem(LS_PORTAL_PT_UID, urlPt);
     if (urlCode) localStorage.setItem(LS_PORTAL_CODE, urlCode);
+    if (urlCid) localStorage.setItem('newshape_student_id', urlCid);
 
     const savedPt = urlPt || localStorage.getItem(LS_PORTAL_PT_UID) || '';
     const savedCode = urlCode || localStorage.getItem(LS_PORTAL_CODE) || '';
+    const savedCid = urlCid || localStorage.getItem('newshape_student_id') || '';
+    const lastMode = localStorage.getItem(LS_LAST_MODE) || '';
 
     if (p.startsWith('/s/')) {
+      if (savedPt && savedCode) localStorage.setItem(LS_LAST_MODE, 'STUDENT');
       return {
         routeType: 'STUDENT_WEEK' as const,
         weekSlug: p.slice(3).split('/')[0] || undefined,
         portalPtUid: savedPt,
         portalCode: savedCode,
+        initialStudentId: savedCid,
       };
     }
     if (p.startsWith('/aluno')) {
+      if (savedPt && savedCode) localStorage.setItem(LS_LAST_MODE, 'STUDENT');
       return {
         routeType: 'STUDENT' as const,
         weekSlug: undefined,
         portalPtUid: savedPt,
         portalCode: savedCode,
+        initialStudentId: savedCid,
       };
     }
     if (p.startsWith('/painel')) {
+      localStorage.setItem(LS_LAST_MODE, 'PT');
       return {
         routeType: 'PT' as const,
         weekSlug: undefined,
         portalPtUid: '',
         portalCode: '',
+        initialStudentId: '',
+      };
+    }
+    // Root "/" opened with student invite params OR from a saved Student Home Screen shortcut
+    if (
+      (urlPt && urlCode) ||
+      ((p === '/' || p === '') && savedPt && savedCode && lastMode === 'STUDENT')
+    ) {
+      localStorage.setItem(LS_LAST_MODE, 'STUDENT');
+      return {
+        routeType: 'STUDENT' as const,
+        weekSlug: undefined,
+        portalPtUid: savedPt,
+        portalCode: savedCode,
+        initialStudentId: savedCid,
       };
     }
     return {
@@ -160,19 +189,23 @@ export function App() {
       weekSlug: undefined,
       portalPtUid: savedPt,
       portalCode: savedCode,
+      initialStudentId: savedCid,
     };
   }, []);
-
-  const isStudentRoute =
-    pathInfo.routeType === 'STUDENT' || pathInfo.routeType === 'STUDENT_WEEK';
-  const hasStudentInviteParams = Boolean(pathInfo.portalPtUid && pathInfo.portalCode);
-  const isExternalStudentPortal = isStudentRoute && hasStudentInviteParams;
 
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authInfo, setAuthInfo] = useState<string | null>(null);
+
+  const isPortalAuthAccount = Boolean(authUser?.email?.endsWith('@portal.newshape.local'));
+  const hasStudentInviteParams = Boolean(pathInfo.portalPtUid && pathInfo.portalCode);
+  const isStudentRoute =
+    pathInfo.routeType === 'STUDENT' ||
+    pathInfo.routeType === 'STUDENT_WEEK' ||
+    (pathInfo.routeType === 'ROLE' && isPortalAuthAccount && hasStudentInviteParams);
+  const isExternalStudentPortal = isStudentRoute && hasStudentInviteParams;
 
   const [portalJoinState, setPortalJoinState] = useState<'idle' | 'joining' | 'joined' | 'error'>(
     'idle'
@@ -181,14 +214,16 @@ export function App() {
 
   const [role, setRole] = useState<'NONE' | 'PT' | 'STUDENT'>(() => {
     if (pathInfo.routeType === 'PT') return 'PT';
-    const savedStudent = localStorage.getItem('newshape_student_id');
-    if (isStudentRoute && savedStudent) {
+    if (
+      (pathInfo.routeType === 'STUDENT' || pathInfo.routeType === 'STUDENT_WEEK') &&
+      pathInfo.initialStudentId
+    ) {
       return 'STUDENT';
     }
     return 'NONE';
   });
-  const [studentId, setStudentId] = useState<string | null>(() =>
-    localStorage.getItem('newshape_student_id')
+  const [studentId, setStudentId] = useState<string | null>(
+    () => pathInfo.initialStudentId || localStorage.getItem('newshape_student_id')
   );
 
   // Firestore synced collections
@@ -269,6 +304,32 @@ export function App() {
     });
     return unsub;
   }, []);
+
+  // Keep student URL & dynamic PWA manifest synced so "Add to Home Screen" always opens Student Portal directly
+  useEffect(() => {
+    if (!isExternalStudentPortal) return;
+    localStorage.setItem(LS_LAST_MODE, 'STUDENT');
+    syncStudentPwaUrlAndManifest(pathInfo.portalPtUid, pathInfo.portalCode, studentId);
+    if (studentId && role === 'NONE') {
+      setRole('STUDENT');
+    }
+  }, [isExternalStudentPortal, pathInfo.portalPtUid, pathInfo.portalCode, studentId, role]);
+
+  // Keep PT manifest & last mode synced for real PT accounts
+  useEffect(() => {
+    if (isExternalStudentPortal) return;
+    if (pathInfo.routeType === 'PT' || (authUser && !isPortalAuthAccount)) {
+      localStorage.setItem(LS_LAST_MODE, 'PT');
+      syncPtPwaManifest();
+    }
+  }, [isExternalStudentPortal, pathInfo.routeType, authUser, isPortalAuthAccount]);
+
+  // Never trap an orphan @portal.newshape.local student session inside the PT login/approval flow
+  useEffect(() => {
+    if (authReady && isPortalAuthAccount && !hasStudentInviteParams && pathInfo.routeType !== 'PT') {
+      signOut(auth).catch(() => {});
+    }
+  }, [authReady, isPortalAuthAccount, hasStudentInviteParams, pathInfo.routeType]);
 
   // Automatic portal session & studio join when opening a Student Link (/aluno?pt=...&code=...)
   useEffect(() => {
@@ -352,6 +413,22 @@ export function App() {
   }, [isExternalStudentPortal, portalJoinState, pathInfo.portalPtUid, authUser?.uid]);
 
   const isStudioOwner = Boolean(authUser && studioUid && authUser.uid === studioUid);
+
+  // Sync student clientId on portal_members when launching directly into a saved/URL ?cid= student account
+  useEffect(() => {
+    if (
+      !isExternalStudentPortal ||
+      portalJoinState !== 'joined' ||
+      !studioUid ||
+      !authUser ||
+      isStudioOwner ||
+      !studentId
+    ) {
+      return;
+    }
+    repo.updatePortalMemberClientId(studioUid, authUser.uid, studentId).catch(() => {});
+  }, [isExternalStudentPortal, portalJoinState, studioUid, authUser, isStudioOwner, studentId]);
+
   const isSuperAdmin = useMemo(
     () => !isExternalStudentPortal && isSuperAdminEmail(authUser?.email),
     [isExternalStudentPortal, authUser?.email]
@@ -678,7 +755,9 @@ export function App() {
     localStorage.removeItem('newshape_student_id');
     setStudentId(null);
     setRole('NONE');
-    if (!isExternalStudentPortal) {
+    if (isExternalStudentPortal) {
+      syncStudentPwaUrlAndManifest(pathInfo.portalPtUid, pathInfo.portalCode, null);
+    } else {
       await signOut(auth);
     }
   };
@@ -790,6 +869,14 @@ export function App() {
   }
 
   // PT Registration Approval Gate (non-admin PTs must be approved by pafm77pedrinho77@gmail.com)
+  if (!isExternalStudentPortal && authUser && isPortalAuthAccount) {
+    return (
+      <div className="min-h-screen bg-[#121214] flex items-center justify-center text-sm text-[#A1A1AA]">
+        A preparar acesso...
+      </div>
+    );
+  }
+
   if (!isExternalStudentPortal && authUser && !isSuperAdmin) {
     if (!ptAccountReady) {
       return (
@@ -990,10 +1077,14 @@ export function App() {
           chatMessages={chatMessages}
           settings={effectiveSettings}
           initialWeekSlug={pathInfo.weekSlug}
+          showInstallPrompt={isExternalStudentPortal}
           onSwitchStudent={() => {
             localStorage.removeItem('newshape_student_id');
             setStudentId(null);
             setRole('NONE');
+            if (isExternalStudentPortal) {
+              syncStudentPwaUrlAndManifest(pathInfo.portalPtUid, pathInfo.portalCode, null);
+            }
           }}
           onSwitchToPt={lockedStudentOnly ? undefined : () => setRole('PT')}
           onSignOut={handleSignOut}
