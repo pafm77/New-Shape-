@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   CheckCircle2,
   Dumbbell,
   KeyRound,
@@ -17,6 +18,12 @@ import {
   isValidPortuguesePhone,
   normalizePortuguesePhone,
 } from '../data/seedCatalog';
+import {
+  hashStudentPin,
+  isValidFourDigitPin,
+  normalizePinInput,
+  verifyStudentPin,
+} from '../services/pinCrypto';
 import { NewShapeLogo } from './NewShapeLogo';
 import { StudentInstallBanner } from './StudentInstallBanner';
 import { BrandCard, FieldLabel, GoldButton, Input, SecondaryButton } from './UiPrimitives';
@@ -265,13 +272,16 @@ export const AuthRoleScreen: React.FC<{
   initialRoleTab?: 'PT' | 'STUDENT';
   lockedStudentOnly?: boolean;
   weekSlugLabel?: string;
+  initialPendingPinClientId?: string | null;
   onSignOut: () => void;
   onEnterPt: () => void;
   onEnterStudent: (clientId: string) => void;
+  onSetStudentPin: (clientId: string, loginPinHash: string) => Promise<void>;
   onRegisterNewStudent: (
     fullName: string,
     cleanPhone: string,
-    rgpdConsentNote: string
+    rgpdConsentNote: string,
+    loginPinHash?: string
   ) => Promise<void>;
 }> = ({
   clients,
@@ -279,26 +289,83 @@ export const AuthRoleScreen: React.FC<{
   initialRoleTab = 'PT',
   lockedStudentOnly = false,
   weekSlugLabel,
+  initialPendingPinClientId = null,
   onSignOut,
   onEnterPt,
   onEnterStudent,
+  onSetStudentPin,
   onRegisterNewStudent,
 }) => {
   const [roleTab, setRoleTab] = useState<'PT' | 'STUDENT'>(
-    lockedStudentOnly ? 'STUDENT' : initialRoleTab
+    lockedStudentOnly || initialPendingPinClientId ? 'STUDENT' : initialRoleTab
   );
   const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [studentStep, setStudentStep] = useState<'phone' | 'verify_pin' | 'setup_pin'>(
+    initialPendingPinClientId ? 'verify_pin' : 'phone'
+  );
+  const [pendingClientId, setPendingClientId] = useState<string | null>(
+    initialPendingPinClientId
+  );
   const [phone, setPhone] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [rgpdAccepted, setRgpdAccepted] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinConfirmInput, setPinConfirmInput] = useState('');
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutUntilMs, setLockoutUntilMs] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (initialPendingPinClientId) {
+      setRoleTab('STUDENT');
+      setIsRegisterMode(false);
+      setPendingClientId(initialPendingPinClientId);
+      setStudentStep('verify_pin');
+      setPinInput('');
+      setError(null);
+      setInfo(null);
+    }
+  }, [initialPendingPinClientId]);
+
+  useEffect(() => {
+    if (lockoutUntilMs <= Date.now()) return;
+    const timer = window.setInterval(() => {
+      const t = Date.now();
+      setNowMs(t);
+      if (t >= lockoutUntilMs) {
+        window.clearInterval(timer);
+      }
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [lockoutUntilMs]);
+
+  const lockoutRemainingSec = Math.max(0, Math.ceil((lockoutUntilMs - nowMs) / 1000));
+  const pendingClient = pendingClientId
+    ? clients.find((c) => c.id === pendingClientId) || null
+    : null;
+  const pendingFirstName = pendingClient
+    ? pendingClient.name.trim().split(/\s+/)[0] || pendingClient.name
+    : '';
+
+  const resetToPhoneStep = () => {
+    setStudentStep('phone');
+    setPendingClientId(null);
+    setPinInput('');
+    setPinConfirmInput('');
+    setFailedAttempts(0);
+    setLockoutUntilMs(0);
+    setError(null);
+    setInfo(null);
+  };
+
   const handleStudentLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setInfo(null);
     const clean = normalizePortuguesePhone(phone);
     if (!isValidPortuguesePhone(clean)) {
       setError('Indica um número de telemóvel válido (9 dígitos, começado por 9 ou 2).');
@@ -306,10 +373,97 @@ export const AuthRoleScreen: React.FC<{
     }
     const existing = clients.find((c) => c.phone === clean);
     if (existing) {
-      onEnterStudent(existing.id);
+      setPendingClientId(existing.id);
+      setPinInput('');
+      setPinConfirmInput('');
+      setFailedAttempts(0);
+      setLockoutUntilMs(0);
+      if (existing.loginPinHash) {
+        setStudentStep('verify_pin');
+      } else {
+        setStudentStep('setup_pin');
+      }
     } else {
       setInfo('Número ainda não registado. Preenche o teu 1º nome e sobrenome para criar conta.');
       setIsRegisterMode(true);
+    }
+  };
+
+  const handleVerifyPinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!pendingClient) {
+      resetToPhoneStep();
+      return;
+    }
+    if (!pendingClient.loginPinHash) {
+      onEnterStudent(pendingClient.id);
+      return;
+    }
+    if (Date.now() < lockoutUntilMs) {
+      setError(`Demasiadas tentativas falhadas. Aguarda ${lockoutRemainingSec}s para tentar novamente.`);
+      return;
+    }
+    if (!isValidFourDigitPin(pinInput)) {
+      setError('Introduz o teu PIN de 4 dígitos.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const ok = await verifyStudentPin(pinInput, pendingClient.loginPinHash);
+      if (ok) {
+        setFailedAttempts(0);
+        setLockoutUntilMs(0);
+        setPinInput('');
+        onEnterStudent(pendingClient.id);
+      } else {
+        const nextFailed = failedAttempts + 1;
+        setPinInput('');
+        if (nextFailed >= 5) {
+          const until = Date.now() + 30_000;
+          setFailedAttempts(0);
+          setLockoutUntilMs(until);
+          setNowMs(Date.now());
+          setError('PIN incorreto 5 vezes seguidas. Aguarda 30 segundos ou pede ao teu PT para repor o PIN.');
+        } else {
+          setFailedAttempts(nextFailed);
+          setError(`PIN incorreto (${5 - nextFailed} tentativa${5 - nextFailed === 1 ? '' : 's'} restante${5 - nextFailed === 1 ? '' : 's'}).`);
+        }
+      }
+    } catch {
+      setError('Não foi possível validar o PIN. Tenta novamente.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSetupPinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!pendingClient) {
+      resetToPhoneStep();
+      return;
+    }
+    if (!isValidFourDigitPin(pinInput)) {
+      setError('O PIN tem de ter exatamente 4 dígitos numéricos.');
+      return;
+    }
+    if (pinInput !== pinConfirmInput) {
+      setError('Os dois PINs não coincidem.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const pinHash = await hashStudentPin(pinInput);
+      await onSetStudentPin(pendingClient.id, pinHash);
+      setPinInput('');
+      setPinConfirmInput('');
+      onEnterStudent(pendingClient.id);
+    } catch (err) {
+      const rawMsg = err instanceof Error ? err.message : '';
+      setError(rawMsg || 'Não foi possível guardar o PIN. Podes entrar sem PIN e tentar em Definições.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -329,8 +483,22 @@ export const AuthRoleScreen: React.FC<{
     }
     const existing = clients.find((c) => c.phone === clean);
     if (existing) {
-      onEnterStudent(existing.id);
+      setIsRegisterMode(false);
+      setPendingClientId(existing.id);
+      setPinInput('');
+      setPinConfirmInput('');
+      setStudentStep(existing.loginPinHash ? 'verify_pin' : 'setup_pin');
       return;
+    }
+    if (pinInput.length > 0 || pinConfirmInput.length > 0) {
+      if (!isValidFourDigitPin(pinInput)) {
+        setError('O PIN opcional tem de ter exatamente 4 dígitos numéricos.');
+        return;
+      }
+      if (pinInput !== pinConfirmInput) {
+        setError('Os dois campos do PIN não coincidem.');
+        return;
+      }
     }
     if (!rgpdAccepted) {
       setError('Tens de aceitar o consentimento RGPD para concluir o registo.');
@@ -338,7 +506,8 @@ export const AuthRoleScreen: React.FC<{
     }
     setSubmitting(true);
     try {
-      await onRegisterNewStudent(`${f} ${l}`, clean, formatRgpdConsentStamp());
+      const pinHash = pinInput.length === 4 ? await hashStudentPin(pinInput) : undefined;
+      await onRegisterNewStudent(`${f} ${l}`, clean, formatRgpdConsentStamp(), pinHash);
     } catch (err) {
       const code =
         typeof err === 'object' && err !== null && 'code' in err
@@ -437,6 +606,152 @@ export const AuthRoleScreen: React.FC<{
               </GoldButton>
             </div>
           </BrandCard>
+        ) : !isRegisterMode && studentStep === 'verify_pin' && pendingClient ? (
+          <BrandCard highlight>
+            <div className="flex items-center gap-2.5">
+              <div className="rounded-xl bg-[#3D3314] p-2.5 text-[#FACC15]">
+                <Lock className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-[#F4F4F5]">Olá, {pendingFirstName}!</h2>
+                <p className="text-xs text-[#A1A1AA]">
+                  Introduz o teu PIN de 4 dígitos para entrar na tua conta.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleVerifyPinSubmit} className="mt-4 space-y-3">
+              <div>
+                <FieldLabel>PIN de 4 dígitos</FieldLabel>
+                <Input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="one-time-code"
+                  maxLength={4}
+                  value={pinInput}
+                  onChange={(e) => {
+                    setPinInput(normalizePinInput(e.target.value));
+                    setError(null);
+                  }}
+                  placeholder="••••"
+                  className="text-center text-2xl tracking-[0.6em] font-bold"
+                  autoFocus
+                />
+              </div>
+
+              {error && <p className="text-xs font-medium text-[#EF4444]">{error}</p>}
+
+              <GoldButton
+                fullWidth
+                type="submit"
+                disabled={submitting || lockoutRemainingSec > 0 || pinInput.length < 4}
+              >
+                <KeyRound className="h-4 w-4" />
+                {lockoutRemainingSec > 0
+                  ? `Aguarda ${lockoutRemainingSec}s...`
+                  : submitting
+                  ? 'A verificar...'
+                  : 'Entrar com PIN'}
+              </GoldButton>
+
+              <p className="rounded-xl border border-[#323238] bg-[#18181B] px-3 py-2 text-[11px] text-[#A1A1AA]">
+                Esqueceste-te do PIN? Pede ao teu Personal Trainer para repor o PIN na tua ficha.
+              </p>
+
+              <button
+                type="button"
+                onClick={resetToPhoneStep}
+                className="flex w-full items-center justify-center gap-1.5 py-2 text-xs font-medium text-[#A1A1AA] hover:text-white"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Usar outro número de telemóvel
+              </button>
+            </form>
+          </BrandCard>
+        ) : !isRegisterMode && studentStep === 'setup_pin' && pendingClient ? (
+          <BrandCard highlight>
+            <div className="flex items-center gap-2.5">
+              <div className="rounded-xl bg-[#3D3314] p-2.5 text-[#FACC15]">
+                <KeyRound className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-[#F4F4F5]">
+                  Protege a tua conta, {pendingFirstName}
+                </h2>
+                <p className="text-xs text-[#A1A1AA]">
+                  Podes acrescentar um PIN de 4 dígitos (opcional) para proteger os teus treinos e
+                  dados pessoais.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSetupPinSubmit} className="mt-4 space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <FieldLabel>Criar PIN (4 dígitos)</FieldLabel>
+                  <Input
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={4}
+                    value={pinInput}
+                    onChange={(e) => {
+                      setPinInput(normalizePinInput(e.target.value));
+                      setError(null);
+                    }}
+                    placeholder="••••"
+                    className="text-center text-lg tracking-[0.45em] font-bold"
+                  />
+                </div>
+                <div>
+                  <FieldLabel>Confirmar PIN</FieldLabel>
+                  <Input
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={4}
+                    value={pinConfirmInput}
+                    onChange={(e) => {
+                      setPinConfirmInput(normalizePinInput(e.target.value));
+                      setError(null);
+                    }}
+                    placeholder="••••"
+                    className="text-center text-lg tracking-[0.45em] font-bold"
+                  />
+                </div>
+              </div>
+
+              {error && <p className="text-xs font-medium text-[#EF4444]">{error}</p>}
+
+              <div className="space-y-2 pt-1">
+                <GoldButton
+                  fullWidth
+                  type="submit"
+                  disabled={submitting || pinInput.length < 4 || pinConfirmInput.length < 4}
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  {submitting ? 'A guardar PIN...' : 'Guardar PIN e Entrar'}
+                </GoldButton>
+                <SecondaryButton
+                  fullWidth
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => onEnterStudent(pendingClient.id)}
+                >
+                  Agora não · Entrar sem PIN
+                </SecondaryButton>
+                <button
+                  type="button"
+                  onClick={resetToPhoneStep}
+                  className="flex w-full items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-[#A1A1AA] hover:text-white"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Voltar
+                </button>
+              </div>
+            </form>
+          </BrandCard>
         ) : (
           <BrandCard highlight>
             <h2 className="text-xl font-bold text-[#F4F4F5]">
@@ -444,7 +759,7 @@ export const AuthRoleScreen: React.FC<{
             </h2>
             <p className="mt-1 text-sm text-[#A1A1AA]">
               {isRegisterMode
-                ? 'Preenche apenas o teu 1º nome, sobrenome e número de telemóvel.'
+                ? 'Preenche o teu 1º nome, sobrenome, telemóvel e (opcionalmente) um PIN de 4 dígitos.'
                 : 'Para escolheres os teus treinos e veres o teu plano, diz-nos o teu telemóvel.'}
             </p>
 
@@ -499,27 +814,76 @@ export const AuthRoleScreen: React.FC<{
               </div>
 
               {isRegisterMode && (
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#323238] bg-[#242429]/80 p-3 text-xs transition hover:border-[#EAB308]/60">
-                  <input
-                    type="checkbox"
-                    checked={rgpdAccepted}
-                    onChange={(e) => {
-                      setRgpdAccepted(e.target.checked);
-                      setError(null);
-                    }}
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#EAB308]"
-                  />
-                  <span className="space-y-1">
-                    <span className="block font-bold text-[#F4F4F5]">
-                      Consentimento RGPD (Obrigatório)
+                <>
+                  <div className="rounded-xl border border-[#323238] bg-[#18181B] p-3 space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="h-4 w-4 text-[#EAB308]" />
+                      <p className="text-xs font-bold text-[#F4F4F5]">
+                        PIN de 4 dígitos (Opcional)
+                      </p>
+                    </div>
+                    <p className="text-[11px] text-[#A1A1AA]">
+                      Se definires um PIN agora, será pedido ao entrar noutros dispositivos. Também
+                      podes criar ou alterar mais tarde em Definições.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <FieldLabel>PIN (4 dígitos)</FieldLabel>
+                        <Input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={4}
+                          value={pinInput}
+                          onChange={(e) => {
+                            setPinInput(normalizePinInput(e.target.value));
+                            setError(null);
+                          }}
+                          placeholder="••••"
+                          className="text-center tracking-[0.4em] font-bold"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Confirmar PIN</FieldLabel>
+                        <Input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={4}
+                          value={pinConfirmInput}
+                          onChange={(e) => {
+                            setPinConfirmInput(normalizePinInput(e.target.value));
+                            setError(null);
+                          }}
+                          placeholder="••••"
+                          className="text-center tracking-[0.4em] font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#323238] bg-[#242429]/80 p-3 text-xs transition hover:border-[#EAB308]/60">
+                    <input
+                      type="checkbox"
+                      checked={rgpdAccepted}
+                      onChange={(e) => {
+                        setRgpdAccepted(e.target.checked);
+                        setError(null);
+                      }}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[#EAB308]"
+                    />
+                    <span className="space-y-1">
+                      <span className="block font-bold text-[#F4F4F5]">
+                        Consentimento RGPD (Obrigatório)
+                      </span>
+                      <span className="block leading-relaxed text-[#A1A1AA]">
+                        Autorizo o tratamento dos meus dados pessoais (nome, telemóvel, marcações,
+                        treinos, nutrição e avaliações físicas) pelo estúdio New Shape, nos termos
+                        do Regulamento Geral sobre a Proteção de Dados (RGPD).
+                      </span>
                     </span>
-                    <span className="block leading-relaxed text-[#A1A1AA]">
-                      Autorizo o tratamento dos meus dados pessoais (nome, telemóvel, marcações,
-                      treinos, nutrição e avaliações físicas) pelo estúdio New Shape, nos termos
-                      do Regulamento Geral sobre a Proteção de Dados (RGPD).
-                    </span>
-                  </span>
-                </label>
+                  </label>
+                </>
               )}
 
               {error && <p className="text-xs font-medium text-[#EF4444]">{error}</p>}
@@ -535,6 +899,8 @@ export const AuthRoleScreen: React.FC<{
                     type="button"
                     onClick={() => {
                       setIsRegisterMode(true);
+                      setPinInput('');
+                      setPinConfirmInput('');
                       setError(null);
                       setInfo(null);
                     }}
@@ -553,12 +919,14 @@ export const AuthRoleScreen: React.FC<{
                     type="button"
                     onClick={() => {
                       setIsRegisterMode(false);
+                      setPinInput('');
+                      setPinConfirmInput('');
                       setError(null);
                       setInfo(null);
                     }}
                     className="w-full py-2 text-center text-xs font-medium text-[#A1A1AA] hover:text-white"
                   >
-                    Já tenho conta · Entrar só com telemóvel
+                    Já tenho conta · Entrar com telemóvel
                   </button>
                 </div>
               )}

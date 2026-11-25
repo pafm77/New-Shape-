@@ -27,6 +27,7 @@ data class ClientRecord(
     val fidelizacaoStartMillis: Long = 0L,
     val weeklySessionLimit: Int = 0,
     val fixedSlots: List<String> = emptyList(),
+    val loginPinHash: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

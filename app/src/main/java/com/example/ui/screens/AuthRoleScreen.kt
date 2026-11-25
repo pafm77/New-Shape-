@@ -9,10 +9,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,13 +27,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
+import com.example.security.StudentPinHasher
 import com.example.ui.components.BrandCard
+import com.example.ui.components.DarkSecondaryButton
 import com.example.ui.components.GoldPrimaryButton
 import com.example.ui.components.NewShapeLogo
 import com.example.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AuthRoleScreen(
@@ -38,16 +49,51 @@ fun AuthRoleScreen(
     onSignOut: () -> Unit,
     onEnterPt: () -> Unit,
     onEnterStudent: (String) -> Unit,
-    onRegisterNewStudent: (String, String, String) -> Unit
+    onSetStudentPin: (String, String, (Boolean) -> Unit) -> Unit,
+    onRegisterNewStudent: (String, String, String, String) -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = PT, 1 = Aluno
     var isRegisterMode by remember { mutableStateOf(false) }
+    var studentStep by remember { mutableStateOf("phone") } // phone | verify_pin | setup_pin
+    var pendingClientId by remember { mutableStateOf<String?>(null) }
     var studentPhone by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
     var rgpdAccepted by remember { mutableStateOf(false) }
+    var pinInput by remember { mutableStateOf("") }
+    var pinConfirmInput by remember { mutableStateOf("") }
+    var failedAttempts by remember { mutableIntStateOf(0) }
+    var lockoutUntilMs by remember { mutableLongStateOf(0L) }
+    var lockoutRemainingSec by remember { mutableIntStateOf(0) }
+    var isProcessingPin by remember { mutableStateOf(false) }
     var studentError by remember { mutableStateOf<String?>(null) }
     var studentInfo by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(lockoutUntilMs) {
+        while (lockoutUntilMs > System.currentTimeMillis()) {
+            lockoutRemainingSec = ((lockoutUntilMs - System.currentTimeMillis() + 999L) / 1000L).toInt().coerceAtLeast(1)
+            delay(500L)
+        }
+        lockoutRemainingSec = 0
+    }
+
+    val pendingClient = remember(clients, pendingClientId) {
+        pendingClientId?.let { id -> clients.find { it.id == id } }
+    }
+    val pendingFirstName = pendingClient?.name?.trim()?.split(" ")?.firstOrNull().orEmpty()
+        .ifBlank { pendingClient?.name.orEmpty() }
+
+    fun resetToPhoneStep() {
+        studentStep = "phone"
+        pendingClientId = null
+        pinInput = ""
+        pinConfirmInput = ""
+        failedAttempts = 0
+        lockoutUntilMs = 0L
+        studentError = null
+        studentInfo = null
+    }
 
     fun normalizePhone(raw: String): String {
         var digits = raw.filter { it.isDigit() }
@@ -170,6 +216,245 @@ fun AuthRoleScreen(
                         testTag = "enter_pt_button"
                     )
                 }
+            } else if (!isRegisterMode && studentStep == "verify_pin" && pendingClient != null) {
+                BrandCard(highlightBorder = true) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "PIN de acesso",
+                            tint = NewShapeGoldBright,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Olá, $pendingFirstName!",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                text = "Introduz o teu PIN de 4 dígitos para entrar.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = {
+                            pinInput = it.filter { ch -> ch.isDigit() }.take(4)
+                            studentError = null
+                        },
+                        label = { Text("PIN de 4 dígitos") },
+                        placeholder = { Text("••••") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        modifier = Modifier.fillMaxWidth().testTag("student_verify_pin_input"),
+                        colors = darkFieldColors()
+                    )
+
+                    if (studentError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(studentError!!, color = DangerRed, style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    GoldPrimaryButton(
+                        text = when {
+                            lockoutRemainingSec > 0 -> "Aguarda ${lockoutRemainingSec}s..."
+                            isProcessingPin -> "A verificar..."
+                            else -> "Entrar com PIN"
+                        },
+                        icon = Icons.Default.Key,
+                        enabled = !isProcessingPin && lockoutRemainingSec == 0 && pinInput.length == 4,
+                        onClick = {
+                            val target = pendingClient
+                            if (target.loginPinHash.isBlank()) {
+                                onEnterStudent(target.id)
+                                return@GoldPrimaryButton
+                            }
+                            if (System.currentTimeMillis() < lockoutUntilMs) {
+                                studentError = "Aguarda ${lockoutRemainingSec}s antes de tentar novamente."
+                                return@GoldPrimaryButton
+                            }
+                            isProcessingPin = true
+                            studentError = null
+                            val attempt = pinInput
+                            scope.launch {
+                                val ok = withContext(Dispatchers.Default) {
+                                    StudentPinHasher.verifyPin(attempt, target.loginPinHash)
+                                }
+                                isProcessingPin = false
+                                if (ok) {
+                                    failedAttempts = 0
+                                    lockoutUntilMs = 0L
+                                    pinInput = ""
+                                    onEnterStudent(target.id)
+                                } else {
+                                    pinInput = ""
+                                    val next = failedAttempts + 1
+                                    if (next >= 5) {
+                                        failedAttempts = 0
+                                        lockoutUntilMs = System.currentTimeMillis() + 30_000L
+                                        studentError = "PIN incorreto 5 vezes seguidas. Aguarda 30 segundos ou pede ao teu PT para repor o PIN."
+                                    } else {
+                                        failedAttempts = next
+                                        val left = 5 - next
+                                        studentError = "PIN incorreto ($left tentativa${if (left == 1) "" else "s"} restante${if (left == 1) "" else "s"})."
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = "student_verify_pin_button"
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "Esqueceste-te do PIN? Pede ao teu Personal Trainer para repor o PIN na tua ficha.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    TextButton(
+                        onClick = { resetToPhoneStep() },
+                        modifier = Modifier.align(Alignment.CenterHorizontally).testTag("student_pin_back_btn")
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Voltar",
+                            tint = TextSecondaryDark,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Usar outro número de telemóvel", color = TextSecondaryDark)
+                    }
+                }
+            } else if (!isRegisterMode && studentStep == "setup_pin" && pendingClient != null) {
+                BrandCard(highlightBorder = true) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = "Criar PIN",
+                            tint = NewShapeGoldBright,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Protege a tua conta, $pendingFirstName",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = TextPrimaryDark,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Podes acrescentar um PIN de 4 dígitos (opcional) para proteger o acesso à tua conta.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = pinInput,
+                            onValueChange = {
+                                pinInput = it.filter { ch -> ch.isDigit() }.take(4)
+                                studentError = null
+                            },
+                            label = { Text("Criar PIN") },
+                            placeholder = { Text("••••") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            modifier = Modifier.weight(1f).testTag("student_setup_pin_input"),
+                            colors = darkFieldColors()
+                        )
+                        OutlinedTextField(
+                            value = pinConfirmInput,
+                            onValueChange = {
+                                pinConfirmInput = it.filter { ch -> ch.isDigit() }.take(4)
+                                studentError = null
+                            },
+                            label = { Text("Confirmar PIN") },
+                            placeholder = { Text("••••") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            modifier = Modifier.weight(1f).testTag("student_setup_pin_confirm_input"),
+                            colors = darkFieldColors()
+                        )
+                    }
+
+                    if (studentError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(studentError!!, color = DangerRed, style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    GoldPrimaryButton(
+                        text = if (isProcessingPin) "A guardar PIN..." else "Guardar PIN e Entrar",
+                        icon = Icons.Default.VerifiedUser,
+                        enabled = !isProcessingPin && pinInput.length == 4 && pinConfirmInput.length == 4,
+                        onClick = {
+                            if (!StudentPinHasher.isValidFourDigitPin(pinInput)) {
+                                studentError = "O PIN tem de ter exatamente 4 dígitos."
+                                return@GoldPrimaryButton
+                            }
+                            if (pinInput != pinConfirmInput) {
+                                studentError = "Os dois PINs não coincidem."
+                                return@GoldPrimaryButton
+                            }
+                            isProcessingPin = true
+                            val rawPin = pinInput
+                            val targetId = pendingClient.id
+                            scope.launch {
+                                val hash = withContext(Dispatchers.Default) {
+                                    StudentPinHasher.hashPin(rawPin)
+                                }
+                                onSetStudentPin(targetId, hash) { ok ->
+                                    isProcessingPin = false
+                                    if (ok) {
+                                        pinInput = ""
+                                        pinConfirmInput = ""
+                                        onEnterStudent(targetId)
+                                    } else {
+                                        studentError = "Não foi possível guardar o PIN. Podes entrar sem PIN e tentar em Definições."
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = "student_setup_pin_save_button"
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+                    DarkSecondaryButton(
+                        text = "Agora não · Entrar sem PIN",
+                        onClick = { onEnterStudent(pendingClient.id) },
+                        modifier = Modifier.fillMaxWidth().testTag("student_setup_pin_skip_button")
+                    )
+
+                    Spacer(Modifier.height(6.dp))
+                    TextButton(
+                        onClick = { resetToPhoneStep() },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text("Voltar", color = TextSecondaryDark)
+                    }
+                }
             } else {
                 BrandCard(highlightBorder = true) {
                     Text(
@@ -180,9 +465,9 @@ fun AuthRoleScreen(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = if (isRegisterMode) {
-                            "Preenche apenas o teu primeiro nome, último nome e número de telemóvel."
+                            "Preenche o teu primeiro nome, último nome, telemóvel e (opcionalmente) um PIN de 4 dígitos."
                         } else {
-                            "Introduz apenas o teu número de telemóvel para acederes ao teu perfil."
+                            "Introduz o teu número de telemóvel para acederes ao teu perfil."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondaryDark
@@ -251,6 +536,58 @@ fun AuthRoleScreen(
                     if (isRegisterMode) {
                         Spacer(Modifier.height(12.dp))
                         Surface(
+                            color = ObsidianBg,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, HairlineBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "PIN de 4 dígitos (Opcional)",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = NewShapeGoldBright,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Podes definir agora ou mais tarde em Definições.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    OutlinedTextField(
+                                        value = pinInput,
+                                        onValueChange = {
+                                            pinInput = it.filter { ch -> ch.isDigit() }.take(4)
+                                            studentError = null
+                                        },
+                                        label = { Text("PIN") },
+                                        placeholder = { Text("••••") },
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                        modifier = Modifier.weight(1f).testTag("student_register_pin_input"),
+                                        colors = darkFieldColors()
+                                    )
+                                    OutlinedTextField(
+                                        value = pinConfirmInput,
+                                        onValueChange = {
+                                            pinConfirmInput = it.filter { ch -> ch.isDigit() }.take(4)
+                                            studentError = null
+                                        },
+                                        label = { Text("Confirmar") },
+                                        placeholder = { Text("••••") },
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                        modifier = Modifier.weight(1f).testTag("student_register_pin_confirm_input"),
+                                        colors = darkFieldColors()
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Surface(
                             color = ElevatedCharcoal,
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, if (rgpdAccepted) NewShapeGold else HairlineBorder),
@@ -308,7 +645,7 @@ fun AuthRoleScreen(
 
                     if (!isRegisterMode) {
                         GoldPrimaryButton(
-                            text = "Entrar",
+                            text = "Continuar",
                             icon = Icons.Default.Person,
                             onClick = {
                                 val clean = normalizePhone(studentPhone)
@@ -318,7 +655,14 @@ fun AuthRoleScreen(
                                 }
                                 val existing = clients.find { it.phone == clean }
                                 if (existing != null) {
-                                    onEnterStudent(existing.id)
+                                    pendingClientId = existing.id
+                                    pinInput = ""
+                                    pinConfirmInput = ""
+                                    failedAttempts = 0
+                                    lockoutUntilMs = 0L
+                                    studentError = null
+                                    studentInfo = null
+                                    studentStep = if (existing.loginPinHash.isNotBlank()) "verify_pin" else "setup_pin"
                                 } else {
                                     studentInfo = "Número ainda não registado. Completa o teu primeiro e último nome para entrar."
                                     isRegisterMode = true
@@ -331,6 +675,8 @@ fun AuthRoleScreen(
                         TextButton(
                             onClick = {
                                 isRegisterMode = true
+                                pinInput = ""
+                                pinConfirmInput = ""
                                 studentError = null
                                 studentInfo = null
                             },
@@ -340,8 +686,9 @@ fun AuthRoleScreen(
                         }
                     } else {
                         GoldPrimaryButton(
-                            text = "Registar e Entrar",
+                            text = if (isProcessingPin) "A registar..." else "Registar e Entrar",
                             icon = Icons.Default.PersonAdd,
+                            enabled = !isProcessingPin,
                             onClick = {
                                 val clean = normalizePhone(studentPhone)
                                 val fName = firstName.trim()
@@ -356,14 +703,48 @@ fun AuthRoleScreen(
                                 }
                                 val existing = clients.find { it.phone == clean }
                                 if (existing != null) {
-                                    onEnterStudent(existing.id)
-                                } else if (!rgpdAccepted) {
+                                    isRegisterMode = false
+                                    pendingClientId = existing.id
+                                    pinInput = ""
+                                    pinConfirmInput = ""
+                                    studentStep = if (existing.loginPinHash.isNotBlank()) "verify_pin" else "setup_pin"
+                                    return@GoldPrimaryButton
+                                }
+                                if (pinInput.isNotEmpty() || pinConfirmInput.isNotEmpty()) {
+                                    if (!StudentPinHasher.isValidFourDigitPin(pinInput)) {
+                                        studentError = "O PIN opcional tem de ter exatamente 4 dígitos."
+                                        return@GoldPrimaryButton
+                                    }
+                                    if (pinInput != pinConfirmInput) {
+                                        studentError = "Os dois campos do PIN não coincidem."
+                                        return@GoldPrimaryButton
+                                    }
+                                }
+                                if (!rgpdAccepted) {
                                     studentError = "Tens de aceitar o consentimento RGPD para concluir o registo."
+                                    return@GoldPrimaryButton
+                                }
+                                if (pinInput.length == 4) {
+                                    isProcessingPin = true
+                                    val rawPin = pinInput
+                                    scope.launch {
+                                        val hash = withContext(Dispatchers.Default) {
+                                            StudentPinHasher.hashPin(rawPin)
+                                        }
+                                        isProcessingPin = false
+                                        onRegisterNewStudent(
+                                            "$fName $lName",
+                                            clean,
+                                            SeedCatalog.formatRgpdConsentStamp(),
+                                            hash
+                                        )
+                                    }
                                 } else {
                                     onRegisterNewStudent(
                                         "$fName $lName",
                                         clean,
-                                        SeedCatalog.formatRgpdConsentStamp()
+                                        SeedCatalog.formatRgpdConsentStamp(),
+                                        ""
                                     )
                                 }
                             },
@@ -374,12 +755,14 @@ fun AuthRoleScreen(
                         TextButton(
                             onClick = {
                                 isRegisterMode = false
+                                pinInput = ""
+                                pinConfirmInput = ""
                                 studentError = null
                                 studentInfo = null
                             },
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                         ) {
-                            Text("Já tenho conta · Entrar só com telemóvel", color = TextSecondaryDark)
+                            Text("Já tenho conta · Entrar com telemóvel", color = TextSecondaryDark)
                         }
                     }
                 }

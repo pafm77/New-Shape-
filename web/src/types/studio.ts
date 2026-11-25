@@ -59,6 +59,7 @@ export interface ClientRecord {
   trainingType: TrainingType;
   weeklySessionLimit?: number;
   fixedSlots?: string[];
+  loginPinHash?: string;
 }
 
 export interface TrainingWeekRecord {

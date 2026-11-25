@@ -584,6 +584,7 @@ fun PtClientProfileScreen(
     val pendingCount = confirmedBookings.size - markedCount
     val donePct = if (markedCount > 0) (presentCount * 100.0 / markedCount) else 0.0
     val absentPct = if (markedCount > 0) (absentCount * 100.0 / markedCount) else 0.0
+    var showResetPinConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Header + Profile Tabs
@@ -611,6 +612,9 @@ fun PtClientProfileScreen(
                             if (client.notes.contains("rgpd aceite", ignoreCase = true)) {
                                 StatusPill("RGPD ✓", ConfirmedGreen, ConfirmedGreenContainer)
                             }
+                            if (client.loginPinHash.isNotBlank()) {
+                                StatusPill("PIN 🔒", NewShapeGoldBright, NewShapeGoldMuted)
+                            }
                         }
                         Text(
                             text = if (client.active) "Aluno ativo" else "Aluno inativo",
@@ -618,12 +622,53 @@ fun PtClientProfileScreen(
                             color = if (client.active) ConfirmedGreen else TextSecondaryDark
                         )
                     }
+                    if (client.loginPinHash.isNotBlank()) {
+                        TextButton(
+                            onClick = { showResetPinConfirm = true },
+                            modifier = Modifier.testTag("pt_reset_client_pin_btn")
+                        ) {
+                            Text("Repor PIN", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                        }
+                    }
                     TextButton(onClick = { viewModel.setClientActive(client, !client.active) }) {
                         Text(
                             text = if (client.active) "Desativar" else "Reativar",
                             color = if (client.active) DangerRed else ConfirmedGreen
                         )
                     }
+                }
+                if (showResetPinConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showResetPinConfirm = false },
+                        containerColor = CharcoalSurface,
+                        title = { Text("Repor PIN do aluno?", color = TextPrimaryDark, fontWeight = FontWeight.Bold) },
+                        text = {
+                            Text(
+                                "O PIN de 4 dígitos de ${client.name} será removido. O aluno poderá entrar só com o telemóvel e definir um novo PIN.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                        },
+                        confirmButton = {
+                            GoldPrimaryButton(
+                                text = "Repor PIN",
+                                onClick = {
+                                    showResetPinConfirm = false
+                                    viewModel.updateClientPinHash(
+                                        clientId = client.id,
+                                        loginPinHash = "",
+                                        successMessage = "PIN reposto! O aluno pode entrar sem PIN e criar um novo."
+                                    )
+                                },
+                                testTag = "pt_confirm_reset_client_pin_btn"
+                            )
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showResetPinConfirm = false }) {
+                                Text("Cancelar", color = TextSecondaryDark)
+                            }
+                        }
+                    )
                 }
                 TabRow(
                     selectedTabIndex = profileTab,

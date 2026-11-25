@@ -8,6 +8,8 @@ import {
   Dumbbell,
   FileText,
   History,
+  KeyRound,
+  Lock,
   LogOut,
   MessageCircle,
   Play,
@@ -61,6 +63,12 @@ import {
   scheduleConfirmedWorkoutReminders,
 } from '../services/notificationService';
 import { isIosDevice, isStandalonePwa } from '../services/pwaInstall';
+import {
+  hashStudentPin,
+  isValidFourDigitPin,
+  normalizePinInput,
+  verifyStudentPin,
+} from '../services/pinCrypto';
 import { StudentAgendaSection } from './StudentAgendaSection';
 import { NewShapeLogo } from './NewShapeLogo';
 import {
@@ -70,7 +78,9 @@ import {
 import {
   BrandCard,
   EmptyState,
+  FieldLabel,
   GoldButton,
+  Input,
   Modal,
   SecondaryButton,
   StatusPill,
@@ -102,6 +112,7 @@ interface StudentPortalProps {
   settings: StudioSettingsRecord;
   initialWeekSlug?: string;
   showInstallPrompt?: boolean;
+  onUpdateStudentPin: (loginPinHash: string) => Promise<void>;
   onSwitchStudent: () => void;
   onSwitchToPt?: () => void;
   onSignOut: () => void;
@@ -130,6 +141,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   settings,
   initialWeekSlug,
   showInstallPrompt = false,
+  onUpdateStudentPin,
   onSwitchStudent,
   onSwitchToPt,
   onSignOut,
@@ -142,6 +154,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   } | null>(null);
   const [showNewAssessmentModal, setShowNewAssessmentModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [pinFormMode, setPinFormMode] = useState<'idle' | 'create' | 'change' | 'remove'>('idle');
+  const [pinCurrent, setPinCurrent] = useState('');
+  const [pinNew, setPinNew] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinSaving, setPinSaving] = useState(false);
   const [historyTarget, setHistoryTarget] = useState<{
     exerciseId: string;
     exerciseName: string;
@@ -1203,6 +1221,203 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* PIN de 4 Dígitos */}
+            <div className="rounded-2xl border border-[#323238] bg-[#242429] p-3.5 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2.5">
+                  <div className="mt-0.5 rounded-xl bg-[#3D3314] p-2 text-[#FACC15]">
+                    {client.loginPinHash ? <Lock className="h-4 w-4" /> : <KeyRound className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-[#F4F4F5]">PIN de 4 Dígitos</p>
+                    <p className="text-xs text-[#A1A1AA]">
+                      {client.loginPinHash
+                        ? 'A tua conta está protegida com PIN ao iniciar sessão.'
+                        : 'Adiciona um PIN de 4 dígitos para proteger o acesso à tua conta.'}
+                    </p>
+                  </div>
+                </div>
+                <StatusPill tone={client.loginPinHash ? 'green' : 'neutral'}>
+                  {client.loginPinHash ? 'PIN ativo 🔒' : 'Sem PIN'}
+                </StatusPill>
+              </div>
+
+              {pinFormMode === 'idle' ? (
+                <div className="flex flex-wrap gap-2">
+                  {!client.loginPinHash ? (
+                    <GoldButton
+                      onClick={() => {
+                        setPinCurrent('');
+                        setPinNew('');
+                        setPinConfirm('');
+                        setPinError(null);
+                        setPinFormMode('create');
+                      }}
+                    >
+                      <KeyRound className="h-4 w-4" />
+                      Criar PIN de 4 dígitos
+                    </GoldButton>
+                  ) : (
+                    <>
+                      <SecondaryButton
+                        onClick={() => {
+                          setPinCurrent('');
+                          setPinNew('');
+                          setPinConfirm('');
+                          setPinError(null);
+                          setPinFormMode('change');
+                        }}
+                      >
+                        Alterar PIN
+                      </SecondaryButton>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPinCurrent('');
+                          setPinNew('');
+                          setPinConfirm('');
+                          setPinError(null);
+                          setPinFormMode('remove');
+                        }}
+                        className="rounded-xl border border-[#EF4444]/40 bg-[#3B1518]/60 px-3 py-2 text-xs font-bold text-[#FCA5A5] hover:border-[#EF4444]"
+                      >
+                        Remover PIN
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <form
+                  className="space-y-2.5 border-t border-[#323238] pt-3"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setPinError(null);
+                    if (pinFormMode === 'change' || pinFormMode === 'remove') {
+                      if (!isValidFourDigitPin(pinCurrent)) {
+                        setPinError('Introduz o teu PIN atual de 4 dígitos.');
+                        return;
+                      }
+                      const ok = await verifyStudentPin(pinCurrent, client.loginPinHash || '');
+                      if (!ok) {
+                        setPinError('O PIN atual está incorreto.');
+                        return;
+                      }
+                    }
+                    if (pinFormMode === 'create' || pinFormMode === 'change') {
+                      if (!isValidFourDigitPin(pinNew)) {
+                        setPinError('O novo PIN tem de ter exatamente 4 dígitos.');
+                        return;
+                      }
+                      if (pinNew !== pinConfirm) {
+                        setPinError('Os dois campos do novo PIN não coincidem.');
+                        return;
+                      }
+                    }
+                    setPinSaving(true);
+                    try {
+                      if (pinFormMode === 'remove') {
+                        await onUpdateStudentPin('');
+                        onBanner('PIN removido da tua conta.');
+                      } else {
+                        const hashed = await hashStudentPin(pinNew);
+                        await onUpdateStudentPin(hashed);
+                        onBanner(
+                          pinFormMode === 'create'
+                            ? 'PIN de 4 dígitos ativado com sucesso!'
+                            : 'PIN de 4 dígitos alterado com sucesso!'
+                        );
+                      }
+                      setPinFormMode('idle');
+                      setPinCurrent('');
+                      setPinNew('');
+                      setPinConfirm('');
+                    } catch (err) {
+                      setPinError(
+                        err instanceof Error ? err.message : 'Não foi possível atualizar o PIN.'
+                      );
+                    } finally {
+                      setPinSaving(false);
+                    }
+                  }}
+                >
+                  {(pinFormMode === 'change' || pinFormMode === 'remove') && (
+                    <div>
+                      <FieldLabel>PIN atual (4 dígitos)</FieldLabel>
+                      <Input
+                        type="password"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={4}
+                        value={pinCurrent}
+                        onChange={(e) => {
+                          setPinCurrent(normalizePinInput(e.target.value));
+                          setPinError(null);
+                        }}
+                        placeholder="••••"
+                        className="text-center tracking-[0.4em] font-bold"
+                      />
+                    </div>
+                  )}
+                  {(pinFormMode === 'create' || pinFormMode === 'change') && (
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <FieldLabel>Novo PIN</FieldLabel>
+                        <Input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={4}
+                          value={pinNew}
+                          onChange={(e) => {
+                            setPinNew(normalizePinInput(e.target.value));
+                            setPinError(null);
+                          }}
+                          placeholder="••••"
+                          className="text-center tracking-[0.4em] font-bold"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Confirmar PIN</FieldLabel>
+                        <Input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={4}
+                          value={pinConfirm}
+                          onChange={(e) => {
+                            setPinConfirm(normalizePinInput(e.target.value));
+                            setPinError(null);
+                          }}
+                          placeholder="••••"
+                          className="text-center tracking-[0.4em] font-bold"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {pinError && <p className="text-xs font-medium text-[#EF4444]">{pinError}</p>}
+                  <div className="flex flex-wrap gap-2">
+                    <GoldButton type="submit" disabled={pinSaving}>
+                      {pinSaving
+                        ? 'A guardar...'
+                        : pinFormMode === 'remove'
+                        ? 'Confirmar remoção'
+                        : 'Guardar PIN'}
+                    </GoldButton>
+                    <SecondaryButton
+                      type="button"
+                      disabled={pinSaving}
+                      onClick={() => {
+                        setPinFormMode('idle');
+                        setPinError(null);
+                      }}
+                    >
+                      Cancelar
+                    </SecondaryButton>
+                  </div>
+                </form>
+              )}
             </div>
 
             {/* Atalho no Ecrã Principal */}

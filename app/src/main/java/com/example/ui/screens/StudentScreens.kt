@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -30,17 +31,23 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.ReportExporter
 import com.example.data.SeedCatalog
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
+import com.example.security.StudentPinHasher
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 @Composable
@@ -284,6 +291,7 @@ fun StudentMainScaffold(
         StudentSettingsDialog(
             student = student,
             state = state,
+            viewModel = viewModel,
             onDismiss = { showSettingsDialog = false }
         )
     }
@@ -293,9 +301,11 @@ fun StudentMainScaffold(
 private fun StudentSettingsDialog(
     student: ClientRecord,
     state: StudioUiState,
+    viewModel: NewShapeViewModel,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val firstName = student.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { student.name }
     val studioDefaultLead = state.settings.effectiveReminderLeadMinutes()
     val visibleSessions = remember(state.sessions) { state.sessions.filter { !it.ptPrivatePersonal } }
@@ -306,6 +316,13 @@ private fun StudentSettingsDialog(
     var reminderLeadMins by remember(studioDefaultLead) {
         mutableIntStateOf(WorkoutNotificationHelper.getStudentReminderLeadMinutes(context, studioDefaultLead))
     }
+
+    var pinMode by remember { mutableStateOf("idle") } // idle | create | change | remove
+    var pinCurrent by remember { mutableStateOf("") }
+    var pinNew by remember { mutableStateOf("") }
+    var pinConfirm by remember { mutableStateOf("") }
+    var pinError by remember { mutableStateOf<String?>(null) }
+    var pinSaving by remember { mutableStateOf(false) }
 
     val rescheduleReminders = { enabled: Boolean, lead: Int ->
         if (enabled && WorkoutNotificationHelper.hasNotificationPermission(context)) {
@@ -479,6 +496,231 @@ private fun StudentSettingsDialog(
                                         selectedContainerColor = NewShapeGold,
                                         selectedLabelColor = TextOnGold
                                     )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // PIN de 4 Dígitos
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, HairlineBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val hasPin = student.loginPinHash.isNotBlank()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = if (hasPin) Icons.Default.Lock else Icons.Default.Key,
+                                    contentDescription = "PIN de 4 dígitos",
+                                    tint = NewShapeGoldBright,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    "PIN de 4 Dígitos",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = NewShapeGoldBright,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            StatusPill(
+                                text = if (hasPin) "PIN ativo 🔒" else "Sem PIN",
+                                textColor = if (hasPin) ConfirmedGreen else TextSecondaryDark,
+                                containerColor = if (hasPin) ConfirmedGreenContainer else ObsidianBg
+                            )
+                        }
+                        Text(
+                            text = if (hasPin) {
+                                "A tua conta está protegida com PIN ao iniciar sessão."
+                            } else {
+                                "Adiciona um PIN de 4 dígitos para proteger o acesso à tua conta."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+
+                        if (pinMode == "idle") {
+                            if (!hasPin) {
+                                GoldPrimaryButton(
+                                    text = "Criar PIN de 4 dígitos",
+                                    icon = Icons.Default.Key,
+                                    onClick = {
+                                        pinCurrent = ""
+                                        pinNew = ""
+                                        pinConfirm = ""
+                                        pinError = null
+                                        pinMode = "create"
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    testTag = "student_settings_create_pin_btn"
+                                )
+                            } else {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    DarkSecondaryButton(
+                                        text = "Alterar PIN",
+                                        onClick = {
+                                            pinCurrent = ""
+                                            pinNew = ""
+                                            pinConfirm = ""
+                                            pinError = null
+                                            pinMode = "change"
+                                        },
+                                        modifier = Modifier.weight(1f).testTag("student_settings_change_pin_btn")
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            pinCurrent = ""
+                                            pinNew = ""
+                                            pinConfirm = ""
+                                            pinError = null
+                                            pinMode = "remove"
+                                        },
+                                        border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.6f)),
+                                        modifier = Modifier.weight(1f).testTag("student_settings_remove_pin_btn")
+                                    ) {
+                                        Text("Remover PIN", color = DangerRed, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        } else {
+                            if (pinMode == "change" || pinMode == "remove") {
+                                OutlinedTextField(
+                                    value = pinCurrent,
+                                    onValueChange = {
+                                        pinCurrent = it.filter { ch -> ch.isDigit() }.take(4)
+                                        pinError = null
+                                    },
+                                    label = { Text("PIN atual (4 dígitos)") },
+                                    placeholder = { Text("••••") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                    modifier = Modifier.fillMaxWidth().testTag("student_settings_pin_current_input"),
+                                    colors = darkFieldColors()
+                                )
+                            }
+                            if (pinMode == "create" || pinMode == "change") {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = pinNew,
+                                        onValueChange = {
+                                            pinNew = it.filter { ch -> ch.isDigit() }.take(4)
+                                            pinError = null
+                                        },
+                                        label = { Text("Novo PIN") },
+                                        placeholder = { Text("••••") },
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                        modifier = Modifier.weight(1f).testTag("student_settings_pin_new_input"),
+                                        colors = darkFieldColors()
+                                    )
+                                    OutlinedTextField(
+                                        value = pinConfirm,
+                                        onValueChange = {
+                                            pinConfirm = it.filter { ch -> ch.isDigit() }.take(4)
+                                            pinError = null
+                                        },
+                                        label = { Text("Confirmar") },
+                                        placeholder = { Text("••••") },
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                        modifier = Modifier.weight(1f).testTag("student_settings_pin_confirm_input"),
+                                        colors = darkFieldColors()
+                                    )
+                                }
+                            }
+                            if (pinError != null) {
+                                Text(pinError!!, color = DangerRed, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                GoldPrimaryButton(
+                                    text = when {
+                                        pinSaving -> "A guardar..."
+                                        pinMode == "remove" -> "Remover"
+                                        else -> "Guardar PIN"
+                                    },
+                                    enabled = !pinSaving,
+                                    onClick = {
+                                        pinError = null
+                                        if (pinMode == "change" || pinMode == "remove") {
+                                            if (!StudentPinHasher.isValidFourDigitPin(pinCurrent)) {
+                                                pinError = "Introduz o teu PIN atual de 4 dígitos."
+                                                return@GoldPrimaryButton
+                                            }
+                                        }
+                                        if (pinMode == "create" || pinMode == "change") {
+                                            if (!StudentPinHasher.isValidFourDigitPin(pinNew)) {
+                                                pinError = "O novo PIN tem de ter exatamente 4 dígitos."
+                                                return@GoldPrimaryButton
+                                            }
+                                            if (pinNew != pinConfirm) {
+                                                pinError = "Os dois PINs não coincidem."
+                                                return@GoldPrimaryButton
+                                            }
+                                        }
+                                        pinSaving = true
+                                        val modeSnapshot = pinMode
+                                        val curSnapshot = pinCurrent
+                                        val newSnapshot = pinNew
+                                        scope.launch {
+                                            if (modeSnapshot == "change" || modeSnapshot == "remove") {
+                                                val ok = withContext(Dispatchers.Default) {
+                                                    StudentPinHasher.verifyPin(curSnapshot, student.loginPinHash)
+                                                }
+                                                if (!ok) {
+                                                    pinSaving = false
+                                                    pinError = "O PIN atual está incorreto."
+                                                    return@launch
+                                                }
+                                            }
+                                            val nextHash = if (modeSnapshot == "remove") {
+                                                ""
+                                            } else {
+                                                withContext(Dispatchers.Default) {
+                                                    StudentPinHasher.hashPin(newSnapshot)
+                                                }
+                                            }
+                                            val msg = when (modeSnapshot) {
+                                                "remove" -> "PIN removido da tua conta."
+                                                "change" -> "PIN de 4 dígitos alterado com sucesso!"
+                                                else -> "PIN de 4 dígitos ativado com sucesso!"
+                                            }
+                                            viewModel.updateClientPinHash(student.id, nextHash, msg) { ok ->
+                                                pinSaving = false
+                                                if (ok) {
+                                                    pinMode = "idle"
+                                                    pinCurrent = ""
+                                                    pinNew = ""
+                                                    pinConfirm = ""
+                                                } else {
+                                                    pinError = "Não foi possível atualizar o PIN."
+                                                }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "student_settings_pin_submit_btn"
+                                )
+                                DarkSecondaryButton(
+                                    text = "Cancelar",
+                                    onClick = {
+                                        pinMode = "idle"
+                                        pinError = null
+                                    },
+                                    modifier = Modifier.weight(1f).testTag("student_settings_pin_cancel_btn")
                                 )
                             }
                         }

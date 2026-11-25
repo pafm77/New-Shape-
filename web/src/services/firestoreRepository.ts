@@ -198,6 +198,7 @@ export function subscribeStudioData(
       fixedSlots: Array.isArray(d.fixedSlots)
         ? normalizeFixedSlots(d.fixedSlots.map(String))
         : [],
+      loginPinHash: typeof d.loginPinHash === 'string' ? d.loginPinHash : '',
     }),
     (list) =>
       list.sort((a, b) => {
@@ -1127,6 +1128,7 @@ export async function addClient(
     fidelizacaoStartMillis?: number;
     trainingType?: TrainingType;
     weeklySessionLimit?: number;
+    loginPinHash?: string;
   }
 ): Promise<string> {
   const ref = doc(subcol(uid, 'clients'));
@@ -1162,6 +1164,10 @@ export async function addClient(
       Math.min(21, Math.round(payload.weeklySessionLimit))
     );
   }
+  const cleanPinHash = (payload.loginPinHash || '').trim().slice(0, 160);
+  if (cleanPinHash) {
+    docData.loginPinHash = cleanPinHash;
+  }
   await setDoc(ref, docData);
   return ref.id;
 }
@@ -1192,6 +1198,17 @@ export async function updateClientFixedSlots(
 ): Promise<void> {
   await updateDoc(doc(subcol(uid, 'clients'), clientId), {
     fixedSlots: normalizeFixedSlots(fixedSlots),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateClientPinHash(
+  uid: string,
+  clientId: string,
+  loginPinHash: string
+): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'clients'), clientId), {
+    loginPinHash: loginPinHash.trim().slice(0, 160),
     updatedAt: serverTimestamp(),
   });
 }

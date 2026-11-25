@@ -373,7 +373,12 @@ class NewShapeViewModel(
         _role.value = AppRole.STUDENT
     }
 
-    fun registerAndEnterStudentMode(name: String, phone: String, rgpdConsentNote: String = "") {
+    fun registerAndEnterStudentMode(
+        name: String,
+        phone: String,
+        rgpdConsentNote: String = "",
+        loginPinHash: String = ""
+    ) {
         val existing = currentData?.clients?.find { it.phone == repository.normalizePortuguesePhone(phone) }
         if (existing != null) {
             _activeStudentId.value = existing.id
@@ -384,12 +389,39 @@ class NewShapeViewModel(
             .filter { it.isNotBlank() }
             .joinToString(" · ")
         viewModelScope.launch {
-            repository.addClient(name, phone, combinedNotes, newClient = true)
+            repository.addClient(
+                name = name,
+                phone = phone,
+                notes = combinedNotes,
+                newClient = true,
+                loginPinHash = loginPinHash
+            )
                 .onSuccess { newId ->
                     _activeStudentId.value = newId
                     _role.value = AppRole.STUDENT
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage ?: "Erro ao registar aluno." }
+        }
+    }
+
+    fun updateClientPinHash(
+        clientId: String,
+        loginPinHash: String,
+        successMessage: String,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.updateClientPinHash(clientId, loginPinHash)
+                .onSuccess {
+                    if (successMessage.isNotBlank()) {
+                        _statusBanner.value = successMessage
+                    }
+                    onDone(true)
+                }
+                .onFailure {
+                    _statusBanner.value = it.localizedMessage ?: "Erro ao atualizar PIN."
+                    onDone(false)
+                }
         }
     }
 

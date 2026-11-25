@@ -92,6 +92,7 @@ const LS_PORTAL_PT_UID = 'newshape_portal_pt_uid';
 const LS_PORTAL_CODE = 'newshape_portal_code';
 const LS_PORTAL_CRED = 'newshape_portal_cred';
 const LS_LAST_MODE = 'newshape_last_mode';
+const LS_PIN_OK_PREFIX = 'newshape_pin_ok_';
 
 function generatePortalCredential(): { email: string; password: string } {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -505,6 +506,7 @@ export function App() {
 
   const isPtApproved = isSuperAdmin || ownPtAccount?.status === 'APPROVED';
   const externalScopedClientId = isExternalStudentPortal ? studentId : null;
+  const [pinCheckTick, setPinCheckTick] = useState(0);
 
   useEffect(() => {
     if (!studioUid) {
@@ -956,9 +958,66 @@ export function App() {
   const activeStudent = studentId ? clients.find((c) => c.id === studentId) || null : null;
   const lockedStudentOnly = isExternalStudentPortal;
 
+  const isStudentPinVerified = (c: ClientRecord | null): boolean => {
+    if (!c || !c.loginPinHash) return true;
+    try {
+      return localStorage.getItem(`${LS_PIN_OK_PREFIX}${c.id}`) === c.loginPinHash;
+    } catch {
+      return false;
+    }
+  };
+
+  const activeStudentPinOk = activeStudent !== null && isStudentPinVerified(activeStudent);
+
+  useEffect(() => {
+    if (!studioUid || !authUser || isStudioOwner || !activeStudent || !activeStudentPinOk) return;
+    repo.updatePortalMemberClientId(studioUid, authUser.uid, activeStudent.id).catch(() => {});
+  }, [studioUid, authUser, isStudioOwner, activeStudent, activeStudentPinOk, pinCheckTick]);
+
+  const markStudentPinVerified = (cid: string, pinHash?: string) => {
+    try {
+      if (pinHash) {
+        localStorage.setItem(`${LS_PIN_OK_PREFIX}${cid}`, pinHash);
+      } else {
+        localStorage.removeItem(`${LS_PIN_OK_PREFIX}${cid}`);
+      }
+    } catch {
+      // ignore storage errors
+    }
+    setPinCheckTick((n) => n + 1);
+  };
+
+  const handleSetStudentPin = async (cid: string, loginPinHash: string) => {
+    const target = clients.find((c) => c.id === cid) || null;
+    if (target?.loginPinHash && !isStudentPinVerified(target)) {
+      throw new Error('Verifica primeiro o teu PIN atual.');
+    }
+    if (authUser && !isStudioOwner) {
+      await repo.updatePortalMemberClientId(studioUid, authUser.uid, cid);
+    }
+    await repo.updateClientPinHash(studioUid, cid, loginPinHash);
+    markStudentPinVerified(cid, loginPinHash || undefined);
+  };
+
+  const handleEnterStudent = (cid: string) => {
+    const target = clients.find((c) => c.id === cid) || null;
+    if (target?.loginPinHash) {
+      markStudentPinVerified(cid, target.loginPinHash);
+    }
+    localStorage.setItem('newshape_student_id', cid);
+    setStudentId(cid);
+    setRole('STUDENT');
+    if (authUser && !isStudioOwner) {
+      repo.updatePortalMemberClientId(studioUid, authUser.uid, cid).catch(() => {});
+    }
+  };
+
+  const needsStudentPinChallenge =
+    role === 'STUDENT' && activeStudent !== null && !isStudentPinVerified(activeStudent);
+
   if (
     lockedStudentOnly &&
-    (role !== 'STUDENT' || !activeStudent)
+    (role !== 'STUDENT' || !activeStudent || needsStudentPinChallenge)
   ) {
     if (!dataLoaded) {
       return (
@@ -975,17 +1034,12 @@ export function App() {
         initialRoleTab="STUDENT"
         lockedStudentOnly
         weekSlugLabel={pathInfo.weekSlug}
+        initialPendingPinClientId={needsStudentPinChallenge && activeStudent ? activeStudent.id : null}
         onSignOut={handleSignOut}
         onEnterPt={() => setRole('PT')}
-        onEnterStudent={(cid) => {
-          localStorage.setItem('newshape_student_id', cid);
-          setStudentId(cid);
-          setRole('STUDENT');
-          if (authUser && !isStudioOwner) {
-            repo.updatePortalMemberClientId(studioUid, authUser.uid, cid).catch(() => {});
-          }
-        }}
-        onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote) => {
+        onEnterStudent={handleEnterStudent}
+        onSetStudentPin={handleSetStudentPin}
+        onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote, loginPinHash) => {
           let newId: string;
           try {
             newId = await repo.addClient(studioUid, {
@@ -993,6 +1047,7 @@ export function App() {
               phone: cleanPhone,
               notes: rgpdConsentNote,
               newClient: true,
+              loginPinHash,
             });
           } catch (err) {
             const errCode =
@@ -1020,10 +1075,14 @@ export function App() {
                 phone: cleanPhone,
                 notes: rgpdConsentNote,
                 newClient: true,
+                loginPinHash,
               });
             } else {
               throw err;
             }
+          }
+          if (loginPinHash) {
+            markStudentPinVerified(newId, loginPinHash);
           }
           localStorage.setItem('newshape_student_id', newId);
           setStudentId(newId);
@@ -1031,37 +1090,51 @@ export function App() {
           if (authUser && !isStudioOwner) {
             repo.updatePortalMemberClientId(studioUid, authUser.uid, newId).catch(() => {});
           }
-          showBanner('Conta criada com consentimento RGPD! Bem-vindo ao New Shape.');
+          showBanner(
+            loginPinHash
+              ? 'Conta criada com PIN e consentimento RGPD! Bem-vindo ao New Shape.'
+              : 'Conta criada com consentimento RGPD! Bem-vindo ao New Shape.'
+          );
         }}
       />
     );
   }
 
-  if (role === 'NONE' || (role === 'STUDENT' && !activeStudent && dataLoaded)) {
+  if (
+    role === 'NONE' ||
+    (role === 'STUDENT' && !activeStudent && dataLoaded) ||
+    needsStudentPinChallenge
+  ) {
     return (
       <AuthRoleScreen
         clients={clients}
         userEmail={authUser?.email || ''}
-        initialRoleTab={isStudentRoute ? 'STUDENT' : 'PT'}
+        initialRoleTab={isStudentRoute || needsStudentPinChallenge ? 'STUDENT' : 'PT'}
         weekSlugLabel={pathInfo.weekSlug}
+        initialPendingPinClientId={needsStudentPinChallenge && activeStudent ? activeStudent.id : null}
         onSignOut={handleSignOut}
         onEnterPt={() => setRole('PT')}
-        onEnterStudent={(cid) => {
-          localStorage.setItem('newshape_student_id', cid);
-          setStudentId(cid);
-          setRole('STUDENT');
-        }}
-        onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote) => {
+        onEnterStudent={handleEnterStudent}
+        onSetStudentPin={handleSetStudentPin}
+        onRegisterNewStudent={async (fullName, cleanPhone, rgpdConsentNote, loginPinHash) => {
           const newId = await repo.addClient(studioUid, {
             name: fullName,
             phone: cleanPhone,
             notes: rgpdConsentNote,
             newClient: true,
+            loginPinHash,
           });
+          if (loginPinHash) {
+            markStudentPinVerified(newId, loginPinHash);
+          }
           localStorage.setItem('newshape_student_id', newId);
           setStudentId(newId);
           setRole('STUDENT');
-          showBanner('Conta criada com consentimento RGPD! Bem-vindo ao New Shape.');
+          showBanner(
+            loginPinHash
+              ? 'Conta criada com PIN e consentimento RGPD! Bem-vindo ao New Shape.'
+              : 'Conta criada com consentimento RGPD! Bem-vindo ao New Shape.'
+          );
         }}
       />
     );
@@ -1090,6 +1163,7 @@ export function App() {
           settings={effectiveSettings}
           initialWeekSlug={pathInfo.weekSlug}
           showInstallPrompt={isExternalStudentPortal}
+          onUpdateStudentPin={(hash) => handleSetStudentPin(activeStudent.id, hash)}
           onSwitchStudent={() => {
             localStorage.removeItem('newshape_student_id');
             setStudentId(null);

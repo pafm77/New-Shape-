@@ -184,8 +184,16 @@ private fun AppNavigation() {
                         onSignOut = performSignOut,
                         onEnterPt = { studioViewModel.enterPtMode() },
                         onEnterStudent = { id -> studioViewModel.enterStudentMode(id) },
-                        onRegisterNewStudent = { name, phone, rgpdNote ->
-                            studioViewModel.registerAndEnterStudentMode(name, phone, rgpdNote)
+                        onSetStudentPin = { clientId, pinHash, onDone ->
+                            studioViewModel.updateClientPinHash(
+                                clientId = clientId,
+                                loginPinHash = pinHash,
+                                successMessage = "PIN de 4 dígitos guardado com sucesso!",
+                                onDone = onDone
+                            )
+                        },
+                        onRegisterNewStudent = { name, phone, rgpdNote, pinHash ->
+                            studioViewModel.registerAndEnterStudentMode(name, phone, rgpdNote, pinHash)
                         }
                     )
 

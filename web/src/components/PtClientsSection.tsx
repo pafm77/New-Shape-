@@ -6,6 +6,7 @@ import {
   CreditCard,
   Dumbbell,
   FileText,
+  KeyRound,
   MessageCircle,
   Plus,
   Search,
@@ -611,24 +612,49 @@ const ClientProfileView: React.FC<{
               {client.notes.toLowerCase().includes('rgpd aceite') && (
                 <StatusPill tone="green">RGPD ✓</StatusPill>
               )}
+              {Boolean(client.loginPinHash) && (
+                <StatusPill tone="gold">PIN 🔒</StatusPill>
+              )}
             </div>
             <p className={`text-xs ${client.active ? 'text-[#22C55E]' : 'text-[#A1A1AA]'}`}>
               {client.active ? 'Aluno ativo' : 'Aluno inativo'}
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={async () => {
-            await repo.updateClient(uid, { ...client, active: !client.active });
-            onBanner(client.active ? 'Aluno desativado.' : 'Aluno reativado.');
-          }}
-          className={`text-xs font-bold ${
-            client.active ? 'text-[#EF4444]' : 'text-[#22C55E]'
-          } hover:underline`}
-        >
-          {client.active ? 'Desativar' : 'Reativar'}
-        </button>
+        <div className="flex items-center gap-3">
+          {Boolean(client.loginPinHash) && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (
+                  !window.confirm(
+                    `Repor o PIN de 4 dígitos de ${client.name}? O aluno poderá entrar só com o telemóvel e criar um novo PIN.`
+                  )
+                ) {
+                  return;
+                }
+                await repo.updateClientPinHash(uid, client.id, '');
+                onBanner('PIN reposto! O aluno pode agora entrar sem PIN e definir um novo.');
+              }}
+              className="inline-flex items-center gap-1 rounded-lg border border-[#EAB308]/40 bg-[#3D3314]/60 px-2.5 py-1 text-xs font-bold text-[#FACC15] hover:border-[#EAB308]"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              Repor PIN
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={async () => {
+              await repo.updateClient(uid, { ...client, active: !client.active });
+              onBanner(client.active ? 'Aluno desativado.' : 'Aluno reativado.');
+            }}
+            className={`text-xs font-bold ${
+              client.active ? 'text-[#EF4444]' : 'text-[#22C55E]'
+            } hover:underline`}
+          >
+            {client.active ? 'Desativar' : 'Reativar'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

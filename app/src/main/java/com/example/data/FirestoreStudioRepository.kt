@@ -797,7 +797,8 @@ class FirestoreStudioRepository(
         monthlyFeeEur: Double = 0.0,
         fidelizacaoMonths: Int = 0,
         fidelizacaoStartMillis: Long = 0L,
-        weeklySessionLimit: Int = 0
+        weeklySessionLimit: Int = 0,
+        loginPinHash: String = ""
     ): Result<String> {
         var path = "users/unknown/clients"
         return try {
@@ -808,28 +809,53 @@ class FirestoreStudioRepository(
             val safeTrainingType = if (trainingType == "PERSONALIZADO") "PERSONALIZADO" else "GRUPO"
             val docRef = userDoc(uid).collection("clients").document()
             path = docRef.path
-            docRef.set(
-                mapOf(
-                    "userId" to uid,
-                    "name" to cleanName,
-                    "phone" to cleanPhone,
-                    "notes" to notes.trim().take(500),
-                    "active" to true,
-                    "newClient" to newClient,
-                    "trainingType" to safeTrainingType,
-                    "monthlyFeeEur" to monthlyFeeEur.coerceIn(0.0, 100000.0),
-                    "fidelizacaoMonths" to (if (fidelizacaoMonths in listOf(6, 12)) fidelizacaoMonths else 0),
-                    "fidelizacaoStartMillis" to fidelizacaoStartMillis.coerceAtLeast(0L),
-                    "weeklySessionLimit" to weeklySessionLimit.coerceIn(0, 21),
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val payload = mutableMapOf<String, Any>(
+                "userId" to uid,
+                "name" to cleanName,
+                "phone" to cleanPhone,
+                "notes" to notes.trim().take(500),
+                "active" to true,
+                "newClient" to newClient,
+                "trainingType" to safeTrainingType,
+                "monthlyFeeEur" to monthlyFeeEur.coerceIn(0.0, 100000.0),
+                "fidelizacaoMonths" to (if (fidelizacaoMonths in listOf(6, 12)) fidelizacaoMonths else 0),
+                "fidelizacaoStartMillis" to fidelizacaoStartMillis.coerceAtLeast(0L),
+                "weeklySessionLimit" to weeklySessionLimit.coerceIn(0, 21),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            val cleanPinHash = loginPinHash.trim().take(160)
+            if (cleanPinHash.isNotEmpty()) {
+                payload["loginPinHash"] = cleanPinHash
+            }
+            docRef.set(payload).await()
             Result.success(docRef.id)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateClientPinHash(clientId: String, loginPinHash: String): Result<Unit> {
+        var path = "users/unknown/clients/$clientId"
+        return try {
+            val uid = requireUserId()
+            require(clientId.isNotBlank())
+            val docRef = userDoc(uid).collection("clients").document(clientId)
+            path = docRef.path
+            docRef.update(
+                mapOf(
+                    "loginPinHash" to loginPinHash.trim().take(160),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
             Result.failure(e)
         }
     }
