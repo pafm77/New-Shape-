@@ -508,6 +508,24 @@ export function App() {
   const externalScopedClientId = isExternalStudentPortal ? studentId : null;
   const [pinCheckTick, setPinCheckTick] = useState(0);
 
+  const activeStudent = studentId ? clients.find((c) => c.id === studentId) || null : null;
+
+  const isStudentPinVerified = (c: ClientRecord | null): boolean => {
+    if (!c || !c.loginPinHash) return true;
+    try {
+      return localStorage.getItem(`${LS_PIN_OK_PREFIX}${c.id}`) === c.loginPinHash;
+    } catch {
+      return false;
+    }
+  };
+
+  const activeStudentPinOk = activeStudent !== null && isStudentPinVerified(activeStudent);
+
+  useEffect(() => {
+    if (!studioUid || !authUser || isStudioOwner || !activeStudent || !activeStudentPinOk) return;
+    repo.updatePortalMemberClientId(studioUid, authUser.uid, activeStudent.id).catch(() => {});
+  }, [studioUid, authUser, isStudioOwner, activeStudent, activeStudentPinOk, pinCheckTick]);
+
   useEffect(() => {
     if (!studioUid) {
       setDataLoaded(false);
@@ -955,24 +973,7 @@ export function App() {
     }
   }
 
-  const activeStudent = studentId ? clients.find((c) => c.id === studentId) || null : null;
   const lockedStudentOnly = isExternalStudentPortal;
-
-  const isStudentPinVerified = (c: ClientRecord | null): boolean => {
-    if (!c || !c.loginPinHash) return true;
-    try {
-      return localStorage.getItem(`${LS_PIN_OK_PREFIX}${c.id}`) === c.loginPinHash;
-    } catch {
-      return false;
-    }
-  };
-
-  const activeStudentPinOk = activeStudent !== null && isStudentPinVerified(activeStudent);
-
-  useEffect(() => {
-    if (!studioUid || !authUser || isStudioOwner || !activeStudent || !activeStudentPinOk) return;
-    repo.updatePortalMemberClientId(studioUid, authUser.uid, activeStudent.id).catch(() => {});
-  }, [studioUid, authUser, isStudioOwner, activeStudent, activeStudentPinOk, pinCheckTick]);
 
   const markStudentPinVerified = (cid: string, pinHash?: string) => {
     try {
