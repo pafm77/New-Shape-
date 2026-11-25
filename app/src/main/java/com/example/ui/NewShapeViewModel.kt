@@ -72,6 +72,9 @@ data class StudioUiState(
     val messageTemplates: List<MessageTemplateRecord> = emptyList(),
     val workoutLoadLogs: List<WorkoutLoadLogRecord> = emptyList(),
     val waitlistEntries: List<WaitlistEntryRecord> = emptyList(),
+    val studioAnnouncements: List<StudioAnnouncementRecord> = emptyList(),
+    val announcementReads: List<AnnouncementReadRecord> = emptyList(),
+    val workoutFeedback: List<WorkoutFeedbackRecord> = emptyList(),
     val settings: StudioSettingsRecord = StudioSettingsRecord(),
     val waitingWhatsAppReturn: Boolean = false,
     val undoSnapshot: UndoConfirmationSnapshot? = null,
@@ -253,6 +256,14 @@ class NewShapeViewModel(
         MgmtSlice(payments, fidelizacoes, exercises, plans, items)
     }
 
+    private val engagementDataFlow = combine(
+        repository.observeStudioAnnouncements(currentUserId),
+        repository.observeAnnouncementReads(currentUserId),
+        repository.observeWorkoutFeedback(currentUserId)
+    ) { announcements, reads, feedback ->
+        Triple(announcements, reads, feedback)
+    }
+
     private val extraDataFlow = combine(
         combine(
             repository.observeFoods(currentUserId),
@@ -265,8 +276,9 @@ class NewShapeViewModel(
             repository.observeSettings(currentUserId)
         ) { chats, templates, settings -> Triple(chats, templates, settings) },
         repository.observeWorkoutLoadLogs(currentUserId),
-        repository.observeWaitlistEntries(currentUserId)
-    ) { (foods, nutrition, assessments), (chats, templates, settings), loadLogs, waitlist ->
+        repository.observeWaitlistEntries(currentUserId),
+        engagementDataFlow
+    ) { (foods, nutrition, assessments), (chats, templates, settings), loadLogs, waitlist, (announcements, reads, feedback) ->
         ExtraSlice(
             foodItems = foods,
             nutritionEntries = nutrition,
@@ -275,7 +287,10 @@ class NewShapeViewModel(
             messageTemplates = templates,
             settings = settings ?: StudioSettingsRecord(),
             workoutLoadLogs = loadLogs,
-            waitlistEntries = waitlist
+            waitlistEntries = waitlist,
+            studioAnnouncements = announcements,
+            announcementReads = reads,
+            workoutFeedback = feedback
         )
     }
 
@@ -333,6 +348,9 @@ class NewShapeViewModel(
             messageTemplates = extra.messageTemplates,
             workoutLoadLogs = extra.workoutLoadLogs,
             waitlistEntries = extra.waitlistEntries,
+            studioAnnouncements = extra.studioAnnouncements,
+            announcementReads = extra.announcementReads,
+            workoutFeedback = extra.workoutFeedback,
             settings = extra.settings,
             waitingWhatsAppReturn = ctrl.waitingWhatsAppReturn,
             undoSnapshot = ctrl.undoSnapshot,
@@ -1087,7 +1105,9 @@ class NewShapeViewModel(
         phone: String,
         notes: String,
         trainingType: String = "GRUPO",
-        weeklySessionLimit: Int = 0
+        weeklySessionLimit: Int = 0,
+        birthDate: String = "",
+        weeklyGoalSessions: Int = 0
     ) {
         if (name.isBlank()) return
         viewModelScope.launch {
@@ -1096,7 +1116,9 @@ class NewShapeViewModel(
                 phone = phone,
                 notes = notes,
                 trainingType = trainingType,
-                weeklySessionLimit = weeklySessionLimit
+                weeklySessionLimit = weeklySessionLimit,
+                birthDate = birthDate,
+                weeklyGoalSessions = weeklyGoalSessions
             )
                 .onSuccess { _statusBanner.value = "Cliente adicionado." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
@@ -1107,6 +1129,14 @@ class NewShapeViewModel(
         viewModelScope.launch {
             repository.updateClient(client)
                 .onSuccess { _statusBanner.value = "Dados do aluno guardados." }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun updateClientBirthDate(clientId: String, birthDate: String) {
+        viewModelScope.launch {
+            repository.updateClientBirthDate(clientId, birthDate)
+                .onSuccess { _statusBanner.value = "Data de nascimento guardada!" }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -1550,6 +1580,89 @@ class NewShapeViewModel(
         }
     }
 
+    private var birthDateWindowInitRequested = false
+
+    fun ensureBirthDateReminderWindowIfUnset() {
+        val current = currentData?.settings ?: return
+        if (current.birthDateReminderUntilMillis > 0L || birthDateWindowInitRequested) return
+        birthDateWindowInitRequested = true
+        viewModelScope.launch {
+            repository.setBirthDateReminderWindow(30)
+        }
+    }
+
+    fun renewBirthDateReminder30Days() {
+        viewModelScope.launch {
+            repository.setBirthDateReminderWindow(30)
+                .onSuccess { _statusBanner.value = "Lembrete de data de nascimento renovado por 30 dias!" }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    // --- Studio Announcements ---
+    fun createStudioAnnouncement(title: String, message: String, durationDays: Int) {
+        viewModelScope.launch {
+            repository.createStudioAnnouncement(title, message, durationDays)
+                .onSuccess { _statusBanner.value = "Aviso publicado por $durationDays dia(s)!" }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun closeStudioAnnouncement(announcementId: String) {
+        viewModelScope.launch {
+            repository.closeStudioAnnouncement(announcementId)
+                .onSuccess { _statusBanner.value = "Aviso encerrado." }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun deleteStudioAnnouncement(announcementId: String) {
+        viewModelScope.launch {
+            repository.deleteStudioAnnouncement(announcementId)
+                .onSuccess { _statusBanner.value = "Aviso removido." }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun markAnnouncementRead(announcementId: String, client: ClientRecord) {
+        viewModelScope.launch {
+            repository.markAnnouncementRead(announcementId, client.id, client.name)
+                .onSuccess { _statusBanner.value = "Aviso marcado como lido!" }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    // --- Post-Workout Feedback ---
+    fun submitWorkoutFeedback(
+        client: ClientRecord,
+        planId: String,
+        planTitle: String,
+        rpe: Int,
+        feeling: String,
+        note: String
+    ) {
+        viewModelScope.launch {
+            repository.addWorkoutFeedback(
+                clientId = client.id,
+                clientName = client.name,
+                planId = planId,
+                planTitle = planTitle,
+                rpe = rpe,
+                feeling = feeling,
+                note = note
+            )
+                .onSuccess { _statusBanner.value = "Feedback enviado ao PT! Bom descanso." }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun deleteWorkoutFeedback(feedbackId: String) {
+        viewModelScope.launch {
+            repository.deleteWorkoutFeedback(feedbackId)
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
     // --- Formatters ---
     fun buildMessage(
         templateKey: String,
@@ -1612,7 +1725,10 @@ private data class ExtraSlice(
     val messageTemplates: List<MessageTemplateRecord>,
     val settings: StudioSettingsRecord,
     val workoutLoadLogs: List<WorkoutLoadLogRecord>,
-    val waitlistEntries: List<WaitlistEntryRecord>
+    val waitlistEntries: List<WaitlistEntryRecord>,
+    val studioAnnouncements: List<StudioAnnouncementRecord>,
+    val announcementReads: List<AnnouncementReadRecord>,
+    val workoutFeedback: List<WorkoutFeedbackRecord>
 )
 
 private data class ControlSlice(

@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  AnnouncementReadRecord,
   BookingRecord,
   ChatMessageRecord,
   ClientRecord,
@@ -24,6 +25,7 @@ import {
   PaymentRecord,
   PtAccountRecord,
   PtNotificationRecord,
+  StudioAnnouncementRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingType,
@@ -59,10 +61,12 @@ import { FinanceChart } from './FinanceChart';
 import { FinanceAdminTools } from './FinanceAdminTools';
 import { AppInstallGuideSubTab } from './AppInstallGuideSubTab';
 import { PtAttendanceSubTab, computeInactiveStudentsCount } from './PtAttendanceSubTab';
+import { PtAnnouncementsSubTab } from './PtAnnouncementsSubTab';
 
 export type ManagementSubTab =
   | 'finance'
   | 'attendance'
+  | 'announcements'
   | 'team'
   | 'fidelizacao'
   | 'chat'
@@ -79,6 +83,8 @@ interface PtManagementSectionProps {
   chatMessages: ChatMessageRecord[];
   ptNotifications?: PtNotificationRecord[];
   ptAccounts: PtAccountRecord[];
+  studioAnnouncements?: StudioAnnouncementRecord[];
+  announcementReads?: AnnouncementReadRecord[];
   settings: StudioSettingsRecord;
   whatsappWebMode?: boolean;
   initialSubTab?: ManagementSubTab;
@@ -98,6 +104,8 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
   chatMessages,
   ptNotifications = [],
   ptAccounts,
+  studioAnnouncements = [],
+  announcementReads = [],
   settings,
   whatsappWebMode = false,
   initialSubTab = 'finance',
@@ -148,6 +156,11 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
     }).length;
   }, [fidelizacoes]);
 
+  const activeAnnouncementsCount = useMemo(() => {
+    const now = Date.now();
+    return studioAnnouncements.filter((a) => a.active && a.expiresAtMillis > now).length;
+  }, [studioAnnouncements]);
+
   const tabs: Array<{ id: ManagementSubTab; label: string; badge?: number }> = isSuperAdmin
     ? [
         { id: 'finance', label: 'Finanças' },
@@ -155,6 +168,11 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           id: 'attendance',
           label: 'Assiduidade',
           badge: inactiveStudentsCount > 0 ? inactiveStudentsCount : undefined,
+        },
+        {
+          id: 'announcements',
+          label: 'Avisos',
+          badge: activeAnnouncementsCount > 0 ? activeAnnouncementsCount : undefined,
         },
         {
           id: 'fidelizacao',
@@ -176,6 +194,11 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           badge: inactiveStudentsCount > 0 ? inactiveStudentsCount : undefined,
         },
         {
+          id: 'announcements',
+          label: 'Avisos',
+          badge: activeAnnouncementsCount > 0 ? activeAnnouncementsCount : undefined,
+        },
+        {
           id: 'fidelizacao',
           label: 'Fidelizações',
           badge: expiringFidCount > 0 ? expiringFidCount : undefined,
@@ -188,7 +211,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
     <div className="space-y-4">
       <div
         className={`grid gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5 ${
-          isSuperAdmin ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-4'
+          isSuperAdmin ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-7' : 'grid-cols-2 sm:grid-cols-5'
         }`}
       >
         {tabs.map((t) => (
@@ -236,6 +259,16 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           sessions={sessions}
           bookings={bookings}
           onOpenWhatsApp={onOpenWhatsApp}
+        />
+      )}
+
+      {subTab === 'announcements' && (
+        <PtAnnouncementsSubTab
+          uid={uid}
+          clients={clients}
+          announcements={studioAnnouncements}
+          announcementReads={announcementReads}
+          onNotify={onBanner}
         />
       )}
 

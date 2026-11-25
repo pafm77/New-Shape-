@@ -179,6 +179,15 @@ class FirestoreStudioRepository(
     fun observeWaitlistEntries(uid: String): Flow<List<WaitlistEntryRecord>> =
         observeSubcollection<WaitlistEntryRecord>(uid, "waitlist_entries") { it.sortedBy { w -> w.createdAtMillis } }
 
+    fun observeStudioAnnouncements(uid: String): Flow<List<StudioAnnouncementRecord>> =
+        observeSubcollection<StudioAnnouncementRecord>(uid, "studio_announcements") { it.sortedByDescending { a -> a.createdAtMillis } }
+
+    fun observeAnnouncementReads(uid: String): Flow<List<AnnouncementReadRecord>> =
+        observeSubcollection<AnnouncementReadRecord>(uid, "announcement_reads") { it.sortedByDescending { r -> r.readAtMillis } }
+
+    fun observeWorkoutFeedback(uid: String): Flow<List<WorkoutFeedbackRecord>> =
+        observeSubcollection<WorkoutFeedbackRecord>(uid, "workout_feedback") { it.sortedByDescending { f -> f.timestampMillis } }
+
     fun observeOwnPtAccount(uid: String): Flow<PtAccountRecord?> = flow {
         require(uid.isNotBlank()) { "UID inválido." }
         val docRef = db.collection("pt_accounts").document(uid)
@@ -800,7 +809,9 @@ class FirestoreStudioRepository(
         fidelizacaoMonths: Int = 0,
         fidelizacaoStartMillis: Long = 0L,
         weeklySessionLimit: Int = 0,
-        loginPinHash: String = ""
+        loginPinHash: String = "",
+        birthDate: String = "",
+        weeklyGoalSessions: Int = 0
     ): Result<String> {
         var path = "users/unknown/clients"
         return try {
@@ -823,12 +834,17 @@ class FirestoreStudioRepository(
                 "fidelizacaoMonths" to (if (fidelizacaoMonths in listOf(6, 12)) fidelizacaoMonths else 0),
                 "fidelizacaoStartMillis" to fidelizacaoStartMillis.coerceAtLeast(0L),
                 "weeklySessionLimit" to weeklySessionLimit.coerceIn(0, 21),
+                "weeklyGoalSessions" to weeklyGoalSessions.coerceIn(0, 14),
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
             val cleanPinHash = loginPinHash.trim().take(160)
             if (cleanPinHash.isNotEmpty()) {
                 payload["loginPinHash"] = cleanPinHash
+            }
+            val cleanBirth = birthDate.trim()
+            if (Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(cleanBirth)) {
+                payload["birthDate"] = cleanBirth
             }
             docRef.set(payload).await()
             Result.success(docRef.id)
@@ -862,6 +878,32 @@ class FirestoreStudioRepository(
         }
     }
 
+    suspend fun updateClientBirthDate(clientId: String, birthDate: String): Result<Unit> {
+        var path = "users/unknown/clients/$clientId"
+        return try {
+            val uid = requireUserId()
+            require(clientId.isNotBlank())
+            val clean = birthDate.trim()
+            require(clean.isEmpty() || Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(clean)) {
+                "Data de nascimento inválida (usa AAAA-MM-DD)."
+            }
+            val docRef = userDoc(uid).collection("clients").document(clientId)
+            path = docRef.path
+            docRef.update(
+                mapOf(
+                    "birthDate" to clean,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateClient(client: ClientRecord): Result<Unit> {
         var path = "users/unknown/clients/${client.id}"
         return try {
@@ -870,6 +912,7 @@ class FirestoreStudioRepository(
             val docRef = userDoc(uid).collection("clients").document(client.id)
             path = docRef.path
             val safeTrainingType = if (client.trainingType == "PERSONALIZADO") "PERSONALIZADO" else "GRUPO"
+            val cleanBirth = client.birthDate.trim().takeIf { Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(it) }.orEmpty()
             docRef.update(
                 mapOf(
                     "name" to client.name.trim().take(100),
@@ -882,6 +925,8 @@ class FirestoreStudioRepository(
                     "fidelizacaoMonths" to (if (client.fidelizacaoMonths in listOf(6, 12)) client.fidelizacaoMonths else 0),
                     "fidelizacaoStartMillis" to client.fidelizacaoStartMillis.coerceAtLeast(0L),
                     "weeklySessionLimit" to client.weeklySessionLimit.coerceIn(0, 21),
+                    "birthDate" to cleanBirth,
+                    "weeklyGoalSessions" to client.weeklyGoalSessions.coerceIn(0, 14),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
@@ -915,6 +960,8 @@ class FirestoreStudioRepository(
                 "payments",
                 "fidelizacoes",
                 "workout_load_logs",
+                "workout_feedback",
+                "announcement_reads",
                 "nutrition_entries",
                 "physical_assessments",
                 "chat_messages",
@@ -2896,6 +2943,215 @@ class FirestoreStudioRepository(
             .replace("{treinos}", sessionsList)
             .replace("{link}", weekLink)
             .replace("{semana}", week?.label.orEmpty())
+    }
+
+    suspend fun setBirthDateReminderWindow(durationDays: Int = 30): Result<Long> = try {
+        val uid = requireUserId()
+        val clampedDays = durationDays.coerceIn(1, 90)
+        val untilMillis = System.currentTimeMillis() + clampedDays * 86_400_000L
+        userDoc(uid).collection("settings").document("studio").update(
+            mapOf(
+                "birthDateReminderUntilMillis" to untilMillis,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(untilMillis)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/settings/studio")
+        Result.failure(e)
+    }
+
+    // --- Studio Announcements & Read Receipts ---
+    suspend fun createStudioAnnouncement(
+        title: String,
+        message: String,
+        durationDays: Int
+    ): Result<String> = try {
+        val uid = requireUserId()
+        val cleanTitle = title.trim().take(120)
+        val cleanMessage = message.trim().take(1200)
+        require(cleanTitle.isNotEmpty() && cleanMessage.isNotEmpty()) {
+            "Preenche o título e a mensagem do aviso."
+        }
+        val safeDays = durationDays.coerceIn(1, 90)
+        val now = System.currentTimeMillis()
+        val expiresAt = now + safeDays * 86_400_000L
+        val docRef = userDoc(uid).collection("studio_announcements").document()
+        docRef.set(
+            mapOf(
+                "userId" to uid,
+                "title" to cleanTitle,
+                "message" to cleanMessage,
+                "durationDays" to safeDays,
+                "createdAtMillis" to now,
+                "expiresAtMillis" to expiresAt,
+                "active" to true,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(docRef.id)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/studio_announcements")
+        Result.failure(e)
+    }
+
+    suspend fun closeStudioAnnouncement(announcementId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("studio_announcements").document(announcementId).update(
+            mapOf(
+                "active" to false,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/studio_announcements/$announcementId")
+        Result.failure(e)
+    }
+
+    suspend fun deleteStudioAnnouncement(announcementId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        val readsSnap = userDoc(uid).collection("announcement_reads")
+            .whereEqualTo("announcementId", announcementId)
+            .get()
+            .await()
+        val batch = db.batch()
+        readsSnap.documents.forEach { batch.delete(it.reference) }
+        batch.delete(userDoc(uid).collection("studio_announcements").document(announcementId))
+        batch.commit().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/studio_announcements/$announcementId")
+        Result.failure(e)
+    }
+
+    suspend fun markAnnouncementRead(
+        announcementId: String,
+        clientId: String,
+        clientName: String
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        val readId = "${announcementId}_${clientId}".replace(Regex("[^a-zA-Z0-9_-]"), "_").take(128)
+        val docRef = userDoc(uid).collection("announcement_reads").document(readId)
+        val existing = docRef.get().await()
+        val now = System.currentTimeMillis()
+        if (existing.exists()) {
+            docRef.update(
+                mapOf(
+                    "readAtMillis" to now,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } else {
+            docRef.set(
+                mapOf(
+                    "userId" to uid,
+                    "announcementId" to announcementId.take(128),
+                    "clientId" to clientId.take(128),
+                    "clientName" to clientName.trim().ifBlank { "Aluno" }.take(100),
+                    "readAtMillis" to now,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/announcement_reads")
+        Result.failure(e)
+    }
+
+    // --- Post-Workout Feedback ---
+    suspend fun addWorkoutFeedback(
+        clientId: String,
+        clientName: String,
+        planId: String,
+        planTitle: String,
+        rpe: Int,
+        feeling: String,
+        note: String
+    ): Result<String> = try {
+        val uid = requireUserId()
+        val now = System.currentTimeMillis()
+        val safeRpe = rpe.coerceIn(1, 10)
+        val safeFeeling = when (feeling) {
+            "LEVE", "PESADO" -> feeling
+            else -> "IDEAL"
+        }
+        val cleanName = clientName.trim().ifBlank { "Aluno" }.take(100)
+        val cleanTitle = planTitle.trim().ifBlank { "Treino" }.take(120)
+        val cleanNote = note.trim().take(400)
+        val docRef = userDoc(uid).collection("workout_feedback").document()
+        docRef.set(
+            mapOf(
+                "userId" to uid,
+                "clientId" to clientId.take(128),
+                "clientName" to cleanName,
+                "planId" to planId.take(128),
+                "planTitle" to cleanTitle,
+                "rpe" to safeRpe,
+                "feeling" to safeFeeling,
+                "note" to cleanNote,
+                "timestampMillis" to now,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+
+        try {
+            val feelingPt = when (safeFeeling) {
+                "LEVE" -> "Leve"
+                "PESADO" -> "Pesado"
+                else -> "Ideal"
+            }
+            val summaryBase = "Feedback pós-treino ($feelingPt · RPE $safeRpe/10) em $cleanTitle"
+            val summary = if (cleanNote.isNotBlank()) "$summaryBase: \"$cleanNote\"" else summaryBase
+            userDoc(uid).collection("pt_notifications").document().set(
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to clientId.take(128),
+                    "clientName" to cleanName,
+                    "type" to "FEEDBACK",
+                    "summary" to summary.take(400),
+                    "weekKey" to "",
+                    "read" to false,
+                    "timestampMillis" to now,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } catch (_: Exception) {
+            // Non-blocking notification failure
+        }
+
+        Result.success(docRef.id)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/workout_feedback")
+        Result.failure(e)
+    }
+
+    suspend fun deleteWorkoutFeedback(feedbackId: String): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("workout_feedback").document(feedbackId).delete().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.DELETE, "users/$uidOrUnknown/workout_feedback/$feedbackId")
+        Result.failure(e)
     }
 
     private fun generatePortalCode(): String {

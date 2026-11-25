@@ -79,6 +79,7 @@ import {
 } from './UiPrimitives';
 import { PtMarcacoesView } from './PtMarcacoesView';
 import { computeInactiveStudentsCount } from './PtAttendanceSubTab';
+import { UpcomingBirthdaysCard } from './StudentEngagementWidgets';
 
 export type PtHomeSubTab = 'confirm' | 'marcacoes' | 'weeks' | 'responses' | 'messages' | 'settings';
 
@@ -469,6 +470,8 @@ const PorConfirmarView: React.FC<{
                           ? 'amber'
                           : n.type === 'ASSESSMENT'
                           ? 'green'
+                          : n.type === 'FEEDBACK'
+                          ? 'gold'
                           : 'gold'
                       }
                     >
@@ -478,6 +481,8 @@ const PorConfirmarView: React.FC<{
                         ? 'Indisponível'
                         : n.type === 'ASSESSMENT'
                         ? 'Nova avaliação física'
+                        : n.type === 'FEEDBACK'
+                        ? 'Feedback pós-treino'
                         : 'Alterou horário'}
                     </StatusPill>
                     <span className="text-[11px] text-[#A1A1AA]">
@@ -498,6 +503,16 @@ const PorConfirmarView: React.FC<{
           </div>
         </BrandCard>
       )}
+
+      <UpcomingBirthdaysCard
+        clients={clients}
+        whatsappWebMode={settings.whatsappWebMode}
+        reminderUntilMillis={settings.birthDateReminderUntilMillis ?? 0}
+        onRenewReminder={async () => {
+          await repo.setBirthDateReminderWindow(uid, 30);
+          onBanner('Lembrete de data de nascimento renovado por 30 dias!');
+        }}
+      />
 
       <PortalLinksCard
         uid={uid}

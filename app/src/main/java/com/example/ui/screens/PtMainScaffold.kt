@@ -81,6 +81,7 @@ fun PtMainScaffold(
                         "UNAVAILABLE" -> "Aluno indisponível · ${n.clientName}"
                         "ASSESSMENT" -> "Nova avaliação física · ${n.clientName}"
                         "CHAT" -> "Nova mensagem · ${n.clientName}"
+                        "FEEDBACK" -> "Feedback pós-treino · ${n.clientName}"
                         else -> "Horário alterado · ${n.clientName}"
                     }
                     WorkoutNotificationHelper.showImmediateNotification(
@@ -453,6 +454,10 @@ fun PtMainScaffold(
                 mgmtInitialSubTab = if (state.isSuperAdmin) 3 else 2
                 mgmtChatClientId = clientId
                 selectedTab = 5
+            },
+            onOpenTraining = {
+                showNotificationsDialog = false
+                selectedTab = 2
             }
         )
     }
@@ -467,7 +472,8 @@ private fun PtNotificationsDialog(
     onDelete: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAssessment: () -> Unit,
-    onOpenChat: (String) -> Unit
+    onOpenChat: (String) -> Unit,
+    onOpenTraining: () -> Unit
 ) {
     val context = LocalContext.current
     var hasNotifPermission by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
@@ -597,6 +603,7 @@ private fun PtNotificationsDialog(
                         val isCancel = notif.type == "CANCELLED" || notif.type == "UNAVAILABLE"
                         val isAssessment = notif.type == "ASSESSMENT"
                         val isChat = notif.type == "CHAT"
+                        val isFeedback = notif.type == "FEEDBACK"
                         Surface(
                             color = if (!notif.read) ElevatedCharcoal else ObsidianBg,
                             shape = RoundedCornerShape(10.dp),
@@ -607,14 +614,19 @@ private fun PtNotificationsDialog(
                                     isCancel -> DangerRed
                                     isAssessment -> ConfirmedGreen
                                     isChat -> InfoBlue
+                                    isFeedback -> NewShapeGold
                                     else -> PendingAmber
                                 }
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = isAssessment || (isChat && notif.clientId.isNotBlank())) {
+                                .clickable(enabled = isAssessment || isFeedback || (isChat && notif.clientId.isNotBlank())) {
                                     if (!notif.read) onMarkRead(notif.id)
-                                    if (isChat) onOpenChat(notif.clientId) else onOpenAssessment()
+                                    when {
+                                        isChat -> onOpenChat(notif.clientId)
+                                        isFeedback -> onOpenTraining()
+                                        else -> onOpenAssessment()
+                                    }
                                 }
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -639,18 +651,21 @@ private fun PtNotificationsDialog(
                                                 "UNAVAILABLE" -> "Indisponível"
                                                 "ASSESSMENT" -> "Avaliação física"
                                                 "CHAT" -> "Mensagem"
+                                                "FEEDBACK" -> "Feedback treino"
                                                 else -> "Alterou"
                                             },
                                             textColor = when {
                                                 isCancel -> DangerRed
                                                 isAssessment -> ConfirmedGreen
                                                 isChat -> InfoBlue
+                                                isFeedback -> NewShapeGoldBright
                                                 else -> PendingAmber
                                             },
                                             containerColor = when {
                                                 isCancel -> DangerRedContainer
                                                 isAssessment -> ConfirmedGreenContainer
                                                 isChat -> InfoBlueContainer
+                                                isFeedback -> NewShapeGoldMuted
                                                 else -> PendingAmberContainer
                                             }
                                         )
@@ -678,6 +693,16 @@ private fun PtNotificationsDialog(
                                             }
                                         ) {
                                             Text("Responder", color = InfoBlue, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                    if (isFeedback) {
+                                        TextButton(
+                                            onClick = {
+                                                if (!notif.read) onMarkRead(notif.id)
+                                                onOpenTraining()
+                                            }
+                                        ) {
+                                            Text("Ver treino", color = NewShapeGoldBright, style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
                                     if (!notif.read) {

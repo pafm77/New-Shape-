@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Activity,
   Bell,
+  Cake,
   Calendar,
   Check,
   Clock,
@@ -25,6 +27,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  AnnouncementReadRecord,
   BookingRecord,
   ChatMessageRecord,
   ClientRecord,
@@ -34,6 +37,7 @@ import {
   NutritionEntryRecord,
   PaymentRecord,
   PhysicalAssessmentRecord,
+  StudioAnnouncementRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
@@ -91,6 +95,14 @@ import { StrengthEvolutionChartCard, StudentConsistencyCard } from './StudentPro
 import { PrivateChatPanel } from './PtManagementSection';
 import { ExerciseProgressModal } from './ExerciseProgressModal';
 import { StudentInstallBanner } from './StudentInstallBanner';
+import {
+  BirthDateReminderBanner,
+  PostWorkoutFeedbackModal,
+  StudioAnnouncementsBanner,
+  WeeklyGoalStreakCard,
+  formatBirthDatePt,
+  parseBirthDate,
+} from './StudentEngagementWidgets';
 import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 
 interface StudentPortalProps {
@@ -110,6 +122,8 @@ interface StudentPortalProps {
   nutritionEntries: NutritionEntryRecord[];
   assessments: PhysicalAssessmentRecord[];
   chatMessages: ChatMessageRecord[];
+  studioAnnouncements?: StudioAnnouncementRecord[];
+  announcementReads?: AnnouncementReadRecord[];
   settings: StudioSettingsRecord;
   initialWeekSlug?: string;
   showInstallPrompt?: boolean;
@@ -139,6 +153,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   nutritionEntries,
   assessments,
   chatMessages,
+  studioAnnouncements = [],
+  announcementReads = [],
   settings,
   initialWeekSlug,
   showInstallPrompt = false,
@@ -161,10 +177,20 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [pinConfirm, setPinConfirm] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinSaving, setPinSaving] = useState(false);
+  const [birthDateDraft, setBirthDateDraft] = useState(client.birthDate || '');
+  const [savingBirthDate, setSavingBirthDate] = useState(false);
+  const [feedbackTarget, setFeedbackTarget] = useState<{
+    planId: string;
+    planTitle: string;
+  } | null>(null);
   const [historyTarget, setHistoryTarget] = useState<{
     exerciseId: string;
     exerciseName: string;
   } | null>(null);
+
+  useEffect(() => {
+    setBirthDateDraft(client.birthDate || '');
+  }, [client.id, client.birthDate]);
   const firstName = client.name.trim().split(/\s+/)[0] || client.name;
   const weeklyLimit = client.weeklySessionLimit ?? 0;
 
@@ -581,36 +607,64 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               }
             />
           )}
+          <StudioAnnouncementsBanner
+            announcements={studioAnnouncements}
+            reads={announcementReads}
+            client={client}
+            onMarkRead={async (announcementId) => {
+              await repo.markAnnouncementRead(uid, {
+                announcementId,
+                clientId: client.id,
+                clientName: client.name,
+              });
+              onBanner('Aviso marcado como lido ✓');
+            }}
+          />
+          <BirthDateReminderBanner
+            client={client}
+            reminderUntilMillis={settings.birthDateReminderUntilMillis ?? 0}
+            onSaveBirthDate={async (birthDate) => {
+              await repo.updateClientBirthDate(uid, client.id, birthDate);
+              onBanner('Data de nascimento guardada! Obrigado 🎂');
+            }}
+          />
           {tab === 'agenda' && (
-            <StudentAgendaSection
-              uid={uid}
-              client={client}
-              firstName={firstName}
-              publishedWeeks={publishedWeeks}
-              activeWeek={activeWeek}
-              activeWeekIdx={activeWeekIdx}
-              onSelectWeekKey={setSelectedWeekKey}
-              sessions={visibleSessions}
-              bookings={bookings}
-              clientWeekBookings={clientWeekBookings}
-              draftSessionIds={draftSessionIds}
-              setDraftSessionIds={setDraftSessionIds}
-              waitlistEntries={waitlistEntries}
-              weekResponse={weekResponse}
-              settings={settings}
-              weeklyLimit={weeklyLimit}
-              studioDefaultLeadMins={studioDefaultLeadMins}
-              notifPerm={notifPerm}
-              setNotifPerm={setNotifPerm}
-              reminderEnabled={reminderEnabled}
-              setReminderEnabled={setReminderEnabled}
-              hasCustomLead={hasCustomLead}
-              setHasCustomLead={setHasCustomLead}
-              reminderLeadMins={reminderLeadMins}
-              setReminderLeadMins={setReminderLeadMins}
-              onBanner={onBanner}
-              onWhatsAppAlert={setWhatsAppAlertModal}
-            />
+            <div className="space-y-4">
+              <WeeklyGoalStreakCard
+                client={client}
+                bookings={bookings}
+                sessions={visibleSessions}
+              />
+              <StudentAgendaSection
+                uid={uid}
+                client={client}
+                firstName={firstName}
+                publishedWeeks={publishedWeeks}
+                activeWeek={activeWeek}
+                activeWeekIdx={activeWeekIdx}
+                onSelectWeekKey={setSelectedWeekKey}
+                sessions={visibleSessions}
+                bookings={bookings}
+                clientWeekBookings={clientWeekBookings}
+                draftSessionIds={draftSessionIds}
+                setDraftSessionIds={setDraftSessionIds}
+                waitlistEntries={waitlistEntries}
+                weekResponse={weekResponse}
+                settings={settings}
+                weeklyLimit={weeklyLimit}
+                studioDefaultLeadMins={studioDefaultLeadMins}
+                notifPerm={notifPerm}
+                setNotifPerm={setNotifPerm}
+                reminderEnabled={reminderEnabled}
+                setReminderEnabled={setReminderEnabled}
+                hasCustomLead={hasCustomLead}
+                setHasCustomLead={setHasCustomLead}
+                reminderLeadMins={reminderLeadMins}
+                setReminderLeadMins={setReminderLeadMins}
+                onBanner={onBanner}
+                onWhatsAppAlert={setWhatsAppAlertModal}
+              />
+            </div>
           )}
 
           {tab === 'treino' && (
@@ -668,26 +722,39 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             </p>
                           )}
                         </div>
-                        {isExecuting ? (
-                          <SecondaryButton
-                            onClick={() => {
-                              setExecutingPlanId(null);
-                              setRestSecondsLeft(0);
-                              onBanner('Treino terminado! Bom trabalho 💪');
-                            }}
-                          >
-                            <Square className="h-3.5 w-3.5 text-[#EF4444]" />
-                            Terminar treino
-                          </SecondaryButton>
-                        ) : (
-                          <GoldButton
-                            disabled={items.length === 0}
-                            onClick={() => startWorkoutExecution(plan.id, items)}
-                          >
-                            <Play className="h-3.5 w-3.5" />
-                            Executar Treino
-                          </GoldButton>
-                        )}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isExecuting ? (
+                            <SecondaryButton
+                              onClick={() => {
+                                setExecutingPlanId(null);
+                                setRestSecondsLeft(0);
+                                setFeedbackTarget({ planId: plan.id, planTitle: plan.title });
+                                onBanner('Treino terminado! Bom trabalho 💪');
+                              }}
+                            >
+                              <Square className="h-3.5 w-3.5 text-[#EF4444]" />
+                              Terminar treino
+                            </SecondaryButton>
+                          ) : (
+                            <>
+                              <SecondaryButton
+                                onClick={() =>
+                                  setFeedbackTarget({ planId: plan.id, planTitle: plan.title })
+                                }
+                              >
+                                <Activity className="h-3.5 w-3.5 text-[#EAB308]" />
+                                Feedback
+                              </SecondaryButton>
+                              <GoldButton
+                                disabled={items.length === 0}
+                                onClick={() => startWorkoutExecution(plan.id, items)}
+                              >
+                                <Play className="h-3.5 w-3.5" />
+                                Executar Treino
+                              </GoldButton>
+                            </>
+                          )}
+                        </div>
                       </div>
 
                       <div className="mt-3 space-y-2.5 border-t border-[#323238] pt-3">
@@ -1434,6 +1501,53 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               )}
             </div>
 
+            {/* Data de Nascimento */}
+            <div className="rounded-2xl border border-[#323238] bg-[#242429] p-3.5 space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2.5">
+                  <div className="mt-0.5 rounded-xl bg-[#3D3314] p-2 text-[#FACC15]">
+                    <Cake className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-[#F4F4F5]">Data de Nascimento</p>
+                    <p className="text-xs text-[#A1A1AA]">
+                      {parseBirthDate(client.birthDate)
+                        ? `Registada: ${formatBirthDatePt(client.birthDate)}`
+                        : 'Adiciona a tua data de nascimento para assinalarmos o teu aniversário.'}
+                    </p>
+                  </div>
+                </div>
+                <StatusPill tone={parseBirthDate(client.birthDate) ? 'green' : 'amber'}>
+                  {parseBirthDate(client.birthDate) ? 'Preenchida ✓' : 'Por preencher'}
+                </StatusPill>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  type="date"
+                  value={birthDateDraft}
+                  max={new Date().toISOString().slice(0, 10)}
+                  min="1925-01-01"
+                  onChange={(e) => setBirthDateDraft(e.target.value)}
+                  className="flex-1"
+                />
+                <GoldButton
+                  type="button"
+                  disabled={savingBirthDate || !parseBirthDate(birthDateDraft)}
+                  onClick={async () => {
+                    setSavingBirthDate(true);
+                    try {
+                      await repo.updateClientBirthDate(uid, client.id, birthDateDraft);
+                      onBanner('Data de nascimento guardada! 🎂');
+                    } finally {
+                      setSavingBirthDate(false);
+                    }
+                  }}
+                >
+                  {savingBirthDate ? 'A guardar...' : 'Guardar'}
+                </GoldButton>
+              </div>
+            </div>
+
             {/* Atalho no Ecrã Principal */}
             {showInstallPrompt && !isStandalonePwa() && (
               <StudentInstallBanner
@@ -1477,6 +1591,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           </div>
         </Modal>
       )}
+
+      {/* Post-Workout Feedback Modal */}
+      <PostWorkoutFeedbackModal
+        open={Boolean(feedbackTarget)}
+        planTitle={feedbackTarget?.planTitle || ''}
+        onClose={() => setFeedbackTarget(null)}
+        onSubmit={async ({ rpe, feeling, note }) => {
+          if (!feedbackTarget) return;
+          await repo.addWorkoutFeedback(uid, {
+            clientId: client.id,
+            clientName: client.name,
+            planId: feedbackTarget.planId,
+            planTitle: feedbackTarget.planTitle,
+            rpe,
+            feeling,
+            note,
+          });
+          onBanner('Feedback enviado ao PT! Bom descanso 💪');
+        }}
+      />
 
       {/* WhatsApp Handoff Modal on Cancel / Schedule Change */}
       {whatsAppAlertModal && (

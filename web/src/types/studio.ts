@@ -31,7 +31,7 @@ export interface PtAccountRecord {
   reviewedAtMillis: number;
 }
 
-export type PtNotificationType = 'CANCELLED' | 'ALTERED' | 'UNAVAILABLE' | 'ASSESSMENT' | 'CHAT';
+export type PtNotificationType = 'CANCELLED' | 'ALTERED' | 'UNAVAILABLE' | 'ASSESSMENT' | 'CHAT' | 'FEEDBACK';
 
 export interface PtNotificationRecord {
   id: string;
@@ -60,6 +60,8 @@ export interface ClientRecord {
   weeklySessionLimit?: number;
   fixedSlots?: string[];
   loginPinHash?: string;
+  birthDate?: string;
+  weeklyGoalSessions?: number;
 }
 
 export interface TrainingWeekRecord {
@@ -242,6 +244,7 @@ export interface StudioSettingsRecord {
   siteBaseUrl: string;
   studentPortalCode?: string;
   ptWhatsappPhone?: string;
+  birthDateReminderUntilMillis?: number;
   seeded: boolean;
 }
 
@@ -281,3 +284,39 @@ export interface ImportResult {
   ignored: number;
   errors: string[];
 }
+
+export interface StudioAnnouncementRecord {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  durationDays: number;
+  createdAtMillis: number;
+  expiresAtMillis: number;
+  active: boolean;
+}
+
+export interface AnnouncementReadRecord {
+  id: string;
+  userId: string;
+  announcementId: string;
+  clientId: string;
+  clientName: string;
+  readAtMillis: number;
+}
+
+export type WorkoutFeedbackFeeling = 'LEVE' | 'IDEAL' | 'PESADO';
+
+export interface WorkoutFeedbackRecord {
+  id: string;
+  userId: string;
+  clientId: string;
+  clientName: string;
+  planId: string;
+  planTitle: string;
+  rpe: number;
+  feeling: WorkoutFeedbackFeeling;
+  note: string;
+  timestampMillis: number;
+}
+

@@ -28,6 +28,8 @@ data class ClientRecord(
     val weeklySessionLimit: Int = 0,
     val fixedSlots: List<String> = emptyList(),
     val loginPinHash: String = "",
+    val birthDate: String = "",
+    val weeklyGoalSessions: Int = 0,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -287,6 +289,7 @@ data class StudioSettingsRecord(
     val siteBaseUrl: String = "https://newshape.vercel.app",
     val studentPortalCode: String = "",
     val ptWhatsappPhone: String = "",
+    val birthDateReminderUntilMillis: Long = 0L,
     val seeded: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -401,4 +404,50 @@ object PhysicalCalculations {
         else -> "Obesidade"
     }
 }
+
+@Keep
+@IgnoreExtraProperties
+data class StudioAnnouncementRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val title: String = "",
+    val message: String = "",
+    val durationDays: Int = 7,
+    val createdAtMillis: Long = 0L,
+    val expiresAtMillis: Long = 0L,
+    val active: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class AnnouncementReadRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val announcementId: String = "",
+    val clientId: String = "",
+    val clientName: String = "",
+    val readAtMillis: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class WorkoutFeedbackRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val clientId: String = "",
+    val clientName: String = "",
+    val planId: String = "",
+    val planTitle: String = "",
+    val rpe: Int = 7,
+    val feeling: String = "IDEAL",
+    val note: String = "",
+    val timestampMillis: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 

@@ -8,6 +8,7 @@ import {
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
+  WorkoutFeedbackRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
@@ -29,6 +30,7 @@ import { ExerciseLastLoadBadge } from './ExerciseLastLoadBadge';
 import { ExerciseProgressModal } from './ExerciseProgressModal';
 import { PtTrainingAgendaView } from './PtTrainingAgendaView';
 import { PtTrainingMarcacoesView } from './PtTrainingMarcacoesView';
+import { PtRecentFeedbackCard } from './StudentEngagementWidgets';
 
 interface PtTrainingSectionProps {
   uid: string;
@@ -41,6 +43,7 @@ interface PtTrainingSectionProps {
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
   workoutLoadLogs: WorkoutLoadLogRecord[];
+  workoutFeedback?: WorkoutFeedbackRecord[];
   templates: MessageTemplateRecord[];
   settings: StudioSettingsRecord;
   initialClientId?: string;
@@ -60,6 +63,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   workoutPlans,
   workoutPlanItems,
   workoutLoadLogs,
+  workoutFeedback = [],
   templates,
   settings,
   initialClientId,
@@ -90,6 +94,14 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
         ? workoutPlans.filter((p) => p.clientId === effectiveClient.id)
         : [],
     [workoutPlans, effectiveClient]
+  );
+
+  const clientFeedback = useMemo(
+    () =>
+      effectiveClient
+        ? workoutFeedback.filter((f) => f.clientId === effectiveClient.id)
+        : [],
+    [workoutFeedback, effectiveClient]
   );
 
   return (
@@ -268,6 +280,17 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                 );
               })}
             </div>
+          )}
+
+          {effectiveClient && clientFeedback.length > 0 && (
+            <PtRecentFeedbackCard
+              clientName={effectiveClient.name}
+              feedbackItems={clientFeedback}
+              onDelete={async (id) => {
+                await repo.deleteWorkoutFeedback(uid, id);
+                onBanner('Feedback removido.');
+              }}
+            />
           )}
 
           {showNewPlan && effectiveClient && (

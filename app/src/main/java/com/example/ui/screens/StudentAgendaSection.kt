@@ -288,6 +288,31 @@ internal fun StudentAgendaSection(
             }
         }
 
+        item(key = "studio_announcements_banner") {
+            StudioAnnouncementsBanner(
+                announcements = state.studioAnnouncements,
+                reads = state.announcementReads,
+                client = student,
+                onMarkRead = { annId -> viewModel.markAnnouncementRead(annId, student) }
+            )
+        }
+
+        item(key = "birthdate_reminder_banner") {
+            BirthDateReminderBanner(
+                client = student,
+                reminderUntilMillis = state.settings.birthDateReminderUntilMillis,
+                onSaveBirthDate = { bd -> viewModel.updateClientBirthDate(student.id, bd) }
+            )
+        }
+
+        item(key = "weekly_goal_streak_card") {
+            WeeklyGoalStreakCard(
+                client = student,
+                bookings = state.bookings,
+                sessions = visibleSessions
+            )
+        }
+
         // Sub-tab Switcher: Horários | Marcações
         item {
             Surface(

@@ -54,6 +54,11 @@ fun PtManagementTab(
         }
     }
 
+    val activeAnnouncementsCount = remember(state.studioAnnouncements) {
+        val now = System.currentTimeMillis()
+        state.studioAnnouncements.count { it.active && it.expiresAtMillis > now }
+    }
+
     val subTabs = remember(state.isSuperAdmin, state.pendingPtApprovalsCount, state.unreadPtChatCount) {
         if (state.isSuperAdmin) {
             val teamTitle = if (state.pendingPtApprovalsCount > 0) "Equipa PT (${state.pendingPtApprovalsCount})" else "Equipa PT"
@@ -63,6 +68,7 @@ fun PtManagementTab(
                 "FIDELIZACOES" to "Fidelizações",
                 "CHAT" to "Chat",
                 "TEAM" to teamTitle,
+                "ANNOUNCEMENTS" to "Avisos",
                 "GUIDE" to "Guia App (PDF)"
             )
         } else {
@@ -70,6 +76,7 @@ fun PtManagementTab(
                 "ATTENDANCE" to "Assiduidade",
                 "FIDELIZACOES" to "Fidelizações",
                 "CHAT" to "Chat",
+                "ANNOUNCEMENTS" to "Avisos",
                 "GUIDE" to "Guia App (PDF)"
             )
         }
@@ -96,6 +103,7 @@ fun PtManagementTab(
                     "CHAT" -> state.unreadPtChatCount
                     "ATTENDANCE" -> inactiveCount
                     "FIDELIZACOES" -> expiringFidCount
+                    "ANNOUNCEMENTS" -> activeAnnouncementsCount
                     else -> 0
                 }
                 Tab(
@@ -140,6 +148,7 @@ fun PtManagementTab(
                 onSelectClient = { activeChatClientId = it }
             )
             "TEAM" -> if (state.isSuperAdmin) PtTeamApprovalsSection(state = state, viewModel = viewModel)
+            "ANNOUNCEMENTS" -> PtAnnouncementsSection(state = state, viewModel = viewModel)
             "GUIDE" -> PtAppInstallGuideSection(state = state)
         }
     }

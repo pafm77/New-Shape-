@@ -401,12 +401,18 @@ fun PtClientsTab(
                                     )
                                 }
                                 val effectiveFid = clientFidMonthsMap[client.id] ?: 0
-                                if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || effectiveFid > 0 || client.weeklySessionLimit > 0) {
+                                val parsedBirth = parseBirthDate(client.birthDate)
+                                val birthAge = getCurrentAge(client.birthDate)
+                                if ((state.isSuperAdmin && client.monthlyFeeEur > 0.0) || effectiveFid > 0 || client.weeklySessionLimit > 0 || parsedBirth != null) {
                                     Spacer(Modifier.height(4.dp))
                                     val feeStr = if (state.isSuperAdmin && client.monthlyFeeEur > 0.0) "€${String.format("%.0f", client.monthlyFeeEur)}/mês" else ""
                                     val fidStr = if (effectiveFid > 0) "Fidelização ${effectiveFid}m" else ""
                                     val limitStr = if (client.weeklySessionLimit > 0) "${client.weeklySessionLimit}x/sem" else ""
-                                    val info = listOf(feeStr, fidStr, limitStr).filter { it.isNotBlank() }.joinToString(" · ")
+                                    val bdayStr = if (parsedBirth != null) {
+                                        "🎂 ${String.format("%02d/%02d", parsedBirth.day, parsedBirth.month)}" +
+                                            (birthAge?.let { " (${it}a)" } ?: "")
+                                    } else ""
+                                    val info = listOf(feeStr, fidStr, limitStr, bdayStr).filter { it.isNotBlank() }.joinToString(" · ")
                                     Text(info, style = MaterialTheme.typography.labelSmall, color = NewShapeGold)
                                 }
                             }
@@ -470,8 +476,16 @@ fun PtClientsTab(
     if (showNewClientDialog) {
         NewClientDialog(
             onDismiss = { showNewClientDialog = false },
-            onSave = { name, phone, notes, trainingType, weeklyLimit ->
-                viewModel.addClient(name, phone, notes, trainingType, weeklyLimit)
+            onSave = { name, phone, notes, trainingType, weeklyLimit, birthDate, weeklyGoal ->
+                viewModel.addClient(
+                    name = name,
+                    phone = phone,
+                    notes = notes,
+                    trainingType = trainingType,
+                    weeklySessionLimit = weeklyLimit,
+                    birthDate = birthDate,
+                    weeklyGoalSessions = weeklyGoal
+                )
                 showNewClientDialog = false
             }
         )
@@ -548,6 +562,19 @@ fun PtClientProfileScreen(
     }
     var weeklySessionLimit by remember(client.id, client.weeklySessionLimit) {
         mutableIntStateOf(client.weeklySessionLimit.coerceIn(0, 21))
+    }
+    val initialBirth = remember(client.id, client.birthDate) { parseBirthDate(client.birthDate) }
+    var birthDay by remember(client.id, client.birthDate) {
+        mutableStateOf(initialBirth?.day?.toString()?.padStart(2, '0').orEmpty())
+    }
+    var birthMonth by remember(client.id, client.birthDate) {
+        mutableStateOf(initialBirth?.month?.toString()?.padStart(2, '0').orEmpty())
+    }
+    var birthYear by remember(client.id, client.birthDate) {
+        mutableStateOf(initialBirth?.year?.toString().orEmpty())
+    }
+    var weeklyGoalSessions by remember(client.id, client.weeklyGoalSessions) {
+        mutableIntStateOf(client.weeklyGoalSessions.coerceIn(0, 14))
     }
     var monthlyFeeText by remember(client.id, client.monthlyFeeEur) {
         mutableStateOf(
@@ -1083,6 +1110,75 @@ fun PtClientProfileScreen(
                             }
                         }
                         Spacer(Modifier.height(10.dp))
+                        val previewBirthStr = remember(birthDay, birthMonth, birthYear) {
+                            val d = birthDay.toIntOrNull()
+                            val m = birthMonth.toIntOrNull()
+                            val y = birthYear.toIntOrNull()
+                            if (d != null && m != null && y != null) String.format("%04d-%02d-%02d", y, m, d) else ""
+                        }
+                        val previewAge = getCurrentAge(previewBirthStr)
+                        Text(
+                            text = "Data de Nascimento (opcional)" + (previewAge?.let { " · $it anos" } ?: ""),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondaryDark
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = birthDay,
+                                onValueChange = { birthDay = it.filter(Char::isDigit).take(2) },
+                                label = { Text("Dia") },
+                                placeholder = { Text("DD") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("profile_birth_day_input"),
+                                colors = darkFieldColors()
+                            )
+                            OutlinedTextField(
+                                value = birthMonth,
+                                onValueChange = { birthMonth = it.filter(Char::isDigit).take(2) },
+                                label = { Text("Mês") },
+                                placeholder = { Text("MM") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("profile_birth_month_input"),
+                                colors = darkFieldColors()
+                            )
+                            OutlinedTextField(
+                                value = birthYear,
+                                onValueChange = { birthYear = it.filter(Char::isDigit).take(4) },
+                                label = { Text("Ano") },
+                                placeholder = { Text("AAAA") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1.3f).testTag("profile_birth_year_input"),
+                                colors = darkFieldColors()
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("Meta Semanal de Treinos (Sequência)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        ) {
+                            listOf(0 to "Auto", 1 to "1x", 2 to "2x", 3 to "3x", 4 to "4x", 5 to "5x", 6 to "6x", 7 to "7x").forEach { (g, lbl) ->
+                                FilterChip(
+                                    selected = weeklyGoalSessions == g,
+                                    onClick = { weeklyGoalSessions = g },
+                                    label = { Text(lbl) },
+                                    modifier = Modifier.testTag("profile_weekly_goal_$g"),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NewShapeGold,
+                                        selectedLabelColor = TextOnGold
+                                    )
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
                         Text("Período de Fidelização (se aplicável)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
                         Spacer(Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -1143,6 +1239,15 @@ fun PtClientProfileScreen(
                                 } else {
                                     client.monthlyFeeEur
                                 }
+                                val formattedBirth = if (birthDay.isBlank() && birthMonth.isBlank() && birthYear.isBlank()) {
+                                    ""
+                                } else {
+                                    val d = birthDay.toIntOrNull()
+                                    val m = birthMonth.toIntOrNull()
+                                    val y = birthYear.toIntOrNull()
+                                    val candidate = if (d != null && m != null && y != null) String.format("%04d-%02d-%02d", y, m, d) else ""
+                                    if (parseBirthDate(candidate) != null) candidate else client.birthDate
+                                }
                                 viewModel.updateClient(
                                     client.copy(
                                         name = name,
@@ -1152,7 +1257,9 @@ fun PtClientProfileScreen(
                                         monthlyFeeEur = parsedFee,
                                         fidelizacaoMonths = fidelizacaoMonths,
                                         fidelizacaoStartMillis = if (fidelizacaoMonths > 0) fidelizacaoStartMillis else 0L,
-                                        weeklySessionLimit = weeklySessionLimit
+                                        weeklySessionLimit = weeklySessionLimit,
+                                        birthDate = formattedBirth,
+                                        weeklyGoalSessions = weeklyGoalSessions
                                     )
                                 )
                             },
@@ -1678,13 +1785,17 @@ private fun FidelizacaoCompactRow(
 @Composable
 private fun NewClientDialog(
     onDismiss: () -> Unit,
-    onSave: (String, String, String, String, Int) -> Unit
+    onSave: (String, String, String, String, Int, String, Int) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var trainingType by remember { mutableStateOf("GRUPO") }
     var weeklySessionLimit by remember { mutableIntStateOf(0) }
+    var birthDay by remember { mutableStateOf("") }
+    var birthMonth by remember { mutableStateOf("") }
+    var birthYear by remember { mutableStateOf("") }
+    var weeklyGoalSessions by remember { mutableIntStateOf(0) }
     var rgpdAccepted by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -1746,6 +1857,56 @@ private fun NewClientDialog(
                         )
                     }
                 }
+                Text("Data de nascimento (opcional)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = birthDay,
+                        onValueChange = { birthDay = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Dia") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        colors = darkFieldColors()
+                    )
+                    OutlinedTextField(
+                        value = birthMonth,
+                        onValueChange = { birthMonth = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Mês") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        colors = darkFieldColors()
+                    )
+                    OutlinedTextField(
+                        value = birthYear,
+                        onValueChange = { birthYear = it.filter(Char::isDigit).take(4) },
+                        label = { Text("Ano") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1.3f),
+                        colors = darkFieldColors()
+                    )
+                }
+                Text("Meta semanal (Sequência)", style = MaterialTheme.typography.labelMedium, color = TextSecondaryDark)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                ) {
+                    listOf(0 to "Auto", 1 to "1x", 2 to "2x", 3 to "3x", 4 to "4x", 5 to "5x", 6 to "6x").forEach { (g, lbl) ->
+                        FilterChip(
+                            selected = weeklyGoalSessions == g,
+                            onClick = { weeklyGoalSessions = g },
+                            label = { Text(lbl) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = NewShapeGold,
+                                selectedLabelColor = TextOnGold
+                            )
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
@@ -1787,7 +1948,12 @@ private fun NewClientDialog(
                     val combinedNotes = listOf(notes.trim(), rgpdStamp)
                         .filter { it.isNotBlank() }
                         .joinToString(" · ")
-                    onSave(name, phone, combinedNotes, trainingType, weeklySessionLimit)
+                    val d = birthDay.toIntOrNull()
+                    val m = birthMonth.toIntOrNull()
+                    val y = birthYear.toIntOrNull()
+                    val candidate = if (d != null && m != null && y != null) String.format("%04d-%02d-%02d", y, m, d) else ""
+                    val validBirth = if (parseBirthDate(candidate) != null) candidate else ""
+                    onSave(name, phone, combinedNotes, trainingType, weeklySessionLimit, validBirth, weeklyGoalSessions)
                 }
             )
         },

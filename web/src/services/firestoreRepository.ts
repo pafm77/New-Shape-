@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
+  AnnouncementReadRecord,
   AttendanceStatus,
   BookingRecord,
   ChatMessageRecord,
@@ -34,12 +35,15 @@ import {
   PtAccountStatus,
   PtNotificationRecord,
   PtNotificationType,
+  StudioAnnouncementRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingType,
   TrainingWeekRecord,
   WaitlistEntryRecord,
   WeekResponseRecord,
+  WorkoutFeedbackFeeling,
+  WorkoutFeedbackRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
@@ -95,6 +99,9 @@ export interface StudioStreams {
   ptNotifications?: (items: PtNotificationRecord[]) => void;
   workoutLoadLogs?: (items: WorkoutLoadLogRecord[]) => void;
   waitlistEntries?: (items: WaitlistEntryRecord[]) => void;
+  studioAnnouncements?: (items: StudioAnnouncementRecord[]) => void;
+  announcementReads?: (items: AnnouncementReadRecord[]) => void;
+  workoutFeedback?: (items: WorkoutFeedbackRecord[]) => void;
   settings: (item: StudioSettingsRecord | null) => void;
   onError: (err: Error) => void;
 }
@@ -200,6 +207,8 @@ export function subscribeStudioData(
         ? normalizeFixedSlots(d.fixedSlots.map(String))
         : [],
       loginPinHash: typeof d.loginPinHash === 'string' ? d.loginPinHash : '',
+      birthDate: typeof d.birthDate === 'string' ? d.birthDate : '',
+      weeklyGoalSessions: Number(d.weeklyGoalSessions ?? 0),
     }),
     (list) =>
       list.sort((a, b) => {
@@ -231,6 +240,7 @@ export function subscribeStudioData(
           siteBaseUrl: String(d.siteBaseUrl ?? window.location.origin ?? DEFAULT_WEB_BASE_URL),
           studentPortalCode: String(d.studentPortalCode ?? ''),
           ptWhatsappPhone: String(d.ptWhatsappPhone ?? ''),
+          birthDateReminderUntilMillis: Number(d.birthDateReminderUntilMillis ?? 0),
           seeded: Boolean(d.seeded ?? false),
         });
       },
@@ -257,6 +267,9 @@ export function subscribeStudioData(
     handlers.ptNotifications?.([]);
     handlers.workoutLoadLogs?.([]);
     handlers.waitlistEntries?.([]);
+    handlers.studioAnnouncements?.([]);
+    handlers.announcementReads?.([]);
+    handlers.workoutFeedback?.([]);
     return () => unsubs.forEach((u) => u());
   }
 
@@ -532,7 +545,8 @@ export function subscribeStudioData(
           d.type === 'CANCELLED' ||
           d.type === 'UNAVAILABLE' ||
           d.type === 'ASSESSMENT' ||
-          d.type === 'CHAT'
+          d.type === 'CHAT' ||
+          d.type === 'FEEDBACK'
             ? d.type
             : 'ALTERED',
         summary: String(d.summary ?? ''),
@@ -581,6 +595,63 @@ export function subscribeStudioData(
       }),
       (list) => list.sort((a, b) => a.createdAtMillis - b.createdAtMillis),
       handlers.waitlistEntries
+    );
+  }
+
+  if (handlers.studioAnnouncements) {
+    listen<StudioAnnouncementRecord>(
+      'studio_announcements',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        title: String(d.title ?? ''),
+        message: String(d.message ?? ''),
+        durationDays: Number(d.durationDays ?? 7),
+        createdAtMillis: Number(d.createdAtMillis ?? 0),
+        expiresAtMillis: Number(d.expiresAtMillis ?? 0),
+        active: Boolean(d.active ?? true),
+      }),
+      (list) => list.sort((a, b) => b.createdAtMillis - a.createdAtMillis),
+      handlers.studioAnnouncements
+    );
+  }
+
+  if (handlers.announcementReads) {
+    listen<AnnouncementReadRecord>(
+      'announcement_reads',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        announcementId: String(d.announcementId ?? ''),
+        clientId: String(d.clientId ?? ''),
+        clientName: String(d.clientName ?? ''),
+        readAtMillis: Number(d.readAtMillis ?? 0),
+      }),
+      (list) => list.sort((a, b) => b.readAtMillis - a.readAtMillis),
+      handlers.announcementReads,
+      true
+    );
+  }
+
+  if (handlers.workoutFeedback) {
+    listen<WorkoutFeedbackRecord>(
+      'workout_feedback',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        clientId: String(d.clientId ?? ''),
+        clientName: String(d.clientName ?? ''),
+        planId: String(d.planId ?? ''),
+        planTitle: String(d.planTitle ?? ''),
+        rpe: Number(d.rpe ?? 7),
+        feeling:
+          d.feeling === 'LEVE' || d.feeling === 'PESADO' ? d.feeling : 'IDEAL',
+        note: String(d.note ?? ''),
+        timestampMillis: Number(d.timestampMillis ?? 0),
+      }),
+      (list) => list.sort((a, b) => b.timestampMillis - a.timestampMillis),
+      handlers.workoutFeedback,
+      true
     );
   }
 
@@ -1130,6 +1201,8 @@ export async function addClient(
     trainingType?: TrainingType;
     weeklySessionLimit?: number;
     loginPinHash?: string;
+    birthDate?: string;
+    weeklyGoalSessions?: number;
   }
 ): Promise<string> {
   const ref = doc(subcol(uid, 'clients'));
@@ -1169,6 +1242,13 @@ export async function addClient(
   if (cleanPinHash) {
     docData.loginPinHash = cleanPinHash;
   }
+  const cleanBirthDate = (payload.birthDate || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cleanBirthDate)) {
+    docData.birthDate = cleanBirthDate;
+  }
+  if (payload.weeklyGoalSessions !== undefined) {
+    docData.weeklyGoalSessions = Math.max(0, Math.min(14, Math.round(payload.weeklyGoalSessions)));
+  }
   await setDoc(ref, docData);
   return ref.id;
 }
@@ -1177,6 +1257,9 @@ export async function updateClient(uid: string, client: ClientRecord): Promise<v
   const fidMonths = client.fidelizacaoMonths === 6 || client.fidelizacaoMonths === 12 ? client.fidelizacaoMonths : 0;
   const trainingType: TrainingType = client.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
   const weeklySessionLimit = Math.max(0, Math.min(21, Math.round(client.weeklySessionLimit ?? 0)));
+  const weeklyGoalSessions = Math.max(0, Math.min(14, Math.round(client.weeklyGoalSessions ?? 0)));
+  const rawBirth = (client.birthDate || '').trim();
+  const birthDate = /^\d{4}-\d{2}-\d{2}$/.test(rawBirth) ? rawBirth : '';
   await updateDoc(doc(subcol(uid, 'clients'), client.id), {
     name: client.name.trim().slice(0, 100),
     phone: normalizePortuguesePhone(client.phone),
@@ -1188,6 +1271,23 @@ export async function updateClient(uid: string, client: ClientRecord): Promise<v
     fidelizacaoStartMillis: Math.max(0, Math.round(client.fidelizacaoStartMillis)),
     trainingType,
     weeklySessionLimit,
+    birthDate,
+    weeklyGoalSessions,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateClientBirthDate(
+  uid: string,
+  clientId: string,
+  birthDate: string
+): Promise<void> {
+  const clean = birthDate.trim();
+  if (clean !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    throw new Error('Data de nascimento inválida (usa AAAA-MM-DD).');
+  }
+  await updateDoc(doc(subcol(uid, 'clients'), clientId), {
+    birthDate: clean,
     updatedAt: serverTimestamp(),
   });
 }
@@ -1224,6 +1324,8 @@ export async function deleteClientAccount(uid: string, clientId: string): Promis
     'payments',
     'fidelizacoes',
     'workout_load_logs',
+    'workout_feedback',
+    'announcement_reads',
     'nutrition_entries',
     'physical_assessments',
     'chat_messages',
@@ -2839,3 +2941,170 @@ export async function updatePortalMemberClientId(
     updatedAt: serverTimestamp(),
   });
 }
+
+// --- Birth Date 30-Day Reminder Window ---
+export async function setBirthDateReminderWindow(
+  uid: string,
+  durationDays = 30
+): Promise<number> {
+  const clampedDays = Math.max(1, Math.min(90, Math.round(durationDays)));
+  const untilMillis = Date.now() + clampedDays * 86_400_000;
+  await updateDoc(doc(subcol(uid, 'settings'), 'studio'), {
+    birthDateReminderUntilMillis: untilMillis,
+    updatedAt: serverTimestamp(),
+  });
+  return untilMillis;
+}
+
+// --- Studio Announcements & Read Receipts ---
+export async function createStudioAnnouncement(
+  uid: string,
+  payload: {
+    title: string;
+    message: string;
+    durationDays: number;
+  }
+): Promise<string> {
+  const title = payload.title.trim().slice(0, 120);
+  const message = payload.message.trim().slice(0, 1200);
+  if (!title || !message) {
+    throw new Error('Preenche o título e a mensagem do aviso.');
+  }
+  const durationDays = Math.max(1, Math.min(90, Math.round(payload.durationDays || 7)));
+  const now = Date.now();
+  const expiresAtMillis = now + durationDays * 86_400_000;
+  const ref = doc(subcol(uid, 'studio_announcements'));
+  await setDoc(ref, {
+    userId: uid,
+    title,
+    message,
+    durationDays,
+    createdAtMillis: now,
+    expiresAtMillis,
+    active: true,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function closeStudioAnnouncement(
+  uid: string,
+  announcementId: string
+): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'studio_announcements'), announcementId), {
+    active: false,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function deleteStudioAnnouncement(
+  uid: string,
+  announcementId: string
+): Promise<void> {
+  const readsSnap = await getDocs(
+    query(subcol(uid, 'announcement_reads'), where('announcementId', '==', announcementId))
+  );
+  const batch = writeBatch(db);
+  readsSnap.forEach((d) => batch.delete(d.ref));
+  batch.delete(doc(subcol(uid, 'studio_announcements'), announcementId));
+  await batch.commit();
+}
+
+export async function markAnnouncementRead(
+  uid: string,
+  payload: {
+    announcementId: string;
+    clientId: string;
+    clientName: string;
+  }
+): Promise<void> {
+  const readId = `${payload.announcementId}_${payload.clientId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const ref = doc(subcol(uid, 'announcement_reads'), readId);
+  const existing = await getDoc(ref);
+  const now = Date.now();
+  if (existing.exists()) {
+    await updateDoc(ref, {
+      readAtMillis: now,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    await setDoc(ref, {
+      userId: uid,
+      announcementId: payload.announcementId.slice(0, 128),
+      clientId: payload.clientId.slice(0, 128),
+      clientName: payload.clientName.trim().slice(0, 100) || 'Aluno',
+      readAtMillis: now,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
+// --- Post-Workout Feedback ---
+export async function addWorkoutFeedback(
+  uid: string,
+  payload: {
+    clientId: string;
+    clientName: string;
+    planId: string;
+    planTitle: string;
+    rpe: number;
+    feeling: WorkoutFeedbackFeeling;
+    note: string;
+  }
+): Promise<string> {
+  const now = Date.now();
+  const rpe = Math.max(1, Math.min(10, Math.round(payload.rpe || 7)));
+  const feeling: WorkoutFeedbackFeeling =
+    payload.feeling === 'LEVE' || payload.feeling === 'PESADO' ? payload.feeling : 'IDEAL';
+  const cleanTitle = payload.planTitle.trim().slice(0, 120) || 'Treino';
+  const cleanNote = payload.note.trim().slice(0, 400);
+  const cleanName = payload.clientName.trim().slice(0, 100) || 'Aluno';
+
+  const ref = doc(subcol(uid, 'workout_feedback'));
+  await setDoc(ref, {
+    userId: uid,
+    clientId: payload.clientId.slice(0, 128),
+    clientName: cleanName,
+    planId: payload.planId.slice(0, 128),
+    planTitle: cleanTitle,
+    rpe,
+    feeling,
+    note: cleanNote,
+    timestampMillis: now,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    const feelingPt = feeling === 'LEVE' ? 'Leve' : feeling === 'PESADO' ? 'Pesado' : 'Ideal';
+    const summaryBase = `Feedback pós-treino (${feelingPt} · RPE ${rpe}/10) em ${cleanTitle}`;
+    const summary = cleanNote ? `${summaryBase}: "${cleanNote}"` : summaryBase;
+    const notifRef = doc(subcol(uid, 'pt_notifications'));
+    await setDoc(notifRef, {
+      userId: uid,
+      clientId: payload.clientId.slice(0, 128),
+      clientName: cleanName,
+      type: 'FEEDBACK',
+      summary: summary.slice(0, 400),
+      weekKey: '',
+      read: false,
+      timestampMillis: now,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Non-blocking notification failure
+  }
+
+  return ref.id;
+}
+
+export async function deleteWorkoutFeedback(
+  uid: string,
+  feedbackId: string
+): Promise<void> {
+  await deleteDoc(doc(subcol(uid, 'workout_feedback'), feedbackId));
+}
+

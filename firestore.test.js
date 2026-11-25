@@ -898,6 +898,190 @@ test("Workout load logs, waitlist entries, and weeklySessionLimit enforce bounds
   );
 });
 
+test("Studio announcements, read receipts, birthDate/weeklyGoalSessions, and post-workout feedback enforce permissions and validation", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
+  const studentDb = testEnv.authenticatedContext("student_portal_789").firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+  const nowMs = Date.now();
+
+  // Unauthenticated denied on new collections
+  await assertFails(unauthDb.collection(`users/${ALICE_UID}/studio_announcements`).get());
+  await assertFails(unauthDb.collection(`users/${ALICE_UID}/announcement_reads`).get());
+  await assertFails(unauthDb.collection(`users/${ALICE_UID}/workout_feedback`).get());
+
+  // Owner configures settings with birthDateReminderUntilMillis and studentPortalCode
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/settings`).doc("studio").set({
+      userId: ALICE_UID,
+      clientsCanEdit: true,
+      cutoffHours: 12,
+      whatsappWebMode: false,
+      siteBaseUrl: "https://newshape.vercel.app",
+      studentPortalCode: "ns_invite_2026_abc",
+      birthDateReminderUntilMillis: nowMs + 30 * 86400000,
+      seeded: true,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/portal_members`).doc("student_portal_789").set({
+      userId: ALICE_UID,
+      memberUid: "student_portal_789",
+      inviteCode: "ns_invite_2026_abc",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Owner creates client with weeklyGoalSessions and empty birthDate
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/clients`).doc("c_bday").set({
+      userId: ALICE_UID,
+      name: "Sofia Costa",
+      phone: "914445556",
+      notes: "",
+      active: true,
+      newClient: false,
+      birthDate: "",
+      weeklyGoalSessions: 3,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Student can save their birthDate (valid YYYY-MM-DD), cannot set invalid format or alter weeklyGoalSessions
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/clients`).doc("c_bday").update({
+      birthDate: "1995-05-14",
+      updatedAt: updated,
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/clients`).doc("c_bday").update({
+      birthDate: "14/05/1995",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/clients`).doc("c_bday").update({
+      weeklyGoalSessions: 5,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Owner creates announcement; student CANNOT create or delete announcements
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/studio_announcements`).doc("ann_1").set({
+      userId: ALICE_UID,
+      title: "Feriado 1 de Dezembro",
+      message: "O estúdio estará aberto das 08:00 às 13:00.",
+      durationDays: 7,
+      createdAtMillis: nowMs,
+      expiresAtMillis: nowMs + 7 * 86400000,
+      active: true,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/studio_announcements`).doc("ann_bad").set({
+      userId: ALICE_UID,
+      title: "Fake",
+      message: "Student cannot publish",
+      durationDays: 3,
+      createdAtMillis: nowMs,
+      expiresAtMillis: nowMs + 3 * 86400000,
+      active: true,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/studio_announcements`).doc("ann_1").delete()
+  );
+
+  // Student CAN read announcements and mark as read ("Lido")
+  await assertSucceeds(studentDb.collection(`users/${ALICE_UID}/studio_announcements`).get());
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/studio_announcements`).get());
+
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/announcement_reads`).doc("ann_1_c_bday").set({
+      userId: ALICE_UID,
+      announcementId: "ann_1",
+      clientId: "c_bday",
+      clientName: "Sofia Costa",
+      readAtMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(aliceDb.collection(`users/${ALICE_UID}/announcement_reads`).get());
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/announcement_reads`).get());
+
+  // Owner can close announcement
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/studio_announcements`).doc("ann_1").update({
+      active: false,
+      updatedAt: updated,
+    })
+  );
+
+  // Student submits post-workout feedback + FEEDBACK pt_notification
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/workout_feedback`).doc("fb_1").set({
+      userId: ALICE_UID,
+      clientId: "c_bday",
+      clientName: "Sofia Costa",
+      planId: "wp_1",
+      planTitle: "Treino A — Glúteo & Pernas",
+      rpe: 8,
+      feeling: "IDEAL",
+      note: "Senti muito bem o agachamento!",
+      timestampMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  // Invalid RPE or feeling rejected
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/workout_feedback`).doc("fb_bad").set({
+      userId: ALICE_UID,
+      clientId: "c_bday",
+      clientName: "Sofia Costa",
+      planId: "wp_1",
+      planTitle: "Treino A",
+      rpe: 12,
+      feeling: "IDEAL",
+      note: "",
+      timestampMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/pt_notifications`).doc("notif_fb_1").set({
+      userId: ALICE_UID,
+      clientId: "c_bday",
+      clientName: "Sofia Costa",
+      type: "FEEDBACK",
+      summary: "Feedback pós-treino (Ideal · RPE 8/10) em Treino A — Glúteo & Pernas",
+      weekKey: "",
+      read: false,
+      timestampMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(aliceDb.collection(`users/${ALICE_UID}/workout_feedback`).get());
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/workout_feedback`).get());
+});
+
+
 
 
 

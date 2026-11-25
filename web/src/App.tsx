@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { auth, googleProvider } from './firebase';
 import {
+  AnnouncementReadRecord,
   BookingRecord,
   BookingWithSession,
   ChatMessageRecord,
@@ -41,11 +42,13 @@ import {
   PhysicalAssessmentRecord,
   PtAccountRecord,
   PtNotificationRecord,
+  StudioAnnouncementRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
   WaitlistEntryRecord,
   WeekResponseRecord,
+  WorkoutFeedbackRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
@@ -246,6 +249,9 @@ export function App() {
   const [workoutPlanItems, setWorkoutPlanItems] = useState<WorkoutPlanItemRecord[]>([]);
   const [workoutLoadLogs, setWorkoutLoadLogs] = useState<WorkoutLoadLogRecord[]>([]);
   const [waitlistEntries, setWaitlistEntries] = useState<WaitlistEntryRecord[]>([]);
+  const [studioAnnouncements, setStudioAnnouncements] = useState<StudioAnnouncementRecord[]>([]);
+  const [announcementReads, setAnnouncementReads] = useState<AnnouncementReadRecord[]>([]);
+  const [workoutFeedback, setWorkoutFeedback] = useState<WorkoutFeedbackRecord[]>([]);
   const [foods, setFoods] = useState<FoodItemRecord[]>([]);
   const [nutritionEntries, setNutritionEntries] = useState<NutritionEntryRecord[]>([]);
   const [assessments, setAssessments] = useState<PhysicalAssessmentRecord[]>([]);
@@ -257,6 +263,7 @@ export function App() {
   const [allPtAccounts, setAllPtAccounts] = useState<PtAccountRecord[]>([]);
   const [settingsState, setSettingsState] = useState<StudioSettingsRecord | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const birthDateWindowInitRef = useRef<Set<string>>(new Set());
 
   // UI state
   const [ptTab, setPtTab] = useState<PtMainTab>('home');
@@ -564,6 +571,9 @@ export function App() {
         workoutPlanItems: setWorkoutPlanItems,
         workoutLoadLogs: setWorkoutLoadLogs,
         waitlistEntries: setWaitlistEntries,
+        studioAnnouncements: setStudioAnnouncements,
+        announcementReads: setAnnouncementReads,
+        workoutFeedback: setWorkoutFeedback,
         foods: setFoods,
         nutritionEntries: setNutritionEntries,
         physicalAssessments: setAssessments,
@@ -590,6 +600,8 @@ export function App() {
                 ? `Nova avaliação física · ${first.clientName}`
                 : first.type === 'CHAT'
                 ? `Nova mensagem · ${first.clientName}`
+                : first.type === 'FEEDBACK'
+                ? `Feedback pós-treino · ${first.clientName}`
                 : 'Horário alterado · New Shape';
             void dispatchLocalPushNotification(title, first.summary, first.id, '/painel');
           }
@@ -616,6 +628,17 @@ export function App() {
     isExternalStudentPortal,
     externalScopedClientId,
   ]);
+
+  // Automatically initialize the 30-day birth date reminder window once when PT/Admin loads
+  useEffect(() => {
+    if (!studioUid || !isStudioOwner || !isPtApproved || !settingsState) return;
+    if ((settingsState.birthDateReminderUntilMillis ?? 0) > 0) return;
+    if (birthDateWindowInitRef.current.has(studioUid)) return;
+    birthDateWindowInitRef.current.add(studioUid);
+    void repo.setBirthDateReminderWindow(studioUid, 30).catch(() => {
+      birthDateWindowInitRef.current.delete(studioUid);
+    });
+  }, [studioUid, isStudioOwner, isPtApproved, settingsState]);
 
   const deliveredStudentMsgIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -1161,6 +1184,8 @@ export function App() {
           nutritionEntries={nutritionEntries}
           assessments={assessments}
           chatMessages={chatMessages}
+          studioAnnouncements={studioAnnouncements}
+          announcementReads={announcementReads}
           settings={effectiveSettings}
           initialWeekSlug={pathInfo.weekSlug}
           showInstallPrompt={isExternalStudentPortal}
@@ -1504,6 +1529,7 @@ export function App() {
               workoutPlans={workoutPlans}
               workoutPlanItems={workoutPlanItems}
               workoutLoadLogs={workoutLoadLogs}
+              workoutFeedback={workoutFeedback}
               templates={effectiveTemplates}
               settings={effectiveSettings}
               initialClientId={jumpClientId}
@@ -1555,6 +1581,8 @@ export function App() {
               chatMessages={chatMessages}
               ptNotifications={ptNotifications}
               ptAccounts={allPtAccounts}
+              studioAnnouncements={studioAnnouncements}
+              announcementReads={announcementReads}
               settings={effectiveSettings}
               whatsappWebMode={effectiveSettings.whatsappWebMode}
               initialSubTab={mgmtSubTab}
@@ -1729,6 +1757,8 @@ export function App() {
                                 ? 'green'
                                 : n.type === 'CHAT'
                                 ? 'blue'
+                                : n.type === 'FEEDBACK'
+                                ? 'gold'
                                 : 'gold'
                             }
                           >
@@ -1740,6 +1770,8 @@ export function App() {
                               ? 'Avaliação física'
                               : n.type === 'CHAT'
                               ? 'Mensagem'
+                              : n.type === 'FEEDBACK'
+                              ? 'Feedback treino'
                               : 'Alterou'}
                           </StatusPill>
                           <span className="text-[11px] text-[#A1A1AA]">
@@ -1747,6 +1779,22 @@ export function App() {
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-[#D4D4D8]">{n.summary}</p>
+                        {n.type === 'FEEDBACK' && n.clientId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!n.read) {
+                                void repo.markPtNotificationRead(studioUid, n.id);
+                              }
+                              setJumpClientId(n.clientId);
+                              setPtTab('training');
+                              setShowNotifModal(false);
+                            }}
+                            className="mt-2 inline-flex items-center rounded-lg border border-[#EAB308]/50 bg-[#3D3314]/50 px-2.5 py-1 text-[11px] font-bold text-[#FACC15] hover:bg-[#3D3314]"
+                          >
+                            Ver feedback no Treino →
+                          </button>
+                        )}
                         {n.type === 'CHAT' && n.clientId && (
                           <button
                             type="button"

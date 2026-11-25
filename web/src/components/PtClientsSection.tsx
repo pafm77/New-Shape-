@@ -62,6 +62,7 @@ import {
   StatusPill,
   Textarea,
 } from './UiPrimitives';
+import { formatBirthDatePt, getCurrentAge, parseBirthDate } from './StudentEngagementWidgets';
 
 interface PtClientsSectionProps {
   uid: string;
@@ -353,6 +354,12 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       {(c.weeklySessionLimit ?? 0) > 0 && (
                         <StatusPill tone="neutral">{c.weeklySessionLimit}x/sem</StatusPill>
                       )}
+                      {parseBirthDate(c.birthDate) && (
+                        <StatusPill tone="blue">
+                          🎂 {formatBirthDatePt(c.birthDate).slice(0, 5)}
+                          {getCurrentAge(c.birthDate) !== null ? ` (${getCurrentAge(c.birthDate)}a)` : ''}
+                        </StatusPill>
+                      )}
                       {hasBookedTrainings ? (
                         <StatusPill tone="green">
                           ✓ {upcomingInfo!.confirmed} marcado{upcomingInfo!.confirmed > 1 ? 's' : ''}
@@ -439,8 +446,24 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
       {showNewModal && (
         <NewClientModal
           onClose={() => setShowNewModal(false)}
-          onSave={async (name, phone, notes, trainingType, weeklySessionLimit) => {
-            await repo.addClient(uid, { name, phone, notes, trainingType, weeklySessionLimit });
+          onSave={async (
+            name,
+            phone,
+            notes,
+            trainingType,
+            weeklySessionLimit,
+            birthDate,
+            weeklyGoalSessions
+          ) => {
+            await repo.addClient(uid, {
+              name,
+              phone,
+              notes,
+              trainingType,
+              weeklySessionLimit,
+              birthDate,
+              weeklyGoalSessions,
+            });
             setShowNewModal(false);
             onBanner('Aluno adicionado!');
           }}
@@ -560,6 +583,10 @@ const ClientProfileView: React.FC<{
   );
   const [weeklySessionLimit, setWeeklySessionLimit] = useState<number>(
     client.weeklySessionLimit ?? 0
+  );
+  const [birthDate, setBirthDate] = useState<string>(client.birthDate || '');
+  const [weeklyGoalSessions, setWeeklyGoalSessions] = useState<number>(
+    client.weeklyGoalSessions ?? 0
   );
   const [monthlyFee, setMonthlyFee] = useState(
     client.monthlyFeeEur > 0 ? String(client.monthlyFeeEur) : ''
@@ -1104,6 +1131,40 @@ const ClientProfileView: React.FC<{
               ))}
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <FieldLabel>
+                Data de Nascimento (opcional)
+                {getCurrentAge(birthDate) !== null ? ` · ${getCurrentAge(birthDate)} anos` : ''}
+              </FieldLabel>
+              <Input
+                type="date"
+                value={birthDate}
+                max={new Date().toISOString().slice(0, 10)}
+                min="1925-01-01"
+                onChange={(e) => setBirthDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <FieldLabel>Meta Semanal de Treinos (Sequência)</FieldLabel>
+              <div className="flex flex-wrap gap-1.5">
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((goal) => (
+                  <button
+                    key={goal}
+                    type="button"
+                    onClick={() => setWeeklyGoalSessions(goal)}
+                    className={`rounded-xl border px-2.5 py-1.5 text-xs font-bold transition ${
+                      weeklyGoalSessions === goal
+                        ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                        : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                    }`}
+                  >
+                    {goal === 0 ? 'Auto' : `${goal}x`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <div className={`grid grid-cols-1 ${isSuperAdmin ? 'sm:grid-cols-2' : ''} gap-3`}>
             <div>
               <FieldLabel>Telemóvel WhatsApp (opcional)</FieldLabel>
@@ -1176,6 +1237,8 @@ const ClientProfileView: React.FC<{
                 fidelizacaoStartMillis: fidMonths > 0 ? fidStart : 0,
                 trainingType,
                 weeklySessionLimit,
+                birthDate,
+                weeklyGoalSessions,
               });
               onBanner('Perfil do aluno guardado!');
             }}
@@ -1448,13 +1511,17 @@ const NewClientModal: React.FC<{
     phone: string,
     notes: string,
     trainingType: TrainingType,
-    weeklySessionLimit: number
+    weeklySessionLimit: number,
+    birthDate: string,
+    weeklyGoalSessions: number
   ) => Promise<void>;
 }> = ({ onClose, onSave }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [trainingType, setTrainingType] = useState<TrainingType>('GRUPO');
   const [weeklySessionLimit, setWeeklySessionLimit] = useState<number>(0);
+  const [birthDate, setBirthDate] = useState('');
+  const [weeklyGoalSessions, setWeeklyGoalSessions] = useState<number>(0);
   const [notes, setNotes] = useState('');
   const [rgpdAccepted, setRgpdAccepted] = useState(false);
 
@@ -1520,6 +1587,37 @@ const NewClientModal: React.FC<{
             ))}
           </div>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <FieldLabel>Data de Nascimento (opcional)</FieldLabel>
+            <Input
+              type="date"
+              value={birthDate}
+              max={new Date().toISOString().slice(0, 10)}
+              min="1925-01-01"
+              onChange={(e) => setBirthDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <FieldLabel>Meta Semanal (Streak)</FieldLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {[0, 1, 2, 3, 4, 5, 6].map((goal) => (
+                <button
+                  key={goal}
+                  type="button"
+                  onClick={() => setWeeklyGoalSessions(goal)}
+                  className={`rounded-xl border px-2 py-1.5 text-xs font-bold transition ${
+                    weeklyGoalSessions === goal
+                      ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                      : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                  }`}
+                >
+                  {goal === 0 ? 'Auto' : `${goal}x`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
         <div>
           <FieldLabel>Notas (opcional)</FieldLabel>
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -1543,7 +1641,15 @@ const NewClientModal: React.FC<{
             onClick={() => {
               const rgpdStamp = rgpdAccepted ? formatRgpdConsentStamp() : '';
               const combinedNotes = [notes.trim(), rgpdStamp].filter(Boolean).join(' · ');
-              return onSave(name, phone, combinedNotes, trainingType, weeklySessionLimit);
+              return onSave(
+                name,
+                phone,
+                combinedNotes,
+                trainingType,
+                weeklySessionLimit,
+                birthDate,
+                weeklyGoalSessions
+              );
             }}
           >
             Adicionar

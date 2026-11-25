@@ -119,6 +119,10 @@ private fun WorkoutPlansBuilderSection(
         if (selectedClient == null) emptyList()
         else state.workoutPlans.filter { it.clientId == selectedClient.id }
     }
+    val clientFeedback = remember(state.workoutFeedback, selectedClient?.id) {
+        if (selectedClient == null) emptyList()
+        else state.workoutFeedback.filter { it.clientId == selectedClient.id }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -243,6 +247,16 @@ private fun WorkoutPlansBuilderSection(
                         )
                     }
                 }
+            }
+        }
+
+        if (selectedClient != null && clientFeedback.isNotEmpty()) {
+            item(key = "client_recent_feedback") {
+                PtRecentFeedbackCard(
+                    clientName = selectedClient.name,
+                    feedbackItems = clientFeedback,
+                    onDelete = { viewModel.deleteWorkoutFeedback(it) }
+                )
             }
         }
     }

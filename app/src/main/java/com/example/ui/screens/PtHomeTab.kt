@@ -43,6 +43,12 @@ fun PtHomeTab(
         }
     }
 
+    LaunchedEffect(state.settings.birthDateReminderUntilMillis, state.clients.size) {
+        if (state.clients.isNotEmpty() && state.settings.birthDateReminderUntilMillis <= 0L) {
+            viewModel.ensureBirthDateReminderWindowIfUnset()
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         ScrollableTabRow(
             selectedTabIndex = selectedSubTab,
@@ -296,6 +302,12 @@ private fun PorConfirmarSection(
                                                 textColor = ConfirmedGreen,
                                                 containerColor = ConfirmedGreenContainer
                                             )
+                                        } else if (alert.type == "FEEDBACK") {
+                                            StatusPill(
+                                                text = "Feedback treino",
+                                                textColor = NewShapeGoldBright,
+                                                containerColor = NewShapeGoldMuted
+                                            )
                                         }
                                     }
                                     Text(
@@ -315,6 +327,15 @@ private fun PorConfirmarSection(
                     }
                 }
             }
+        }
+
+        item(key = "upcoming_birthdays_card") {
+            UpcomingBirthdaysCard(
+                clients = state.clients,
+                whatsappWebMode = state.settings.whatsappWebMode,
+                reminderUntilMillis = state.settings.birthDateReminderUntilMillis,
+                onRenewReminder = { viewModel.renewBirthDateReminder30Days() }
+            )
         }
 
         if (activeWeek != null) {

@@ -727,6 +727,112 @@ private fun StudentSettingsDialog(
                     }
                 }
 
+                // Data de Nascimento
+                val existingBirth = remember(student.birthDate) { parseBirthDate(student.birthDate) }
+                var settingsBirthDay by remember(student.id, student.birthDate) {
+                    mutableStateOf(existingBirth?.day?.toString()?.padStart(2, '0').orEmpty())
+                }
+                var settingsBirthMonth by remember(student.id, student.birthDate) {
+                    mutableStateOf(existingBirth?.month?.toString()?.padStart(2, '0').orEmpty())
+                }
+                var settingsBirthYear by remember(student.id, student.birthDate) {
+                    mutableStateOf(existingBirth?.year?.toString().orEmpty())
+                }
+                var settingsBirthError by remember { mutableStateOf<String?>(null) }
+
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, HairlineBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Data de Nascimento",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = NewShapeGoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            StatusPill(
+                                text = if (existingBirth != null) "Preenchida ✓" else "Por preencher",
+                                textColor = if (existingBirth != null) ConfirmedGreen else PendingAmber,
+                                containerColor = if (existingBirth != null) ConfirmedGreenContainer else PendingAmberContainer
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = settingsBirthDay,
+                                onValueChange = {
+                                    settingsBirthDay = it.filter(Char::isDigit).take(2)
+                                    settingsBirthError = null
+                                },
+                                label = { Text("Dia") },
+                                placeholder = { Text("DD") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("settings_birth_day_input")
+                            )
+                            OutlinedTextField(
+                                value = settingsBirthMonth,
+                                onValueChange = {
+                                    settingsBirthMonth = it.filter(Char::isDigit).take(2)
+                                    settingsBirthError = null
+                                },
+                                label = { Text("Mês") },
+                                placeholder = { Text("MM") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("settings_birth_month_input")
+                            )
+                            OutlinedTextField(
+                                value = settingsBirthYear,
+                                onValueChange = {
+                                    settingsBirthYear = it.filter(Char::isDigit).take(4)
+                                    settingsBirthError = null
+                                },
+                                label = { Text("Ano") },
+                                placeholder = { Text("AAAA") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1.3f).testTag("settings_birth_year_input")
+                            )
+                        }
+                        if (settingsBirthError != null) {
+                            Text(
+                                text = settingsBirthError!!,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = DangerRed
+                            )
+                        }
+                        GoldPrimaryButton(
+                            text = "Guardar data de nascimento",
+                            onClick = {
+                                val d = settingsBirthDay.toIntOrNull()
+                                val m = settingsBirthMonth.toIntOrNull()
+                                val y = settingsBirthYear.toIntOrNull()
+                                val formatted = if (d != null && m != null && y != null) {
+                                    String.format("%04d-%02d-%02d", y, m, d)
+                                } else ""
+                                if (parseBirthDate(formatted) == null) {
+                                    settingsBirthError = "Insere uma data válida (DD / MM / AAAA)."
+                                } else {
+                                    viewModel.updateClientBirthDate(student.id, formatted)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = "settings_save_birthdate_btn"
+                        )
+                    }
+                }
+
                 Surface(
                     color = ObsidianBg,
                     shape = RoundedCornerShape(12.dp),
@@ -752,6 +858,17 @@ private fun StudentSettingsDialog(
                                 color = TextPrimaryDark,
                                 fontWeight = FontWeight.SemiBold
                             )
+                        }
+                        if (existingBirth != null) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Nascimento", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                                Text(
+                                    formatBirthDatePt(student.birthDate),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextPrimaryDark,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Plano semanal", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
@@ -879,6 +996,7 @@ private fun StudentWorkoutScreen(
     var restSecondsLeft by remember { mutableIntStateOf(0) }
     var restExerciseName by remember { mutableStateOf("") }
     var historyTargetItem by remember { mutableStateOf<WorkoutPlanItemRecord?>(null) }
+    var feedbackTargetPlan by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
 
     LaunchedEffect(restSecondsLeft) {
         if (restSecondsLeft > 0) {
@@ -898,6 +1016,15 @@ private fun StudentWorkoutScreen(
                 "Inicia o treino para ver a carga do último treino, cronómetro de descanso e registar novas cargas (kg)",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondaryDark
+            )
+        }
+
+        item(key = "workout_announcements_banner") {
+            StudioAnnouncementsBanner(
+                announcements = state.studioAnnouncements,
+                reads = state.announcementReads,
+                client = student,
+                onMarkRead = { annId -> viewModel.markAnnouncementRead(annId, student) }
             )
         }
 
@@ -970,15 +1097,23 @@ private fun StudentWorkoutScreen(
                                     containerColor = ConfirmedGreenContainer
                                 )
                             } else {
-                                GoldPrimaryButton(
-                                    text = "Executar",
-                                    icon = Icons.Default.PlayArrow,
-                                    onClick = {
-                                        executingPlanId = plan.id
-                                        completedExerciseIds = emptySet()
-                                    },
-                                    testTag = "student_start_workout_${plan.id}"
-                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(
+                                        onClick = { feedbackTargetPlan = plan },
+                                        modifier = Modifier.testTag("student_feedback_btn_${plan.id}")
+                                    ) {
+                                        Text("Feedback", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                                    }
+                                    GoldPrimaryButton(
+                                        text = "Executar",
+                                        icon = Icons.Default.PlayArrow,
+                                        onClick = {
+                                            executingPlanId = plan.id
+                                            completedExerciseIds = emptySet()
+                                        },
+                                        testTag = "student_start_workout_${plan.id}"
+                                    )
+                                }
                             }
                         }
                     }
@@ -1000,6 +1135,7 @@ private fun StudentWorkoutScreen(
                                 onClick = {
                                     executingPlanId = null
                                     restSecondsLeft = 0
+                                    feedbackTargetPlan = plan
                                 },
                                 modifier = Modifier.testTag("student_finish_workout_${plan.id}")
                             ) {
@@ -1061,6 +1197,24 @@ private fun StudentWorkoutScreen(
             workoutLoadLogs = state.workoutLoadLogs,
             currentLoadKg = exItem.loadKg,
             onDismiss = { historyTargetItem = null }
+        )
+    }
+
+    feedbackTargetPlan?.let { plan ->
+        PostWorkoutFeedbackDialog(
+            planTitle = plan.title,
+            onDismiss = { feedbackTargetPlan = null },
+            onSubmit = { rpe, feeling, note ->
+                viewModel.submitWorkoutFeedback(
+                    client = student,
+                    planId = plan.id,
+                    planTitle = plan.title,
+                    rpe = rpe,
+                    feeling = feeling,
+                    note = note
+                )
+                feedbackTargetPlan = null
+            }
         )
     }
 }

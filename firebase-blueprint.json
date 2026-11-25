@@ -16,6 +16,8 @@
         "fidelizacaoStartMillis": { "type": "integer" },
         "trainingType": { "type": "string", "enum": ["PERSONALIZADO", "GRUPO"] },
         "weeklySessionLimit": { "type": "integer" },
+        "birthDate": { "type": "string" },
+        "weeklyGoalSessions": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -257,6 +259,7 @@
         "siteBaseUrl": { "type": "string" },
         "studentPortalCode": { "type": "string" },
         "ptWhatsappPhone": { "type": "string" },
+        "birthDateReminderUntilMillis": { "type": "integer" },
         "seeded": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -325,7 +328,7 @@
         "userId": { "type": "string" },
         "clientId": { "type": "string" },
         "clientName": { "type": "string" },
-        "type": { "type": "string", "enum": ["CANCELLED", "ALTERED", "UNAVAILABLE"] },
+        "type": { "type": "string", "enum": ["CANCELLED", "ALTERED", "UNAVAILABLE", "ASSESSMENT", "CHAT", "FEEDBACK"] },
         "summary": { "type": "string" },
         "weekKey": { "type": "string" },
         "read": { "type": "boolean" },
@@ -368,6 +371,57 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "sessionId", "weekKey", "clientId", "createdAtMillis", "createdAt", "updatedAt"]
+    },
+    "StudioAnnouncement": {
+      "title": "StudioAnnouncement",
+      "description": "Aviso publicado pelo administrador/PT com duração limitada para os alunos",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "durationDays": { "type": "integer" },
+        "createdAtMillis": { "type": "integer" },
+        "expiresAtMillis": { "type": "integer" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "durationDays", "createdAtMillis", "expiresAtMillis", "active", "createdAt", "updatedAt"]
+    },
+    "AnnouncementRead": {
+      "title": "AnnouncementRead",
+      "description": "Confirmação de leitura de um aviso por parte de um aluno",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "announcementId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "readAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "announcementId", "clientId", "clientName", "readAtMillis", "createdAt", "updatedAt"]
+    },
+    "WorkoutFeedback": {
+      "title": "WorkoutFeedback",
+      "description": "Feedback rápido pós-treino (RPE 1-10, sensação e nota curta)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "planId": { "type": "string" },
+        "planTitle": { "type": "string" },
+        "rpe": { "type": "integer" },
+        "feeling": { "type": "string", "enum": ["LEVE", "IDEAL", "PESADO"] },
+        "note": { "type": "string" },
+        "timestampMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "clientName", "planId", "planTitle", "rpe", "feeling", "note", "timestampMillis", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -450,6 +504,18 @@
     "/users/{userId}/waitlist_entries/{entryId}": {
       "schema": { "$ref": "#/entities/WaitlistEntry" },
       "description": "Lista de espera para sessões de grupo lotadas"
+    },
+    "/users/{userId}/studio_announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/StudioAnnouncement" },
+      "description": "Avisos publicados pelo estúdio com duração configurada"
+    },
+    "/users/{userId}/announcement_reads/{readId}": {
+      "schema": { "$ref": "#/entities/AnnouncementRead" },
+      "description": "Registo de alunos que leram cada aviso"
+    },
+    "/users/{userId}/workout_feedback/{feedbackId}": {
+      "schema": { "$ref": "#/entities/WorkoutFeedback" },
+      "description": "Feedback rápido pós-treino submetido pelos alunos"
     },
     "/pt_accounts/{ptUid}": {
       "schema": { "$ref": "#/entities/PtAccount" },
