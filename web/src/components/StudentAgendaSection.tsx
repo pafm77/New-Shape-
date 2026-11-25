@@ -207,6 +207,11 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
     () => new Map(sessions.filter((s) => !s.ptPrivatePersonal).map((s) => [s.id, s])),
     [sessions]
   );
+  const visibleSessionDayById = useMemo(() => {
+    const map = new Map<string, number>();
+    sessionMap.forEach((s, id) => map.set(id, s.dayOfWeek));
+    return map;
+  }, [sessionMap]);
   const weekMap = useMemo(() => new Map(publishedWeeks.map((w) => [w.weekKey, w])), [publishedWeeks]);
 
   const myConfirmedItems = useMemo(() => {
@@ -333,7 +338,14 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
           .filter((sid) => sid !== target.booking.sessionId)
       );
 
-      await repo.submitStudentBookings(uid, weekKey, client.id, nextIds, activeForWeek);
+      await repo.submitStudentBookings(
+        uid,
+        weekKey,
+        client.id,
+        nextIds,
+        activeForWeek,
+        visibleSessionDayById
+      );
 
       if (activeWeek?.weekKey === weekKey) {
         setDraftSessionIds(nextIds);
@@ -375,11 +387,22 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
     newSession: TrainingSessionRecord
   ) => {
     if (actionBusy) return;
+    const weekKey = target.booking.weekKey;
+    const activeForWeek = getWeekActiveVisibleBookings(weekKey);
+    const otherBookedDays = new Set<number>();
+    activeForWeek.forEach((b) => {
+      if (b.sessionId === target.booking.sessionId) return;
+      const sess = sessionMap.get(b.sessionId);
+      if (sess) otherBookedDays.add(sess.dayOfWeek);
+    });
+    if (otherBookedDays.has(newSession.dayOfWeek)) {
+      onBanner('Já tens um treino marcado nesse dia (máx. 1 treino por dia).');
+      return;
+    }
+
     setActionBusy(true);
     try {
-      const weekKey = target.booking.weekKey;
       const weekLabel = target.week?.label || weekKey;
-      const activeForWeek = getWeekActiveVisibleBookings(weekKey);
       const nextIds = new Set(
         activeForWeek
           .map((b) => b.sessionId)
@@ -387,7 +410,14 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
       );
       nextIds.add(newSession.id);
 
-      await repo.submitStudentBookings(uid, weekKey, client.id, nextIds, activeForWeek);
+      await repo.submitStudentBookings(
+        uid,
+        weekKey,
+        client.id,
+        nextIds,
+        activeForWeek,
+        visibleSessionDayById
+      );
 
       if (activeWeek?.weekKey === weekKey) {
         setDraftSessionIds(nextIds);
@@ -414,8 +444,12 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
         message: `Olá! Sou ${client.name} (New Shape). Troquei o meu treino da semana ${weekLabel}:\n• Anterior: ${oldDesc}\n• Novo horário: ${newDesc}\nJá atualizei na app!`,
       });
       onBanner(`Treino trocado para ${newDesc}!`);
-    } catch {
-      onBanner('Não foi possível trocar o horário. Tenta novamente.');
+    } catch (err) {
+      onBanner(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível trocar o horário. Tenta novamente.'
+      );
     } finally {
       setActionBusy(false);
     }
@@ -424,16 +458,21 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
   const swapCandidateSessions = useMemo(() => {
     if (!swapTarget) return [];
     const weekKey = swapTarget.booking.weekKey;
-    const activeWeekBookedIds = new Set(
-      bookings
-        .filter(
-          (b) =>
-            b.weekKey === weekKey &&
-            b.clientId === client.id &&
-            b.status !== 'CANCELLED'
-        )
-        .map((b) => b.sessionId)
+    const activeWeekBookings = bookings.filter(
+      (b) =>
+        b.weekKey === weekKey &&
+        b.clientId === client.id &&
+        b.status !== 'CANCELLED' &&
+        sessionMap.has(b.sessionId)
     );
+    const activeWeekBookedIds = new Set(activeWeekBookings.map((b) => b.sessionId));
+    // Days where the student already has ANOTHER workout (max 1 workout per day)
+    const otherBookedDays = new Set<number>();
+    activeWeekBookings.forEach((b) => {
+      if (b.sessionId === swapTarget.session.id) return;
+      const sess = sessionMap.get(b.sessionId);
+      if (sess) otherBookedDays.add(sess.dayOfWeek);
+    });
     const now = Date.now();
     return sessions
       .filter((s) => {
@@ -441,6 +480,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
         if (s.weekKey !== weekKey) return false;
         if (s.id === swapTarget.session.id) return false;
         if (activeWeekBookedIds.has(s.id)) return false;
+        if (otherBookedDays.has(s.dayOfWeek)) return false;
         if (s.startMillis > 0 && now >= s.startMillis) return false;
         if (cutoffMs > 0 && s.startMillis > 0 && now > s.startMillis - cutoffMs) return false;
         const confirmedCount = bookings.filter(
@@ -449,7 +489,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
         return confirmedCount < s.capacity;
       })
       .sort((a, b) => a.startMillis - b.startMillis || a.timeLabel.localeCompare(b.timeLabel));
-  }, [swapTarget, sessions, bookings, client.id, cutoffMs]);
+  }, [swapTarget, sessions, bookings, client.id, cutoffMs, sessionMap]);
 
   const swapCandidatesByDay = useMemo(() => {
     const map = new Map<number, TrainingSessionRecord[]>();
@@ -726,7 +766,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                       <p className="text-[11px] text-[#A1A1AA]">
                         {daySessions.length === 0
                           ? 'Sem horários publicados neste dia'
-                          : `${daySessions.length} horário${daySessions.length > 1 ? 's' : ''} disponível${daySessions.length > 1 ? 's' : ''} para consulta`}
+                          : `${daySessions.length} horário${daySessions.length > 1 ? 's' : ''} disponível${daySessions.length > 1 ? 's' : ''} · Máx. 1 treino/dia`}
                       </p>
                     </div>
                     <button
@@ -762,6 +802,15 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                           (b) => b.sessionId === s.id
                         );
                         const alreadyBooked = Boolean(existingForSession);
+                        const otherBookedOnDay = daySessions.find(
+                          (other) =>
+                            other.id !== s.id &&
+                            draftSessionIds.has(other.id) &&
+                            clientWeekBookings.some((b) => b.sessionId === other.id)
+                        );
+                        const otherDraftOnDay = daySessions.find(
+                          (other) => other.id !== s.id && draftSessionIds.has(other.id)
+                        );
                         const cutoffMinutes = getEffectiveCutoffMinutes(settings);
                         const cutoffMs = cutoffMinutes * 60_000;
                         const isCutoffLocked =
@@ -770,6 +819,11 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                           Date.now() > s.startMillis - cutoffMs;
                         const editLocked = !settings.clientsCanEdit || isCutoffLocked;
                         const fullAndNotMine = isFull && !alreadyBooked;
+                        const hasAnyActiveBookingOnDay = daySessions.some(
+                          (other) =>
+                            other.id !== s.id &&
+                            clientWeekBookings.some((b) => b.sessionId === other.id)
+                        );
                         const sessionWaitlist = waitlistEntries
                           .filter((w) => w.sessionId === s.id)
                           .sort((a, b) => a.createdAtMillis - b.createdAtMillis);
@@ -814,6 +868,8 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                 ? 'border-[#EAB308] bg-[#3D3314]/70'
                                 : myWaitlistEntry
                                 ? 'border-[#F59E0B]/60 bg-[#3B2A10]/40'
+                                : otherBookedOnDay
+                                ? 'border-[#2A2A30] bg-[#1D1D21]/65 opacity-80'
                                 : 'border-[#323238] bg-[#242429]/70 hover:border-[#EAB308]/50'
                             }`}
                           >
@@ -821,11 +877,34 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                               type="button"
                               disabled={editLocked || fullAndNotMine}
                               onClick={() => {
-                                if (
-                                  !isMine &&
-                                  weeklyLimit > 0 &&
-                                  draftSessionIds.size >= weeklyLimit
-                                ) {
+                                if (isMine) {
+                                  setDraftSessionIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(s.id);
+                                    return next;
+                                  });
+                                  return;
+                                }
+                                // Enforce max 1 training per day
+                                if (otherBookedOnDay) {
+                                  onBanner(
+                                    `Só podes marcar 1 treino por dia. Já tens treino às ${otherBookedOnDay.timeLabel} — usa "Trocar horário" para mudar a hora.`
+                                  );
+                                  return;
+                                }
+                                if (otherDraftOnDay) {
+                                  setDraftSessionIds((prev) => {
+                                    const next = new Set(prev);
+                                    daySessions.forEach((ds) => next.delete(ds.id));
+                                    next.add(s.id);
+                                    return next;
+                                  });
+                                  onBanner(
+                                    `Horário deste dia atualizado para ${s.timeLabel} (máx. 1 treino por dia).`
+                                  );
+                                  return;
+                                }
+                                if (weeklyLimit > 0 && draftSessionIds.size >= weeklyLimit) {
                                   onBanner(
                                     `Atingiste o limite semanal do teu pacote (${weeklyLimit} treino(s)/semana). Retira um horário ou fala com o teu PT.`
                                   );
@@ -833,8 +912,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                 }
                                 setDraftSessionIds((prev) => {
                                   const next = new Set(prev);
-                                  if (next.has(s.id)) next.delete(s.id);
-                                  else next.add(s.id);
+                                  next.add(s.id);
                                   return next;
                                 });
                               }}
@@ -873,12 +951,27 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                         {s.note}
                                       </p>
                                     ) : (
-                                      <p className="mt-0.5 text-xs text-[#A1A1AA]">
+                                      <p
+                                        className={`mt-0.5 text-xs ${
+                                          !isMine && otherBookedOnDay
+                                            ? 'text-[#F59E0B]'
+                                            : 'text-[#A1A1AA]'
+                                        }`}
+                                      >
                                         {isMine
                                           ? 'Toca para desmarcar este horário'
                                           : isFull
                                           ? 'Horário completo'
+                                          : otherBookedOnDay
+                                          ? `Já tens treino neste dia às ${otherBookedOnDay.timeLabel} (máx. 1/dia)`
+                                          : otherDraftOnDay
+                                          ? 'Toca para mudar para este horário (máx. 1/dia)'
                                           : 'Toca para selecionar este horário'}
+                                      </p>
+                                    )}
+                                    {s.note && !isMine && otherBookedOnDay && (
+                                      <p className="mt-0.5 text-[11px] text-[#F59E0B]">
+                                        Já tens treino neste dia às {otherBookedOnDay.timeLabel} (máx. 1/dia)
                                       </p>
                                     )}
                                     {isCutoffLocked && (
@@ -973,10 +1066,20 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                   >
                                     Sair da espera
                                   </button>
+                                ) : hasAnyActiveBookingOnDay ? (
+                                  <span className="text-[11px] font-semibold text-[#F59E0B]">
+                                    Já tens treino neste dia (máx. 1/dia)
+                                  </span>
                                 ) : (
                                   <button
                                     type="button"
                                     onClick={async () => {
+                                      if (hasAnyActiveBookingOnDay) {
+                                        onBanner(
+                                          'Já tens um treino marcado neste dia (máx. 1 treino por dia).'
+                                        );
+                                        return;
+                                      }
                                       await repo.joinWaitlist(
                                         uid,
                                         s.id,
@@ -1062,14 +1165,30 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                 <div className="flex flex-col sm:flex-row gap-2 pt-1">
                   <GoldButton
                     fullWidth
-                    disabled={!settings.clientsCanEdit}
+                    disabled={!settings.clientsCanEdit || actionBusy}
                     onClick={async () => {
+                      if (actionBusy) return;
                       if (weeklyLimit > 0 && draftSessionIds.size > weeklyLimit) {
                         onBanner(
                           `O teu pacote permite até ${weeklyLimit} treino(s) por semana.`
                         );
                         return;
                       }
+                      // Validate max 1 training per day across draft selections
+                      const seenDays = new Set<number>();
+                      for (const sid of draftSessionIds) {
+                        const day = visibleSessionDayById.get(sid);
+                        if (day !== undefined) {
+                          if (seenDays.has(day)) {
+                            onBanner(
+                              'Só podes marcar 1 treino por dia. Remove o horário duplicado antes de guardar.'
+                            );
+                            return;
+                          }
+                          seenDays.add(day);
+                        }
+                      }
+
                       const prevIds = new Set(clientWeekBookings.map((b) => b.sessionId));
                       const removedIds = Array.from(prevIds).filter(
                         (id) => !draftSessionIds.has(id)
@@ -1082,121 +1201,143 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         hadExisting && (removedIds.length > 0 || addedIds.length > 0);
                       const isFullCancel = hadExisting && draftSessionIds.size === 0;
 
-                      await repo.submitStudentBookings(
-                        uid,
-                        activeWeek.weekKey,
-                        client.id,
-                        draftSessionIds,
-                        clientWeekBookings
-                      );
+                      setActionBusy(true);
+                      try {
+                        await repo.submitStudentBookings(
+                          uid,
+                          activeWeek.weekKey,
+                          client.id,
+                          draftSessionIds,
+                          clientWeekBookings,
+                          visibleSessionDayById
+                        );
 
-                      if (isFullCancel || hasScheduleChange) {
-                        const fmtSessions = (ids: string[]) =>
-                          ids
-                            .map((id) => sessionMap.get(id))
-                            .filter((s): s is TrainingSessionRecord => Boolean(s))
-                            .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
-                            .join(', ');
+                        if (isFullCancel || hasScheduleChange) {
+                          const fmtSessions = (ids: string[]) =>
+                            ids
+                              .map((id) => sessionMap.get(id))
+                              .filter((s): s is TrainingSessionRecord => Boolean(s))
+                              .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
+                              .join(', ');
 
-                        const removedTxt = fmtSessions(removedIds);
-                        const nextTxt = fmtSessions(Array.from(draftSessionIds));
+                          const removedTxt = fmtSessions(removedIds);
+                          const nextTxt = fmtSessions(Array.from(draftSessionIds));
 
-                        const notifType = isFullCancel ? 'CANCELLED' : 'ALTERED';
-                        const summary = isFullCancel
-                          ? `${client.name} cancelou o(s) treino(s) da semana ${activeWeek.label}${
-                              removedTxt ? ` (${removedTxt})` : ''
-                            }.`
-                          : `${client.name} alterou o horário na semana ${activeWeek.label}.${
-                              removedTxt ? ` Retirou: ${removedTxt}.` : ''
-                            }${nextTxt ? ` Novo horário: ${nextTxt}.` : ''}`;
+                          const notifType = isFullCancel ? 'CANCELLED' : 'ALTERED';
+                          const summary = isFullCancel
+                            ? `${client.name} cancelou o(s) treino(s) da semana ${activeWeek.label}${
+                                removedTxt ? ` (${removedTxt})` : ''
+                              }.`
+                            : `${client.name} alterou o horário na semana ${activeWeek.label}.${
+                                removedTxt ? ` Retirou: ${removedTxt}.` : ''
+                              }${nextTxt ? ` Novo horário: ${nextTxt}.` : ''}`;
 
-                        await repo
-                          .createPtNotification(uid, {
-                            clientId: client.id,
-                            clientName: client.name,
-                            type: notifType,
-                            summary,
-                            weekKey: activeWeek.weekKey,
-                          })
-                          .catch(() => {});
+                          await repo
+                            .createPtNotification(uid, {
+                              clientId: client.id,
+                              clientName: client.name,
+                              type: notifType,
+                              summary,
+                              weekKey: activeWeek.weekKey,
+                            })
+                            .catch(() => {});
 
-                        const waMsg = isFullCancel
-                          ? `Olá! Sou ${client.name} (New Shape). Tive de cancelar o meu treino da semana ${activeWeek.label}${
-                              removedTxt ? ` (${removedTxt})` : ''
-                            }. Já atualizei na app!`
-                          : `Olá! Sou ${client.name} (New Shape). Modifiquei o meu horário de treino da semana ${activeWeek.label}.${
-                              removedTxt ? `\n• Retirado: ${removedTxt}` : ''
-                            }${nextTxt ? `\n• Novo horário: ${nextTxt}` : ''}\nJá atualizei na app!`;
+                          const waMsg = isFullCancel
+                            ? `Olá! Sou ${client.name} (New Shape). Tive de cancelar o meu treino da semana ${activeWeek.label}${
+                                removedTxt ? ` (${removedTxt})` : ''
+                              }. Já atualizei na app!`
+                            : `Olá! Sou ${client.name} (New Shape). Modifiquei o meu horário de treino da semana ${activeWeek.label}.${
+                                removedTxt ? `\n• Retirado: ${removedTxt}` : ''
+                              }${nextTxt ? `\n• Novo horário: ${nextTxt}` : ''}\nJá atualizei na app!`;
 
-                        onWhatsAppAlert({
-                          title: isFullCancel
-                            ? 'Treino cancelado — Avisa o PT no WhatsApp'
-                            : 'Horário modificado — Avisa o PT no WhatsApp',
-                          subtitle:
-                            'O teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
-                          message: waMsg,
-                        });
+                          onWhatsAppAlert({
+                            title: isFullCancel
+                              ? 'Treino cancelado — Avisa o PT no WhatsApp'
+                              : 'Horário modificado — Avisa o PT no WhatsApp',
+                            subtitle:
+                              'O teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
+                            message: waMsg,
+                          });
+                        }
+
+                        onBanner(
+                          isFullCancel
+                            ? 'Treino cancelado e PT notificado!'
+                            : hasScheduleChange
+                            ? 'Alteração de horário enviada e PT notificado!'
+                            : 'Marcação enviada ao Personal Trainer!'
+                        );
+                      } catch (err) {
+                        onBanner(
+                          err instanceof Error && err.message
+                            ? err.message
+                            : 'Não foi possível guardar a marcação. Tenta novamente.'
+                        );
+                      } finally {
+                        setActionBusy(false);
                       }
-
-                      onBanner(
-                        isFullCancel
-                          ? 'Treino cancelado e PT notificado!'
-                          : hasScheduleChange
-                          ? 'Alteração de horário enviada e PT notificado!'
-                          : 'Marcação enviada ao Personal Trainer!'
-                      );
                     }}
                   >
                     <Check className="h-4 w-4" />
-                    {clientWeekBookings.length > 0
+                    {actionBusy
+                      ? 'A guardar...'
+                      : clientWeekBookings.length > 0
                       ? `Guardar alterações (${draftSessionIds.size})`
                       : `Marcar treinos (${draftSessionIds.size})`}
                   </GoldButton>
 
                   <SecondaryButton
                     fullWidth
-                    disabled={!settings.clientsCanEdit}
+                    disabled={!settings.clientsCanEdit || actionBusy}
                     onClick={async () => {
-                      const hadExisting = clientWeekBookings.length > 0;
-                      const prevSessionsTxt = clientWeekBookings
-                        .map((b) => sessionMap.get(b.sessionId))
-                        .filter((s): s is TrainingSessionRecord => Boolean(s))
-                        .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
-                        .join(', ');
+                      if (actionBusy) return;
+                      setActionBusy(true);
+                      try {
+                        const hadExisting = clientWeekBookings.length > 0;
+                        const prevSessionsTxt = clientWeekBookings
+                          .map((b) => sessionMap.get(b.sessionId))
+                          .filter((s): s is TrainingSessionRecord => Boolean(s))
+                          .map((s) => `${s.dateLabel} às ${s.timeLabel}`)
+                          .join(', ');
 
-                      await repo.markStudentUnavailable(
-                        uid,
-                        activeWeek.weekKey,
-                        client.id,
-                        clientWeekBookings
-                      );
-                      setDraftSessionIds(new Set());
+                        await repo.markStudentUnavailable(
+                          uid,
+                          activeWeek.weekKey,
+                          client.id,
+                          clientWeekBookings
+                        );
+                        setDraftSessionIds(new Set());
 
-                      if (hadExisting) {
-                        const summary = `${client.name} cancelou os treinos e marcou indisponibilidade na semana ${activeWeek.label}${
-                          prevSessionsTxt ? ` (${prevSessionsTxt})` : ''
-                        }.`;
-                        await repo
-                          .createPtNotification(uid, {
-                            clientId: client.id,
-                            clientName: client.name,
-                            type: 'UNAVAILABLE',
-                            summary,
-                            weekKey: activeWeek.weekKey,
-                          })
-                          .catch(() => {});
-
-                        onWhatsAppAlert({
-                          title: 'Treinos cancelados — Avisa o PT no WhatsApp',
-                          subtitle:
-                            'O teu PT foi notificado na app de que não podes treinar esta semana. Envia-lhe a mensagem pelo WhatsApp.',
-                          message: `Olá! Sou ${client.name} (New Shape). Esta semana (${activeWeek.label}) não vou conseguir treinar e cancelei a minha marcação${
+                        if (hadExisting) {
+                          const summary = `${client.name} cancelou os treinos e marcou indisponibilidade na semana ${activeWeek.label}${
                             prevSessionsTxt ? ` (${prevSessionsTxt})` : ''
-                          } na app.`,
-                        });
-                      }
+                          }.`;
+                          await repo
+                            .createPtNotification(uid, {
+                              clientId: client.id,
+                              clientName: client.name,
+                              type: 'UNAVAILABLE',
+                              summary,
+                              weekKey: activeWeek.weekKey,
+                            })
+                            .catch(() => {});
 
-                      onBanner('Registado: indisponível esta semana.');
+                          onWhatsAppAlert({
+                            title: 'Treinos cancelados — Avisa o PT no WhatsApp',
+                            subtitle:
+                              'O teu PT foi notificado na app de que não podes treinar esta semana. Envia-lhe a mensagem pelo WhatsApp.',
+                            message: `Olá! Sou ${client.name} (New Shape). Esta semana (${activeWeek.label}) não vou conseguir treinar e cancelei a minha marcação${
+                              prevSessionsTxt ? ` (${prevSessionsTxt})` : ''
+                            } na app.`,
+                          });
+                        }
+
+                        onBanner('Registado: indisponível esta semana.');
+                      } catch {
+                        onBanner('Não foi possível registar. Tenta novamente.');
+                      } finally {
+                        setActionBusy(false);
+                      }
                     }}
                   >
                     Esta semana não posso
@@ -1683,8 +1824,8 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
           <div className="space-y-3.5">
             <div className="rounded-xl border border-[#EAB308]/40 bg-[#3D3314]/50 px-3.5 py-2.5 text-xs text-[#FACC15]">
               Escolhe abaixo o novo dia e hora para a semana{' '}
-              <strong>{swapTarget.week?.label || swapTarget.booking.weekKey}</strong>. A troca é
-              imediata e o teu PT é avisado automaticamente.
+              <strong>{swapTarget.week?.label || swapTarget.booking.weekKey}</strong> (máx. 1 treino
+              por dia). A troca é imediata e o teu PT é avisado automaticamente.
             </div>
 
             {swapCandidatesByDay.length === 0 ? (

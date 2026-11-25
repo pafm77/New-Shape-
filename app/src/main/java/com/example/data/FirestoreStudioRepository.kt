@@ -28,6 +28,8 @@ class FirestoreStudioRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = Firebase.auth
 ) {
+    private val inFlightStudentBookingKeys = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     private fun requireUserId(): String {
         return auth.currentUser?.uid?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("Inicia sessão com o Google antes de aceder ao Firestore.")
@@ -1626,73 +1628,153 @@ class FirestoreStudioRepository(
         weekKey: String,
         clientId: String,
         selectedSessionIds: Set<String>,
-        existingBookings: List<BookingRecord>
-    ): Result<Unit> = try {
-        val uid = requireUserId()
-        val batch = db.batch()
-        batch.delete(userDoc(uid).collection("week_responses").document("${weekKey}_$clientId"))
-        val hadConfirmed = existingBookings.any { it.status == BookingStatus.CONFIRMED.name || it.status == BookingStatus.ALTERED.name }
+        existingBookings: List<BookingRecord>,
+        visibleSessionDayById: Map<String, Int> = emptyMap()
+    ): Result<Unit> {
+        val uid = try {
+            requireUserId()
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+        val lockKey = "${uid}_${weekKey}_${clientId}"
+        if (!inFlightStudentBookingKeys.add(lockKey)) {
+            return Result.failure(IllegalStateException("Marcação já em curso. Aguarda um momento."))
+        }
 
-        if (selectedSessionIds.isEmpty()) {
-            if (hadConfirmed) {
-                existingBookings.forEach { b ->
-                    batch.update(
-                        userDoc(uid).collection("bookings").document(b.id),
-                        mapOf(
-                            "status" to BookingStatus.CANCELLED.name,
-                            "requestedAtMillis" to System.currentTimeMillis(),
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    )
-                }
-            } else {
-                existingBookings.forEach { b ->
-                    batch.delete(userDoc(uid).collection("bookings").document(b.id))
+        return try {
+            // Enforce at most 1 training per day across selected sessions
+            if (visibleSessionDayById.isNotEmpty()) {
+                val seenDays = mutableSetOf<Int>()
+                for (sid in selectedSessionIds) {
+                    val day = visibleSessionDayById[sid]
+                    if (day != null && !seenDays.add(day)) {
+                        return Result.failure(IllegalStateException("Só podes marcar 1 treino por dia."))
+                    }
                 }
             }
-        } else {
-            val currentIds = existingBookings.map { it.sessionId }.toSet()
-            existingBookings.filter { it.sessionId !in selectedSessionIds }.forEach { b ->
-                batch.delete(userDoc(uid).collection("bookings").document(b.id))
+
+            // Query live week bookings to prevent race-condition duplicates on rapid taps
+            val liveById = linkedMapOf<String, BookingRecord>()
+            try {
+                val liveSnap = userDoc(uid).collection("bookings")
+                    .whereEqualTo("weekKey", weekKey)
+                    .get()
+                    .await()
+                liveSnap.documents.forEach { doc ->
+                    val bClientId = doc.getString("clientId").orEmpty()
+                    val bSessionId = doc.getString("sessionId").orEmpty()
+                    val bStatus = doc.getString("status") ?: BookingStatus.PENDING.name
+                    if (bClientId != clientId || bStatus == BookingStatus.CANCELLED.name) return@forEach
+                    if (visibleSessionDayById.isNotEmpty() && bSessionId !in visibleSessionDayById) {
+                        return@forEach
+                    }
+                    liveById[doc.id] = BookingRecord(
+                        id = doc.id,
+                        userId = uid,
+                        sessionId = bSessionId,
+                        weekKey = doc.getString("weekKey") ?: weekKey,
+                        clientId = bClientId,
+                        status = bStatus,
+                        attendanceStatus = doc.getString("attendanceStatus").orEmpty(),
+                        requestedAtMillis = doc.getLong("requestedAtMillis") ?: 0L
+                    )
+                }
+            } catch (_: Exception) {
+                // Fallback to caller-provided existing bookings if query fails
+            }
+
+            existingBookings.forEach { b ->
+                if (b.status == BookingStatus.CANCELLED.name) return@forEach
+                if (visibleSessionDayById.isNotEmpty() && b.sessionId !in visibleSessionDayById) return@forEach
+                if (b.id !in liveById) {
+                    liveById[b.id] = b
+                }
+            }
+
+            // Prefer keeping CONFIRMED bookings first if legacy duplicates exist for the same session
+            val activeExisting = liveById.values.sortedWith(
+                compareBy<BookingRecord> { if (it.status == BookingStatus.CONFIRMED.name) 0 else 1 }
+                    .thenBy { it.requestedAtMillis }
+            )
+
+            val batch = db.batch()
+            batch.delete(userDoc(uid).collection("week_responses").document("${weekKey}_$clientId"))
+            val hadConfirmed = activeExisting.any {
+                it.status == BookingStatus.CONFIRMED.name || it.status == BookingStatus.ALTERED.name
             }
             val now = System.currentTimeMillis()
-            val newStatus = if (hadConfirmed) BookingStatus.ALTERED.name else BookingStatus.PENDING.name
-            if (hadConfirmed && currentIds != selectedSessionIds) {
-                existingBookings.filter { it.sessionId in selectedSessionIds }.forEach { b ->
-                    batch.update(
-                        userDoc(uid).collection("bookings").document(b.id),
+
+            if (selectedSessionIds.isEmpty()) {
+                if (hadConfirmed) {
+                    val cancelledSessions = mutableSetOf<String>()
+                    activeExisting.forEach { b ->
+                        if (!cancelledSessions.add(b.sessionId)) {
+                            batch.delete(userDoc(uid).collection("bookings").document(b.id))
+                        } else {
+                            batch.update(
+                                userDoc(uid).collection("bookings").document(b.id),
+                                mapOf(
+                                    "status" to BookingStatus.CANCELLED.name,
+                                    "requestedAtMillis" to now,
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    activeExisting.forEach { b ->
+                        batch.delete(userDoc(uid).collection("bookings").document(b.id))
+                    }
+                }
+            } else {
+                val currentIds = activeExisting.map { it.sessionId }.toSet()
+                val hasSelectionChanged = currentIds != selectedSessionIds
+                val newStatus = if (hadConfirmed) BookingStatus.ALTERED.name else BookingStatus.PENDING.name
+                val keptSessionIds = mutableSetOf<String>()
+
+                activeExisting.forEach { b ->
+                    if (b.sessionId !in selectedSessionIds || !keptSessionIds.add(b.sessionId)) {
+                        // Delete unselected bookings AND any duplicate docs for the same sessionId
+                        batch.delete(userDoc(uid).collection("bookings").document(b.id))
+                    } else if (hadConfirmed && hasSelectionChanged) {
+                        batch.update(
+                            userDoc(uid).collection("bookings").document(b.id),
+                            mapOf(
+                                "status" to BookingStatus.ALTERED.name,
+                                "requestedAtMillis" to now,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    }
+                }
+
+                selectedSessionIds.filter { it !in keptSessionIds }.forEach { sessionId ->
+                    val ref = userDoc(uid).collection("bookings").document()
+                    batch.set(
+                        ref,
                         mapOf(
-                            "status" to BookingStatus.ALTERED.name,
+                            "userId" to uid,
+                            "sessionId" to sessionId,
+                            "weekKey" to weekKey,
+                            "clientId" to clientId,
+                            "status" to newStatus,
                             "requestedAtMillis" to now,
+                            "createdAt" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
                     )
                 }
             }
-            selectedSessionIds.filter { it !in currentIds }.forEach { sessionId ->
-                val ref = userDoc(uid).collection("bookings").document()
-                batch.set(
-                    ref,
-                    mapOf(
-                        "userId" to uid,
-                        "sessionId" to sessionId,
-                        "weekKey" to weekKey,
-                        "clientId" to clientId,
-                        "status" to newStatus,
-                        "requestedAtMillis" to now,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                )
-            }
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/bookings")
+            Result.failure(e)
+        } finally {
+            inFlightStudentBookingKeys.remove(lockKey)
         }
-        batch.commit().await()
-        Result.success(Unit)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/bookings")
-        Result.failure(e)
     }
 
     suspend fun upsertWeekResponse(weekKey: String, clientId: String, status: String, existingBookings: List<BookingRecord> = emptyList()): Result<Unit> = try {

@@ -1779,65 +1779,152 @@ export async function setBookingAttendance(
   });
 }
 
+const inFlightStudentBookingKeys = new Set<string>();
+
 export async function submitStudentBookings(
   uid: string,
   weekKey: string,
   clientId: string,
   selectedSessionIds: Set<string>,
-  existingClientBookings: BookingRecord[]
+  existingClientBookings: BookingRecord[],
+  visibleSessionDayById?: Map<string, number>
 ): Promise<void> {
-  const batch = writeBatch(db);
-  batch.delete(doc(subcol(uid, 'week_responses'), `${weekKey}_${clientId}`));
+  const lockKey = `${uid}_${weekKey}_${clientId}`;
+  if (inFlightStudentBookingKeys.has(lockKey)) {
+    throw new Error('Marcação já em curso. Aguarda um momento.');
+  }
+  inFlightStudentBookingKeys.add(lockKey);
 
-  const activeExisting = existingClientBookings.filter((b) => b.status !== 'CANCELLED');
-  const wasConfirmed = activeExisting.some((b) => b.status === 'CONFIRMED');
-  const existingSessionIds = new Set(activeExisting.map((b) => b.sessionId));
-  const now = Date.now();
+  try {
+    // Enforce at most 1 training per day across selected sessions
+    if (visibleSessionDayById && visibleSessionDayById.size > 0) {
+      const seenDays = new Set<number>();
+      for (const sid of selectedSessionIds) {
+        const day = visibleSessionDayById.get(sid);
+        if (day !== undefined) {
+          if (seenDays.has(day)) {
+            throw new Error('Só podes marcar 1 treino por dia.');
+          }
+          seenDays.add(day);
+        }
+      }
+    }
 
-  if (selectedSessionIds.size === 0 && activeExisting.length > 0) {
-    if (wasConfirmed) {
-      activeExisting.forEach((b) => {
-        batch.update(doc(subcol(uid, 'bookings'), b.id), {
-          status: 'CANCELLED',
-          requestedAtMillis: now,
-          updatedAt: serverTimestamp(),
+    // Fetch live week bookings from Firestore to prevent race-condition duplicates on rapid taps
+    const liveById = new Map<string, BookingRecord>();
+    try {
+      const liveSnap = await getDocs(
+        query(subcol(uid, 'bookings'), where('weekKey', '==', weekKey))
+      );
+      liveSnap.docs.forEach((d) => {
+        const data = d.data();
+        const bClientId = String(data.clientId ?? '');
+        const bSessionId = String(data.sessionId ?? '');
+        const bStatus = String(data.status ?? 'PENDING') as BookingRecord['status'];
+        if (bClientId !== clientId || bStatus === 'CANCELLED') return;
+        if (visibleSessionDayById && visibleSessionDayById.size > 0 && !visibleSessionDayById.has(bSessionId)) {
+          return;
+        }
+        liveById.set(d.id, {
+          id: d.id,
+          userId: String(data.userId ?? uid),
+          sessionId: bSessionId,
+          weekKey: String(data.weekKey ?? weekKey),
+          clientId: bClientId,
+          status: bStatus,
+          attendanceStatus: String(data.attendanceStatus ?? '') as AttendanceStatus,
+          requestedAtMillis: Number(data.requestedAtMillis ?? 0),
         });
       });
-    } else {
-      activeExisting.forEach((b) => batch.delete(doc(subcol(uid, 'bookings'), b.id)));
+    } catch {
+      // Fallback to caller-provided existing bookings if query fails
     }
+
+    existingClientBookings.forEach((b) => {
+      if (b.status === 'CANCELLED') return;
+      if (visibleSessionDayById && visibleSessionDayById.size > 0 && !visibleSessionDayById.has(b.sessionId)) {
+        return;
+      }
+      if (!liveById.has(b.id)) {
+        liveById.set(b.id, b);
+      }
+    });
+
+    // Prefer keeping CONFIRMED bookings first if legacy duplicates exist for the same session
+    const activeExisting = Array.from(liveById.values()).sort((a, b) => {
+      if (a.status === 'CONFIRMED' && b.status !== 'CONFIRMED') return -1;
+      if (b.status === 'CONFIRMED' && a.status !== 'CONFIRMED') return 1;
+      return a.requestedAtMillis - b.requestedAtMillis;
+    });
+
+    const batch = writeBatch(db);
+    batch.delete(doc(subcol(uid, 'week_responses'), `${weekKey}_${clientId}`));
+
+    const wasConfirmed = activeExisting.some((b) => b.status === 'CONFIRMED');
+    const existingSessionIds = new Set(activeExisting.map((b) => b.sessionId));
+    const hasSelectionChanged =
+      existingSessionIds.size !== selectedSessionIds.size ||
+      Array.from(selectedSessionIds).some((sid) => !existingSessionIds.has(sid));
+    const now = Date.now();
+
+    if (selectedSessionIds.size === 0 && activeExisting.length > 0) {
+      if (wasConfirmed) {
+        const cancelledSessions = new Set<string>();
+        activeExisting.forEach((b) => {
+          if (cancelledSessions.has(b.sessionId)) {
+            batch.delete(doc(subcol(uid, 'bookings'), b.id));
+          } else {
+            cancelledSessions.add(b.sessionId);
+            batch.update(doc(subcol(uid, 'bookings'), b.id), {
+              status: 'CANCELLED',
+              requestedAtMillis: now,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        });
+      } else {
+        activeExisting.forEach((b) => batch.delete(doc(subcol(uid, 'bookings'), b.id)));
+      }
+      await batch.commit();
+      return;
+    }
+
+    const keptSessionIds = new Set<string>();
+    activeExisting.forEach((b) => {
+      if (!selectedSessionIds.has(b.sessionId) || keptSessionIds.has(b.sessionId)) {
+        // Delete unselected bookings AND any duplicate docs for the same sessionId
+        batch.delete(doc(subcol(uid, 'bookings'), b.id));
+      } else {
+        keptSessionIds.add(b.sessionId);
+        if (wasConfirmed && hasSelectionChanged) {
+          batch.update(doc(subcol(uid, 'bookings'), b.id), {
+            status: 'ALTERED',
+            requestedAtMillis: now,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+    });
+
+    selectedSessionIds.forEach((sid) => {
+      if (!keptSessionIds.has(sid)) {
+        batch.set(doc(subcol(uid, 'bookings')), {
+          userId: uid,
+          sessionId: sid,
+          weekKey,
+          clientId,
+          status: wasConfirmed ? 'ALTERED' : 'PENDING',
+          requestedAtMillis: now,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+
     await batch.commit();
-    return;
+  } finally {
+    inFlightStudentBookingKeys.delete(lockKey);
   }
-
-  activeExisting.forEach((b) => {
-    if (!selectedSessionIds.has(b.sessionId)) {
-      batch.delete(doc(subcol(uid, 'bookings'), b.id));
-    } else if (wasConfirmed) {
-      batch.update(doc(subcol(uid, 'bookings'), b.id), {
-        status: 'ALTERED',
-        requestedAtMillis: now,
-        updatedAt: serverTimestamp(),
-      });
-    }
-  });
-
-  selectedSessionIds.forEach((sid) => {
-    if (!existingSessionIds.has(sid)) {
-      batch.set(doc(subcol(uid, 'bookings')), {
-        userId: uid,
-        sessionId: sid,
-        weekKey,
-        clientId,
-        status: wasConfirmed ? 'ALTERED' : 'PENDING',
-        requestedAtMillis: now,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
-  });
-
-  await batch.commit();
 }
 
 export async function markStudentUnavailable(

@@ -203,6 +203,8 @@ class NewShapeViewModel(
     private val _undoSnapshot = MutableStateFlow<UndoConfirmationSnapshot?>(null)
     private val _statusBanner = MutableStateFlow<String?>(null)
     private val _pendingWhatsAppPrompt = MutableStateFlow<StudentWhatsAppAlertPrompt?>(null)
+    private val _bookingActionBusy = MutableStateFlow(false)
+    val bookingActionBusy: StateFlow<Boolean> = _bookingActionBusy.asStateFlow()
 
     private var undoTimerJob: Job? = null
 
@@ -847,8 +849,22 @@ class NewShapeViewModel(
     }
 
     fun submitStudentBookings(weekKey: String, clientId: String, selectedSessionIds: Set<String>) {
+        if (_bookingActionBusy.value) return
         val data = currentData
-        val visibleSessionIds = data?.sessions?.filter { !it.ptPrivatePersonal }?.map { it.id }?.toSet().orEmpty()
+        val visibleSessions = data?.sessions?.filter { !it.ptPrivatePersonal }.orEmpty()
+        val visibleSessionIds = visibleSessions.map { it.id }.toSet()
+        val visibleSessionDayById = visibleSessions.associate { it.id to it.dayOfWeek }
+
+        // Enforce max 1 training per day
+        val seenDays = mutableSetOf<Int>()
+        for (sid in selectedSessionIds) {
+            val day = visibleSessionDayById[sid]
+            if (day != null && !seenDays.add(day)) {
+                _statusBanner.value = "Só podes marcar 1 treino por dia. Remove o horário duplicado antes de guardar."
+                return
+            }
+        }
+
         val existing = data?.bookings?.filter {
             it.weekKey == weekKey &&
                 it.clientId == clientId &&
@@ -868,49 +884,57 @@ class NewShapeViewModel(
                 .joinToString(", ") { "${it.dateLabel} ${it.timeLabel.replace(":", "h")}" }
 
         viewModelScope.launch {
-            repository.submitStudentBookings(weekKey, clientId, selectedSessionIds, existing)
-                .onSuccess {
-                    if (isCancel) {
-                        val removedText = formatList(existingIds)
-                        val summary = "Cancelou os treinos da semana $weekLabel ($removedText)."
-                        repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
-                        val waMsg = "Olá! Sou $clientName. Cancelei o(s) meu(s) treino(s) na New Shape (semana $weekLabel): $removedText. Podes confirmar?"
-                        _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
-                            type = "CANCELLED",
-                            title = "Treino cancelado — avisa o teu PT",
-                            detail = "O teu PT já recebeu uma notificação na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o cancelamento.",
-                            whatsappMessage = waMsg
-                        )
-                        _statusBanner.value = "Cancelamento registado. Avisa o PT pelo WhatsApp."
-                    } else if (isModify) {
-                        val removedIds = existingIds - selectedSessionIds
-                        val addedIds = selectedSessionIds - existingIds
-                        val newText = formatList(selectedSessionIds)
-                        val parts = mutableListOf<String>()
-                        if (removedIds.isNotEmpty()) parts.add("saiu de ${formatList(removedIds)}")
-                        if (addedIds.isNotEmpty()) parts.add("marcou ${formatList(addedIds)}")
-                        val summary = "Alterou o horário da semana $weekLabel (${parts.joinToString(" · ")})."
-                        repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
-                        val waMsg = "Olá! Sou $clientName. Alterei o meu horário de treino na New Shape (semana $weekLabel). Novo horário: $newText. Podes confirmar?"
-                        _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
-                            type = "ALTERED",
-                            title = "Horário alterado — avisa o teu PT",
-                            detail = "O teu PT já foi notificado na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o novo horário.",
-                            whatsappMessage = waMsg
-                        )
-                        _statusBanner.value = "Alteração guardada. Avisa o PT pelo WhatsApp."
-                    } else {
-                        _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp."
+            _bookingActionBusy.value = true
+            try {
+                repository.submitStudentBookings(weekKey, clientId, selectedSessionIds, existing, visibleSessionDayById)
+                    .onSuccess {
+                        if (isCancel) {
+                            val removedText = formatList(existingIds)
+                            val summary = "Cancelou os treinos da semana $weekLabel ($removedText)."
+                            repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
+                            val waMsg = "Olá! Sou $clientName. Cancelei o(s) meu(s) treino(s) na New Shape (semana $weekLabel): $removedText. Podes confirmar?"
+                            _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                                type = "CANCELLED",
+                                title = "Treino cancelado — avisa o teu PT",
+                                detail = "O teu PT já recebeu uma notificação na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o cancelamento.",
+                                whatsappMessage = waMsg
+                            )
+                            _statusBanner.value = "Cancelamento registado. Avisa o PT pelo WhatsApp."
+                        } else if (isModify) {
+                            val removedIds = existingIds - selectedSessionIds
+                            val addedIds = selectedSessionIds - existingIds
+                            val newText = formatList(selectedSessionIds)
+                            val parts = mutableListOf<String>()
+                            if (removedIds.isNotEmpty()) parts.add("saiu de ${formatList(removedIds)}")
+                            if (addedIds.isNotEmpty()) parts.add("marcou ${formatList(addedIds)}")
+                            val summary = "Alterou o horário da semana $weekLabel (${parts.joinToString(" · ")})."
+                            repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
+                            val waMsg = "Olá! Sou $clientName. Alterei o meu horário de treino na New Shape (semana $weekLabel). Novo horário: $newText. Podes confirmar?"
+                            _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                                type = "ALTERED",
+                                title = "Horário alterado — avisa o teu PT",
+                                detail = "O teu PT já foi notificado na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o novo horário.",
+                                whatsappMessage = waMsg
+                            )
+                            _statusBanner.value = "Alteração guardada. Avisa o PT pelo WhatsApp."
+                        } else {
+                            _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp."
+                        }
                     }
-                }
-                .onFailure { _statusBanner.value = it.localizedMessage }
+                    .onFailure { _statusBanner.value = it.localizedMessage }
+            } finally {
+                _bookingActionBusy.value = false
+            }
         }
     }
 
     fun cancelSingleStudentBooking(weekKey: String, clientId: String, sessionIdToCancel: String) {
+        if (_bookingActionBusy.value) return
         val data = currentData
         val sessionMap = data?.sessions?.associateBy { it.id }.orEmpty()
-        val visibleSessionIds = data?.sessions?.filter { !it.ptPrivatePersonal }?.map { it.id }?.toSet().orEmpty()
+        val visibleSessions = data?.sessions?.filter { !it.ptPrivatePersonal }.orEmpty()
+        val visibleSessionIds = visibleSessions.map { it.id }.toSet()
+        val visibleSessionDayById = visibleSessions.associate { it.id to it.dayOfWeek }
         val existing = data?.bookings?.filter {
             it.weekKey == weekKey &&
                 it.clientId == clientId &&
@@ -924,20 +948,25 @@ class NewShapeViewModel(
         val cancelledDesc = cancelledSession?.let { "${it.dateLabel} às ${it.timeLabel.replace(":", "h")}" } ?: "treino"
 
         viewModelScope.launch {
-            repository.submitStudentBookings(weekKey, clientId, nextIds, existing)
-                .onSuccess {
-                    val summary = "$clientName desmarcou o treino de $cancelledDesc (semana $weekLabel)."
-                    repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
-                    val waMsg = "Olá! Sou $clientName (New Shape). Tive de desmarcar o meu treino de $cancelledDesc (semana $weekLabel). Já atualizei na app!"
-                    _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
-                        type = "CANCELLED",
-                        title = "Treino desmarcado — avisa o teu PT",
-                        detail = "O teu lugar foi libertado e o teu PT já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.",
-                        whatsappMessage = waMsg
-                    )
-                    _statusBanner.value = "Treino de $cancelledDesc desmarcado!"
-                }
-                .onFailure { _statusBanner.value = it.localizedMessage }
+            _bookingActionBusy.value = true
+            try {
+                repository.submitStudentBookings(weekKey, clientId, nextIds, existing, visibleSessionDayById)
+                    .onSuccess {
+                        val summary = "$clientName desmarcou o treino de $cancelledDesc (semana $weekLabel)."
+                        repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
+                        val waMsg = "Olá! Sou $clientName (New Shape). Tive de desmarcar o meu treino de $cancelledDesc (semana $weekLabel). Já atualizei na app!"
+                        _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                            type = "CANCELLED",
+                            title = "Treino desmarcado — avisa o teu PT",
+                            detail = "O teu lugar foi libertado e o teu PT já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.",
+                            whatsappMessage = waMsg
+                        )
+                        _statusBanner.value = "Treino de $cancelledDesc desmarcado!"
+                    }
+                    .onFailure { _statusBanner.value = it.localizedMessage }
+            } finally {
+                _bookingActionBusy.value = false
+            }
         }
     }
 
@@ -947,38 +976,56 @@ class NewShapeViewModel(
         fromSessionId: String,
         toSessionId: String
     ) {
+        if (_bookingActionBusy.value) return
         val data = currentData
         val sessionMap = data?.sessions?.associateBy { it.id }.orEmpty()
-        val visibleSessionIds = data?.sessions?.filter { !it.ptPrivatePersonal }?.map { it.id }?.toSet().orEmpty()
+        val visibleSessions = data?.sessions?.filter { !it.ptPrivatePersonal }.orEmpty()
+        val visibleSessionIds = visibleSessions.map { it.id }.toSet()
+        val visibleSessionDayById = visibleSessions.associate { it.id to it.dayOfWeek }
         val existing = data?.bookings?.filter {
             it.weekKey == weekKey &&
                 it.clientId == clientId &&
                 it.status != BookingStatus.CANCELLED.name &&
                 it.sessionId in visibleSessionIds
         }.orEmpty()
+        val oldSession = sessionMap[fromSessionId]
+        val newSession = sessionMap[toSessionId]
+        if (newSession != null) {
+            val otherBookedDays = existing
+                .filter { it.sessionId != fromSessionId }
+                .mapNotNull { visibleSessionDayById[it.sessionId] }
+                .toSet()
+            if (newSession.dayOfWeek in otherBookedDays) {
+                _statusBanner.value = "Já tens um treino marcado nesse dia (máx. 1 treino por dia)."
+                return
+            }
+        }
         val nextIds = (existing.map { it.sessionId }.filter { it != fromSessionId } + toSessionId).toSet()
         val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
         val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
-        val oldSession = sessionMap[fromSessionId]
-        val newSession = sessionMap[toSessionId]
         val oldDesc = oldSession?.let { "${it.dateLabel} às ${it.timeLabel.replace(":", "h")}" } ?: "horário anterior"
         val newDesc = newSession?.let { "${it.dateLabel} às ${it.timeLabel.replace(":", "h")}" } ?: "novo horário"
 
         viewModelScope.launch {
-            repository.submitStudentBookings(weekKey, clientId, nextIds, existing)
-                .onSuccess {
-                    val summary = "$clientName trocou o treino na semana $weekLabel: saiu de $oldDesc para $newDesc."
-                    repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
-                    val waMsg = "Olá! Sou $clientName (New Shape). Troquei o meu treino da semana $weekLabel:\n• Anterior: $oldDesc\n• Novo horário: $newDesc\nJá atualizei na app!"
-                    _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
-                        type = "ALTERED",
-                        title = "Horário trocado — avisa o teu PT",
-                        detail = "O pedido de troca foi enviado e o teu PT já foi notificado na app. Envia também a mensagem pelo WhatsApp para confirmar.",
-                        whatsappMessage = waMsg
-                    )
-                    _statusBanner.value = "Treino trocado para $newDesc!"
-                }
-                .onFailure { _statusBanner.value = it.localizedMessage }
+            _bookingActionBusy.value = true
+            try {
+                repository.submitStudentBookings(weekKey, clientId, nextIds, existing, visibleSessionDayById)
+                    .onSuccess {
+                        val summary = "$clientName trocou o treino na semana $weekLabel: saiu de $oldDesc para $newDesc."
+                        repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
+                        val waMsg = "Olá! Sou $clientName (New Shape). Troquei o meu treino da semana $weekLabel:\n• Anterior: $oldDesc\n• Novo horário: $newDesc\nJá atualizei na app!"
+                        _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                            type = "ALTERED",
+                            title = "Horário trocado — avisa o teu PT",
+                            detail = "O pedido de troca foi enviado e o teu PT já foi notificado na app. Envia também a mensagem pelo WhatsApp para confirmar.",
+                            whatsappMessage = waMsg
+                        )
+                        _statusBanner.value = "Treino trocado para $newDesc!"
+                    }
+                    .onFailure { _statusBanner.value = it.localizedMessage }
+            } finally {
+                _bookingActionBusy.value = false
+            }
         }
     }
 
@@ -1251,6 +1298,23 @@ class NewShapeViewModel(
 
     // --- Waitlist (Lista de Espera) ---
     fun joinWaitlist(sessionId: String, weekKey: String, clientId: String) {
+        val data = currentData
+        val visibleSessions = data?.sessions?.filter { !it.ptPrivatePersonal }.orEmpty()
+        val sessionMap = visibleSessions.associateBy { it.id }
+        val targetDay = sessionMap[sessionId]?.dayOfWeek
+        if (targetDay != null) {
+            val alreadyBookedSameDay = data?.bookings?.any { b ->
+                b.weekKey == weekKey &&
+                    b.clientId == clientId &&
+                    b.status != BookingStatus.CANCELLED.name &&
+                    b.sessionId != sessionId &&
+                    sessionMap[b.sessionId]?.dayOfWeek == targetDay
+            } == true
+            if (alreadyBookedSameDay) {
+                _statusBanner.value = "Já tens um treino marcado neste dia (máx. 1 treino por dia)."
+                return
+            }
+        }
         viewModelScope.launch {
             repository.joinWaitlist(sessionId, weekKey, clientId)
                 .onSuccess { _statusBanner.value = "Entraste na lista de espera! O PT será avisado se abrir vaga." }

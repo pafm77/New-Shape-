@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.SeedCatalog
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
@@ -113,6 +114,7 @@ internal fun StudentAgendaSection(
     viewModel: NewShapeViewModel
 ) {
     val context = LocalContext.current
+    val bookingActionBusy by viewModel.bookingActionBusy.collectAsStateWithLifecycle()
     val firstName = student.name.trim().split(" ").firstOrNull().orEmpty()
     val publishedWeeks = remember(state.weeks) { state.weeks.filter { it.published } }
     var subTab by remember { mutableIntStateOf(0) } // 0 = Horários (Marcar), 1 = Marcações (Confirmados)
@@ -667,7 +669,7 @@ internal fun StudentAgendaSection(
                             )
                             Text(
                                 text = if (daySessions.isEmpty()) "Sem horários publicados neste dia"
-                                else "${daySessions.size} horário(s) disponível(is)",
+                                else "${daySessions.size} horário(s) disponível(is) · Máx. 1 treino/dia",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondaryDark
                             )
@@ -705,6 +707,17 @@ internal fun StudentAgendaSection(
                     val isSelected = session.id in selectedSessionIds
                     val isPastCutoff = cutoffMs > 0L && session.startMillis > 0 && (session.startMillis - nowMs) < cutoffMs
                     val existingForSession = existingBookings.find { it.sessionId == session.id }
+                    val otherBookedOnDay = daySessions.firstOrNull { other ->
+                        other.id != session.id &&
+                            other.id in selectedSessionIds &&
+                            existingBookings.any { it.sessionId == other.id }
+                    }
+                    val otherDraftOnDay = daySessions.firstOrNull { other ->
+                        other.id != session.id && other.id in selectedSessionIds
+                    }
+                    val hasAnyActiveBookingOnDay = daySessions.any { other ->
+                        other.id != session.id && existingBookings.any { it.sessionId == other.id }
+                    }
                     val isFullForNew = isFull && !isSelected
                     val canToggle = canEditExisting && !isPastCutoff && !isFullForNew
                     val endTime = studentComputeEndTime(session.timeLabel, session.durationMinutes)
@@ -721,6 +734,7 @@ internal fun StudentAgendaSection(
                                 ConfirmedGreenContainer.copy(alpha = 0.55f)
                             isSelected -> NewShapeGoldMuted
                             myWaitlistEntry != null -> PendingAmberContainer.copy(alpha = 0.4f)
+                            otherBookedOnDay != null -> CharcoalSurface.copy(alpha = 0.7f)
                             else -> CharcoalSurface
                         },
                         shape = MaterialTheme.shapes.medium,
@@ -730,6 +744,7 @@ internal fun StudentAgendaSection(
                                 existingForSession?.status == BookingStatus.CONFIRMED.name && isSelected -> ConfirmedGreen
                                 isSelected -> NewShapeGold
                                 myWaitlistEntry != null -> PendingAmber
+                                otherBookedOnDay != null -> HairlineBorder.copy(alpha = 0.6f)
                                 else -> HairlineBorder
                             }
                         ),
@@ -737,16 +752,30 @@ internal fun StudentAgendaSection(
                             .fillMaxWidth()
                             .clip(MaterialTheme.shapes.medium)
                             .clickable(enabled = canToggle) {
-                                if (!isSelected && weeklyLimit > 0 && selectedSessionIds.size >= weeklyLimit) {
+                                if (isSelected) {
+                                    selectedSessionIds = selectedSessionIds - session.id
+                                } else if (otherBookedOnDay != null) {
+                                    Toast.makeText(
+                                        context,
+                                        "Só podes marcar 1 treino por dia. Já tens treino às ${otherBookedOnDay.timeLabel} — usa 'Trocar' para mudar a hora.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } else if (otherDraftOnDay != null) {
+                                    val dayIds = daySessions.map { it.id }.toSet()
+                                    selectedSessionIds = (selectedSessionIds - dayIds) + session.id
+                                    Toast.makeText(
+                                        context,
+                                        "Horário deste dia atualizado para ${session.timeLabel} (máx. 1 treino por dia).",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else if (weeklyLimit > 0 && selectedSessionIds.size >= weeklyLimit) {
                                     Toast.makeText(
                                         context,
                                         "Atingiste o limite semanal do teu pacote ($weeklyLimit treino(s)/semana).",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 } else {
-                                    selectedSessionIds =
-                                        if (isSelected) selectedSessionIds - session.id
-                                        else selectedSessionIds + session.id
+                                    selectedSessionIds = selectedSessionIds + session.id
                                 }
                             }
                             .testTag("student_session_${session.id}")
@@ -796,15 +825,26 @@ internal fun StudentAgendaSection(
                                     )
                                     Text(
                                         text = session.note.ifBlank {
-                                            if (isSelected) "Toca para desmarcar"
-                                            else if (isFull) "Horário completo"
-                                            else "Toca para selecionar"
+                                            when {
+                                                isSelected -> "Toca para desmarcar"
+                                                isFull -> "Horário completo"
+                                                otherBookedOnDay != null -> "Já tens treino neste dia às ${otherBookedOnDay.timeLabel} (máx. 1/dia)"
+                                                otherDraftOnDay != null -> "Toca para mudar para este horário (máx. 1/dia)"
+                                                else -> "Toca para selecionar"
+                                            }
                                         },
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = TextSecondaryDark,
+                                        color = if (session.note.isBlank() && !isSelected && otherBookedOnDay != null) PendingAmber else TextSecondaryDark,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    if (session.note.isNotBlank() && !isSelected && otherBookedOnDay != null) {
+                                        Text(
+                                            text = "Já tens treino neste dia às ${otherBookedOnDay.timeLabel} (máx. 1/dia)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = PendingAmber
+                                        )
+                                    }
                                     if (isPastCutoff) {
                                         Text(
                                             text = "Fechado (menos de ${state.settings.formatCutoffLabel()})",
@@ -935,6 +975,13 @@ internal fun StudentAgendaSection(
                                         ) {
                                             Text("Sair da espera", color = DangerRed, fontWeight = FontWeight.Bold)
                                         }
+                                    } else if (hasAnyActiveBookingOnDay) {
+                                        Text(
+                                            text = "Já tens treino neste dia (máx. 1/dia)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = PendingAmber,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
                                     } else {
                                         TextButton(
                                             onClick = { viewModel.joinWaitlist(session.id, currentWeek.weekKey, student.id) },
@@ -998,12 +1045,23 @@ internal fun StudentAgendaSection(
                 item {
                     Spacer(Modifier.height(4.dp))
                     GoldPrimaryButton(
-                        text = if (existingBookings.isEmpty()) "Marcar treinos (${selectedSessionIds.size})"
-                        else "Guardar alterações (${selectedSessionIds.size})",
+                        text = when {
+                            bookingActionBusy -> "A guardar..."
+                            existingBookings.isEmpty() -> "Marcar treinos (${selectedSessionIds.size})"
+                            else -> "Guardar alterações (${selectedSessionIds.size})"
+                        },
                         icon = Icons.Default.Check,
-                        enabled = canEditExisting && (selectedSessionIds.isNotEmpty() || existingBookings.isNotEmpty()),
+                        enabled = !bookingActionBusy && canEditExisting && (selectedSessionIds.isNotEmpty() || existingBookings.isNotEmpty()),
                         onClick = {
-                            if (weeklyLimit > 0 && selectedSessionIds.size > weeklyLimit) {
+                            if (bookingActionBusy) return@GoldPrimaryButton
+                            val selectedDays = selectedSessionIds.mapNotNull { sessionMap[it]?.dayOfWeek }
+                            if (selectedDays.size != selectedDays.distinct().size) {
+                                Toast.makeText(
+                                    context,
+                                    "Só podes marcar 1 treino por dia. Remove o horário duplicado antes de guardar.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else if (weeklyLimit > 0 && selectedSessionIds.size > weeklyLimit) {
                                 Toast.makeText(
                                     context,
                                     "O teu pacote permite até $weeklyLimit treino(s) por semana.",
@@ -1019,7 +1077,11 @@ internal fun StudentAgendaSection(
                     Spacer(Modifier.height(8.dp))
                     DarkSecondaryButton(
                         text = "Esta semana não posso",
-                        onClick = { viewModel.markStudentUnavailable(currentWeek.weekKey, student.id) },
+                        onClick = {
+                            if (!bookingActionBusy) {
+                                viewModel.markStudentUnavailable(currentWeek.weekKey, student.id)
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -1648,9 +1710,17 @@ internal fun StudentAgendaSection(
     swapTarget?.let { (booking, oldSession) ->
         val weekKey = booking.weekKey
         val weekLabel = weekMap[weekKey]?.label ?: weekKey
-        val bookedIdsInWeek = state.bookings
-            .filter { it.weekKey == weekKey && it.clientId == student.id && it.status != BookingStatus.CANCELLED.name }
-            .map { it.sessionId }
+        val activeWeekBookings = state.bookings.filter {
+            it.weekKey == weekKey &&
+                it.clientId == student.id &&
+                it.status != BookingStatus.CANCELLED.name &&
+                it.sessionId in sessionMap
+        }
+        val bookedIdsInWeek = activeWeekBookings.map { it.sessionId }.toSet()
+        // Days where the student already has ANOTHER workout (max 1 workout per day)
+        val otherBookedDays = activeWeekBookings
+            .filter { it.sessionId != oldSession.id }
+            .mapNotNull { sessionMap[it.sessionId]?.dayOfWeek }
             .toSet()
         val now = System.currentTimeMillis()
         val candidates = visibleSessions
@@ -1658,6 +1728,7 @@ internal fun StudentAgendaSection(
                 s.weekKey == weekKey &&
                     s.id != oldSession.id &&
                     s.id !in bookedIdsInWeek &&
+                    s.dayOfWeek !in otherBookedDays &&
                     (s.startMillis <= 0L || now < s.startMillis) &&
                     (cutoffMs <= 0L || s.startMillis <= 0L || now <= s.startMillis - cutoffMs) &&
                     state.bookings.count { it.sessionId == s.id && it.status == BookingStatus.CONFIRMED.name } < s.capacity
@@ -1672,7 +1743,7 @@ internal fun StudentAgendaSection(
                 Column {
                     Text("Trocar horário do treino", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
                     Text(
-                        text = "A trocar: ${oldSession.dateLabel} às ${oldSession.timeLabel.replace(":", "h")}",
+                        text = "A trocar: ${oldSession.dateLabel} às ${oldSession.timeLabel.replace(":", "h")} · Máx. 1 treino/dia",
                         style = MaterialTheme.typography.bodySmall,
                         color = NewShapeGoldBright
                     )
