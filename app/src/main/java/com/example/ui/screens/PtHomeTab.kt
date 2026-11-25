@@ -30,7 +30,9 @@ fun PtHomeTab(
     state: StudioUiState,
     viewModel: NewShapeViewModel,
     requestedSubTab: Pair<Int, Int>? = null,
-    onJumpToPtApprovals: () -> Unit = {}
+    onJumpToPtApprovals: () -> Unit = {},
+    onJumpToFidelizacoes: () -> Unit = {},
+    onJumpToAttendance: () -> Unit = {}
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) }
     val subTabs = listOf("Por confirmar", "Marcações", "Semanas", "Respostas", "Mensagens", "Definições")
@@ -71,7 +73,9 @@ fun PtHomeTab(
                 state = state,
                 viewModel = viewModel,
                 onJumpToResponses = { selectedSubTab = 3 },
-                onJumpToPtApprovals = onJumpToPtApprovals
+                onJumpToPtApprovals = onJumpToPtApprovals,
+                onJumpToFidelizacoes = onJumpToFidelizacoes,
+                onJumpToAttendance = onJumpToAttendance
             )
             1 -> PtMarcacoesSection(state = state, viewModel = viewModel)
             2 -> SemanasSection(state = state, viewModel = viewModel)
@@ -87,7 +91,9 @@ private fun PorConfirmarSection(
     state: StudioUiState,
     viewModel: NewShapeViewModel,
     onJumpToResponses: () -> Unit,
-    onJumpToPtApprovals: () -> Unit
+    onJumpToPtApprovals: () -> Unit,
+    onJumpToFidelizacoes: () -> Unit,
+    onJumpToAttendance: () -> Unit
 ) {
     val context = LocalContext.current
     val activeWeek = state.activeWeek
@@ -105,6 +111,13 @@ private fun PorConfirmarSection(
 
     val unreadAlerts = remember(state.ptNotifications) {
         state.ptNotifications.filter { !it.read }
+    }
+    val expiringFidsCount = remember(state.fidelizacoes) {
+        val now = System.currentTimeMillis()
+        state.fidelizacoes.count { ((it.endDateMillis - now) / 86_400_000L).toInt() <= 30 }
+    }
+    val inactiveStudentsCount = remember(state.clients, state.sessions, state.bookings) {
+        countInactiveActiveStudents(state.clients, state.sessions, state.bookings, 7)
     }
 
     LazyColumn(
@@ -143,6 +156,80 @@ private fun PorConfirmarSection(
                             modifier = Modifier.testTag("home_jump_pt_approvals_btn")
                         ) {
                             Text("Gerir", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (expiringFidsCount > 0) {
+            item {
+                Surface(
+                    color = PendingAmberContainer,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, PendingAmber.copy(alpha = 0.7f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "$expiringFidsCount fidelização(ões) a terminar (≤30d)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = NewShapeGoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Envia mensagem de renovação pelo WhatsApp.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimaryDark
+                            )
+                        }
+                        TextButton(
+                            onClick = onJumpToFidelizacoes,
+                            modifier = Modifier.testTag("home_jump_fidelizacoes_btn")
+                        ) {
+                            Text("Ver", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (inactiveStudentsCount > 0) {
+            item {
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, PendingAmber.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "$inactiveStudentsCount aluno(s) inativo(s) (≥7 dias)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimaryDark,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Consulta a assiduidade e faz check-in rápido.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                        TextButton(
+                            onClick = onJumpToAttendance,
+                            modifier = Modifier.testTag("home_jump_attendance_btn")
+                        ) {
+                            Text("Assiduidade", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

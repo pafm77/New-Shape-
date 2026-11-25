@@ -1338,10 +1338,25 @@ private fun StudentAssessmentScreen(
                 )
             }
         }
+        item {
+            StudentConsistencyCard(
+                clientId = student.id,
+                bookings = state.bookings,
+                sessions = state.sessions
+            )
+        }
         assessmentDashboardItems(
             assessments = assessments,
             onDelete = { id -> viewModel.deletePhysicalAssessment(id) }
         )
+        item {
+            StrengthEvolutionChartCard(
+                clientId = student.id,
+                workoutLoadLogs = state.workoutLoadLogs,
+                workoutPlans = state.workoutPlans,
+                workoutPlanItems = state.workoutPlanItems
+            )
+        }
     }
 
     if (showNewDialog) {

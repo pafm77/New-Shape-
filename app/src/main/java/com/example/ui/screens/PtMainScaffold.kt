@@ -393,9 +393,17 @@ fun PtMainScaffold(
                                 requestedSubTab = requestedHomeSubTab,
                                 onJumpToPtApprovals = {
                                     if (state.isSuperAdmin) {
-                                        mgmtInitialSubTab = 3
+                                        mgmtInitialSubTab = 4
                                         selectedTab = 5
                                     }
+                                },
+                                onJumpToFidelizacoes = {
+                                    mgmtInitialSubTab = if (state.isSuperAdmin) 2 else 1
+                                    selectedTab = 5
+                                },
+                                onJumpToAttendance = {
+                                    mgmtInitialSubTab = if (state.isSuperAdmin) 1 else 0
+                                    selectedTab = 5
                                 }
                             )
                             1 -> PtClientsTab(
@@ -404,7 +412,7 @@ fun PtMainScaffold(
                                 onJumpToWorkout = { selectedTab = 2 },
                                 onJumpToNutrition = { selectedTab = 3 },
                                 onJumpToChat = { cid ->
-                                    mgmtInitialSubTab = if (state.isSuperAdmin) 2 else 1
+                                    mgmtInitialSubTab = if (state.isSuperAdmin) 3 else 2
                                     mgmtChatClientId = cid
                                     selectedTab = 5
                                 }
@@ -442,7 +450,7 @@ fun PtMainScaffold(
             },
             onOpenChat = { clientId ->
                 showNotificationsDialog = false
-                mgmtInitialSubTab = if (state.isSuperAdmin) 2 else 1
+                mgmtInitialSubTab = if (state.isSuperAdmin) 3 else 2
                 mgmtChatClientId = clientId
                 selectedTab = 5
             }

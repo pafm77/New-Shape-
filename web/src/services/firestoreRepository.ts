@@ -1568,22 +1568,42 @@ export async function duplicatePreviousWeek(
   uid: string,
   targetWeek: TrainingWeekRecord,
   prevSessions: TrainingSessionRecord[],
-  existingTargetSessions: TrainingSessionRecord[]
-): Promise<{ added: number; createdSessions: TrainingSessionRecord[] }> {
+  existingTargetSessions: TrainingSessionRecord[],
+  prevBookings: BookingRecord[] = [],
+  existingTargetBookings: BookingRecord[] = []
+): Promise<{
+  added: number;
+  addedPrivateBookings: number;
+  createdSessions: TrainingSessionRecord[];
+  createdBookings: BookingRecord[];
+}> {
   const writes: Array<[DocumentReference, Record<string, unknown>]> = [];
   const createdSessions: TrainingSessionRecord[] = [];
+  const createdBookings: BookingRecord[] = [];
+  let addedSessions = 0;
+  let addedPrivateBookings = 0;
+
+  const targetSessionByKey = new Map<string, TrainingSessionRecord>();
+  existingTargetSessions.forEach((s) => {
+    const k = `${s.dayOfWeek}|${s.timeLabel}|${Boolean(s.ptPrivatePersonal)}`;
+    if (!targetSessionByKey.has(k)) targetSessionByKey.set(k, s);
+  });
+
+  const existingBookingKeys = new Set<string>(
+    existingTargetBookings
+      .filter((b) => b.status !== 'CANCELLED')
+      .map((b) => `${b.sessionId}|${b.clientId}`)
+  );
+
   prevSessions.forEach((prev) => {
     const [hStr, mStr] = prev.timeLabel.split(':');
     const h = Number(hStr) || 18;
     const m = Number(mStr) || 0;
     const isPrivate = Boolean(prev.ptPrivatePersonal);
-    const exists = existingTargetSessions.some(
-      (s) =>
-        s.dayOfWeek === prev.dayOfWeek &&
-        s.timeLabel === prev.timeLabel &&
-        Boolean(s.ptPrivatePersonal) === isPrivate
-    );
-    if (!exists) {
+    const slotKey = `${prev.dayOfWeek}|${prev.timeLabel}|${isPrivate}`;
+    let targetSession = targetSessionByKey.get(slotKey);
+
+    if (!targetSession) {
       const s = createSessionModel(
         uid,
         targetWeek.weekKey,
@@ -1605,11 +1625,60 @@ export async function duplicatePreviousWeek(
           updatedAt: serverTimestamp(),
         },
       ]);
-      createdSessions.push({ id: ref.id, ...s, ptPrivatePersonal: isPrivate });
+      targetSession = { id: ref.id, ...s, ptPrivatePersonal: isPrivate };
+      createdSessions.push(targetSession);
+      targetSessionByKey.set(slotKey, targetSession);
+      addedSessions += 1;
+    }
+
+    // Also duplicate confirmed/active student bookings attached to private 1-on-1 PT sessions
+    if (isPrivate && targetSession) {
+      const activePrevBookings = prevBookings.filter(
+        (b) => b.sessionId === prev.id && b.status !== 'CANCELLED'
+      );
+      activePrevBookings.forEach((prevB) => {
+        const bkKey = `${targetSession!.id}|${prevB.clientId}`;
+        if (!existingBookingKeys.has(bkKey)) {
+          existingBookingKeys.add(bkKey);
+          const bRef = doc(subcol(uid, 'bookings'));
+          const nowMs = Date.now();
+          writes.push([
+            bRef,
+            {
+              userId: uid,
+              sessionId: targetSession!.id,
+              weekKey: targetWeek.weekKey,
+              clientId: prevB.clientId,
+              status: 'CONFIRMED',
+              attendanceStatus: '',
+              requestedAtMillis: nowMs,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            },
+          ]);
+          createdBookings.push({
+            id: bRef.id,
+            userId: uid,
+            sessionId: targetSession!.id,
+            weekKey: targetWeek.weekKey,
+            clientId: prevB.clientId,
+            status: 'CONFIRMED',
+            attendanceStatus: '',
+            requestedAtMillis: nowMs,
+          });
+          addedPrivateBookings += 1;
+        }
+      });
     }
   });
+
   if (writes.length > 0) await commitWrites(writes);
-  return { added: writes.length, createdSessions };
+  return {
+    added: addedSessions,
+    addedPrivateBookings,
+    createdSessions,
+    createdBookings,
+  };
 }
 
 export async function createPrivatePersonalSessionAndBooking(

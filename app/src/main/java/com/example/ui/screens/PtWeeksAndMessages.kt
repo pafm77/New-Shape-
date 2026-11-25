@@ -143,10 +143,10 @@ fun SemanasSection(
                             modifier = Modifier.weight(1f)
                         )
                         DarkSecondaryButton(
-                            text = "Duplicar",
+                            text = "Duplicar ant.",
                             icon = Icons.Default.ContentCopy,
                             onClick = { viewModel.duplicatePreviousWeek(activeWeek) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).testTag("duplicate_prev_week_btn")
                         )
                         DarkSecondaryButton(
                             text = "CSV",
@@ -334,15 +334,26 @@ fun SemanasSection(
 
         if (filteredWeekSessions.isEmpty()) {
             item {
-                EmptyStateBox(
-                    icon = Icons.Default.CalendarMonth,
-                    title = if (visibilityFilter == "PRIVATE") "Sem horários personalizados (Só PT)" else "Sem treinos nesta semana",
-                    subtitle = if (visibilityFilter == "PRIVATE") {
-                        "Toca em '+ Pers. (Só PT)' acima para criar horários ocultos dos alunos."
-                    } else {
-                        "Toca em '+ Novo treino' ou 'Duplicar' para criar os horários."
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    EmptyStateBox(
+                        icon = Icons.Default.CalendarMonth,
+                        title = if (visibilityFilter == "PRIVATE") "Sem horários personalizados (Só PT)" else "Sem treinos nesta semana",
+                        subtitle = if (visibilityFilter == "PRIVATE") {
+                            "Toca em '+ Pers. (Só PT)' acima para criar horários ocultos dos alunos."
+                        } else {
+                            "Copia todos os treinos (incluindo horários privados PT e dias fixos) da semana anterior com 1 toque."
+                        }
+                    )
+                    if (visibilityFilter != "PRIVATE" && activeWeek != null) {
+                        GoldPrimaryButton(
+                            text = "Duplicar semana anterior (1 toque)",
+                            icon = Icons.Default.ContentCopy,
+                            onClick = { viewModel.duplicatePreviousWeek(activeWeek) },
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = "empty_week_duplicate_prev_btn"
+                        )
                     }
-                )
+                }
             }
         } else {
             val todayCal = Calendar.getInstance()

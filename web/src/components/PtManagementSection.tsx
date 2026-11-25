@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Award,
   Check,
   CheckCheck,
@@ -16,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  BookingRecord,
   ChatMessageRecord,
   ClientRecord,
   FidelizacaoRecord,
@@ -23,6 +25,7 @@ import {
   PtAccountRecord,
   PtNotificationRecord,
   StudioSettingsRecord,
+  TrainingSessionRecord,
   TrainingType,
 } from '../types/studio';
 import {
@@ -55,13 +58,22 @@ import { RegisterPaymentModal, SplitPaymentFidelizacaoModal } from './PtClientsS
 import { FinanceChart } from './FinanceChart';
 import { FinanceAdminTools } from './FinanceAdminTools';
 import { AppInstallGuideSubTab } from './AppInstallGuideSubTab';
+import { PtAttendanceSubTab, computeInactiveStudentsCount } from './PtAttendanceSubTab';
 
-export type ManagementSubTab = 'finance' | 'team' | 'fidelizacao' | 'chat' | 'guide';
+export type ManagementSubTab =
+  | 'finance'
+  | 'attendance'
+  | 'team'
+  | 'fidelizacao'
+  | 'chat'
+  | 'guide';
 
 interface PtManagementSectionProps {
   uid: string;
   isSuperAdmin: boolean;
   clients: ClientRecord[];
+  sessions?: TrainingSessionRecord[];
+  bookings?: BookingRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   chatMessages: ChatMessageRecord[];
@@ -79,6 +91,8 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
   uid,
   isSuperAdmin,
   clients,
+  sessions = [],
+  bookings = [],
   payments,
   fidelizacoes,
   chatMessages,
@@ -121,20 +135,51 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
     [chatMessages]
   );
 
+  const inactiveStudentsCount = useMemo(
+    () => computeInactiveStudentsCount(clients, sessions, bookings, 7),
+    [clients, sessions, bookings]
+  );
+
+  const expiringFidCount = useMemo(() => {
+    const now = Date.now();
+    return fidelizacoes.filter((f) => {
+      const daysLeft = Math.floor((f.endDateMillis - now) / 86_400_000);
+      return daysLeft <= 30;
+    }).length;
+  }, [fidelizacoes]);
+
   const tabs: Array<{ id: ManagementSubTab; label: string; badge?: number }> = isSuperAdmin
     ? [
         { id: 'finance', label: 'Finanças' },
+        {
+          id: 'attendance',
+          label: 'Assiduidade',
+          badge: inactiveStudentsCount > 0 ? inactiveStudentsCount : undefined,
+        },
+        {
+          id: 'fidelizacao',
+          label: 'Fidelizações',
+          badge: expiringFidCount > 0 ? expiringFidCount : undefined,
+        },
+        { id: 'chat', label: 'Chat', badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         {
           id: 'team',
           label: 'Equipa PT',
           badge: pendingPtCount > 0 ? pendingPtCount : undefined,
         },
-        { id: 'fidelizacao', label: 'Fidelizações' },
-        { id: 'chat', label: 'Chat', badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         { id: 'guide', label: 'Guia App (PDF)' },
       ]
     : [
-        { id: 'fidelizacao', label: 'Fidelizações' },
+        {
+          id: 'attendance',
+          label: 'Assiduidade',
+          badge: inactiveStudentsCount > 0 ? inactiveStudentsCount : undefined,
+        },
+        {
+          id: 'fidelizacao',
+          label: 'Fidelizações',
+          badge: expiringFidCount > 0 ? expiringFidCount : undefined,
+        },
         { id: 'chat', label: 'Chat', badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         { id: 'guide', label: 'Guia App (PDF)' },
       ];
@@ -143,7 +188,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
     <div className="space-y-4">
       <div
         className={`grid gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5 ${
-          isSuperAdmin ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-3'
+          isSuperAdmin ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-4'
         }`}
       >
         {tabs.map((t) => (
@@ -185,6 +230,15 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
         />
       )}
 
+      {subTab === 'attendance' && (
+        <PtAttendanceSubTab
+          clients={clients}
+          sessions={sessions}
+          bookings={bookings}
+          onOpenWhatsApp={onOpenWhatsApp}
+        />
+      )}
+
       {isSuperAdmin && subTab === 'team' && (
         <TeamApprovalSubTab ptAccounts={ptAccounts} onBanner={onBanner} />
       )}
@@ -195,6 +249,7 @@ export const PtManagementSection: React.FC<PtManagementSectionProps> = ({
           isSuperAdmin={isSuperAdmin}
           clients={clients}
           fidelizacoes={fidelizacoes}
+          onOpenWhatsApp={onOpenWhatsApp}
           onBanner={onBanner}
         />
       )}
@@ -1118,13 +1173,45 @@ const FidelizacaoSubTab: React.FC<{
   isSuperAdmin: boolean;
   clients: ClientRecord[];
   fidelizacoes: FidelizacaoRecord[];
+  onOpenWhatsApp: (phone: string | null, msg: string) => void;
   onBanner: (msg: string) => void;
-}> = ({ uid, isSuperAdmin, clients, fidelizacoes, onBanner }) => {
+}> = ({ uid, isSuperAdmin, clients, fidelizacoes, onOpenWhatsApp, onBanner }) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<FidelizacaoRecord | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'expiring' | 'expired'>('all');
+
+  const now = Date.now();
+  const buildRenewalMessage = (f: FidelizacaoRecord, client?: ClientRecord) => {
+    const rawName = client?.name || 'aluno';
+    const firstName = rawName.trim().split(' ')[0] || rawName;
+    const endLabel = formatShortDate(f.endDateMillis);
+    const daysLeft = Math.floor((f.endDateMillis - now) / 86_400_000);
+    if (daysLeft < 0) {
+      return `Olá ${firstName}! A tua fidelização de ${f.durationMonths} meses na New Shape terminou em ${endLabel}. Vamos combinar a renovação para continuares a evoluir connosco? 💪`;
+    }
+    return `Olá ${firstName}! A tua fidelização de ${f.durationMonths} meses na New Shape termina em ${endLabel} (faltam ${daysLeft} dias). Vamos combinar a renovação para manteres o teu ritmo? 💪`;
+  };
+
+  const { expiringSoon, expiredList } = useMemo(() => {
+    const expiring: FidelizacaoRecord[] = [];
+    const expired: FidelizacaoRecord[] = [];
+    fidelizacoes.forEach((f) => {
+      const daysLeft = Math.floor((f.endDateMillis - now) / 86_400_000);
+      if (daysLeft < 0) expired.push(f);
+      else if (daysLeft <= 30) expiring.push(f);
+    });
+    expiring.sort((a, b) => a.endDateMillis - b.endDateMillis);
+    expired.sort((a, b) => b.endDateMillis - a.endDateMillis);
+    return { expiringSoon: expiring, expiredList: expired };
+  }, [fidelizacoes, now]);
+
+  const urgentAlerts = useMemo(
+    () => [...expiringSoon, ...expiredList],
+    [expiringSoon, expiredList]
+  );
 
   const filteredFidelizacoes = useMemo(() => {
     const q = searchQuery
@@ -1132,16 +1219,21 @@ const FidelizacaoSubTab: React.FC<{
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '');
-    if (!q) return fidelizacoes;
-    return fidelizacoes.filter((f) => {
-      const client = clientMap.get(f.clientId);
-      const haystack = `${client?.name || ''} ${client?.phone || ''} ${f.notes || ''} ${f.durationMonths} meses`
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '');
-      return haystack.includes(q);
-    });
-  }, [fidelizacoes, clientMap, searchQuery]);
+    return fidelizacoes
+      .filter((f) => {
+        const daysLeft = Math.floor((f.endDateMillis - now) / 86_400_000);
+        if (statusFilter === 'expiring' && (daysLeft < 0 || daysLeft > 30)) return false;
+        if (statusFilter === 'expired' && daysLeft >= 0) return false;
+        if (!q) return true;
+        const client = clientMap.get(f.clientId);
+        const haystack = `${client?.name || ''} ${client?.phone || ''} ${f.notes || ''} ${f.durationMonths} meses`
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+        return haystack.includes(q);
+      })
+      .sort((a, b) => a.endDateMillis - b.endDateMillis);
+  }, [fidelizacoes, clientMap, searchQuery, statusFilter, now]);
 
   return (
     <div className="space-y-4">
@@ -1149,7 +1241,7 @@ const FidelizacaoSubTab: React.FC<{
         <div>
           <h2 className="text-xl font-bold text-[#F4F4F5]">Fidelizações (6 / 12 meses)</h2>
           <p className="text-xs text-[#A1A1AA]">
-            Acompanha contratos ativos, progresso e datas de renovação
+            Acompanha contratos ativos, alertas dos próximos 30 dias e renovação por WhatsApp
           </p>
         </div>
         <GoldButton
@@ -1164,25 +1256,108 @@ const FidelizacaoSubTab: React.FC<{
         </GoldButton>
       </div>
 
+      {/* Alert Banner for expiring <=30 days or expired contracts */}
+      {urgentAlerts.length > 0 && (
+        <BrandCard highlight>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-[#F59E0B]" />
+              <h3 className="text-sm font-bold text-[#FACC15]">
+                Renovações Prioritárias ({urgentAlerts.length})
+              </h3>
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-[11px]">
+              {expiringSoon.length > 0 && (
+                <StatusPill tone="amber">{expiringSoon.length} a terminar (≤30d)</StatusPill>
+              )}
+              {expiredList.length > 0 && (
+                <StatusPill tone="red">{expiredList.length} expirada(s)</StatusPill>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {urgentAlerts.slice(0, 5).map((f) => {
+              const client = clientMap.get(f.clientId);
+              const daysLeft = Math.floor((f.endDateMillis - now) / 86_400_000);
+              return (
+                <div
+                  key={f.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F59E0B]/40 bg-[#242429] px-3 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-bold text-[#F4F4F5]">
+                        {client?.name || 'Aluno'}
+                      </span>
+                      <StatusPill tone={daysLeft < 0 ? 'red' : 'amber'}>
+                        {daysLeft < 0 ? 'Expirada' : `Termina em ${daysLeft}d`}
+                      </StatusPill>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+                      {f.durationMonths} meses · Fim: {formatShortDate(f.endDateMillis)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenWhatsApp(client?.phone || null, buildRenewalMessage(f, client))
+                    }
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-[#25D366]/50 bg-[#25D366]/15 px-3 py-1.5 text-xs font-bold text-[#86EFAC] transition hover:bg-[#25D366] hover:text-[#121214]"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    WhatsApp Renovação
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </BrandCard>
+      )}
+
       {fidelizacoes.length > 0 && (
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#A1A1AA]" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Pesquisar aluno por nome, telemóvel ou notas..."
-            className="pl-10 pr-9"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              aria-label="Limpar pesquisa"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-[#A1A1AA] hover:bg-[#242429] hover:text-white"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#A1A1AA]" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Pesquisar aluno por nome, telemóvel ou notas..."
+              className="pl-10 pr-9"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                aria-label="Limpar pesquisa"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-[#A1A1AA] hover:bg-[#242429] hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: 'all' as const, label: `Todas (${fidelizacoes.length})` },
+                { id: 'expiring' as const, label: `≤30 dias (${expiringSoon.length})` },
+                { id: 'expired' as const, label: `Expiradas (${expiredList.length})` },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setStatusFilter(opt.id)}
+                className={`rounded-xl border px-3 py-2 text-xs font-bold transition ${
+                  statusFilter === opt.id
+                    ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1196,20 +1371,24 @@ const FidelizacaoSubTab: React.FC<{
         <EmptyState
           icon={<Search className="h-6 w-6" />}
           title="Nenhum aluno encontrado"
-          subtitle={`Sem fidelizações correspondentes a "${searchQuery.trim()}".`}
+          subtitle={
+            searchQuery.trim()
+              ? `Sem fidelizações correspondentes a "${searchQuery.trim()}".`
+              : 'Sem fidelizações neste filtro.'
+          }
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {filteredFidelizacoes.map((f) => {
             const client = clientMap.get(f.clientId);
-            const now = Date.now();
             const totalMs = Math.max(1, f.endDateMillis - f.startDateMillis);
             const elapsedMs = Math.max(0, Math.min(totalMs, now - f.startDateMillis));
             const pct = Math.round((elapsedMs / totalMs) * 100);
             const daysLeft = Math.floor((f.endDateMillis - now) / 86_400_000);
+            const isUrgent = daysLeft <= 30;
 
             return (
-              <BrandCard key={f.id}>
+              <BrandCard key={f.id} highlight={isUrgent}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -1222,7 +1401,7 @@ const FidelizacaoSubTab: React.FC<{
                       {formatShortDate(f.startDateMillis)} → {formatShortDate(f.endDateMillis)}
                     </p>
                   </div>
-                  <StatusPill tone={daysLeft < 0 ? 'red' : daysLeft < 30 ? 'amber' : 'green'}>
+                  <StatusPill tone={daysLeft < 0 ? 'red' : daysLeft <= 30 ? 'amber' : 'green'}>
                     {daysLeft < 0 ? 'Expirada' : `Faltam ${daysLeft} dias`}
                   </StatusPill>
                 </div>
@@ -1231,7 +1410,13 @@ const FidelizacaoSubTab: React.FC<{
                   <div className="h-2 w-full overflow-hidden rounded-full bg-[#242429]">
                     <div
                       style={{ width: `${pct}%` }}
-                      className="h-full rounded-full bg-[#EAB308]"
+                      className={`h-full rounded-full ${
+                        daysLeft < 0
+                          ? 'bg-[#EF4444]'
+                          : daysLeft <= 30
+                          ? 'bg-[#F59E0B]'
+                          : 'bg-[#EAB308]'
+                      }`}
                     />
                   </div>
                   <div className="mt-1 flex justify-between text-[11px] text-[#A1A1AA]">
@@ -1242,29 +1427,45 @@ const FidelizacaoSubTab: React.FC<{
 
                 {f.notes && <p className="mt-2 text-xs text-[#F4F4F5]">{f.notes}</p>}
 
-                <div className="mt-3 flex justify-end gap-2 border-t border-[#323238] pt-2.5">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#323238] pt-2.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditing(f);
-                      setModalOpen(true);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-[#FACC15] hover:bg-[#242429]"
+                    onClick={() =>
+                      onOpenWhatsApp(client?.phone || null, buildRenewalMessage(f, client))
+                    }
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold transition ${
+                      isUrgent
+                        ? 'border border-[#25D366]/60 bg-[#25D366]/15 text-[#86EFAC] hover:bg-[#25D366] hover:text-[#121214]'
+                        : 'border border-[#323238] bg-[#242429] text-[#86EFAC] hover:border-[#25D366]'
+                    }`}
                   >
-                    <Edit3 className="h-3.5 w-3.5" />
-                    Editar
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    WhatsApp Renovação
                   </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await repo.deleteFidelizacao(uid, f.id);
-                      onBanner('Fidelização removida.');
-                    }}
-                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-[#EF4444] hover:bg-[#3B1518]"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Apagar
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditing(f);
+                        setModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-[#FACC15] hover:bg-[#242429]"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await repo.deleteFidelizacao(uid, f.id);
+                        onBanner('Fidelização removida.');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-[#EF4444] hover:bg-[#3B1518]"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Apagar
+                    </button>
+                  </div>
                 </div>
               </BrandCard>
             );

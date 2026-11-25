@@ -43,11 +43,23 @@ fun PtManagementTab(
     initialSubTab: Int = 0,
     initialChatClientId: String? = null
 ) {
+    val inactiveCount = remember(state.clients, state.sessions, state.bookings) {
+        countInactiveActiveStudents(state.clients, state.sessions, state.bookings, 7)
+    }
+    val expiringFidCount = remember(state.fidelizacoes) {
+        val now = System.currentTimeMillis()
+        state.fidelizacoes.count { fid ->
+            val daysLeft = ((fid.endDateMillis - now) / 86_400_000L).toInt()
+            daysLeft <= 30
+        }
+    }
+
     val subTabs = remember(state.isSuperAdmin, state.pendingPtApprovalsCount, state.unreadPtChatCount) {
         if (state.isSuperAdmin) {
             val teamTitle = if (state.pendingPtApprovalsCount > 0) "Equipa PT (${state.pendingPtApprovalsCount})" else "Equipa PT"
             listOf(
                 "FINANCES" to "Finanças",
+                "ATTENDANCE" to "Assiduidade",
                 "FIDELIZACOES" to "Fidelizações",
                 "CHAT" to "Chat",
                 "TEAM" to teamTitle,
@@ -55,6 +67,7 @@ fun PtManagementTab(
             )
         } else {
             listOf(
+                "ATTENDANCE" to "Assiduidade",
                 "FIDELIZACOES" to "Fidelizações",
                 "CHAT" to "Chat",
                 "GUIDE" to "Guia App (PDF)"
@@ -71,81 +84,54 @@ fun PtManagementTab(
     val currentKey = subTabs[safeIndex].first
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (subTabs.size > 3) {
-            ScrollableTabRow(
-                selectedTabIndex = safeIndex,
-                containerColor = CharcoalSurface,
-                contentColor = NewShapeGold,
-                edgePadding = 12.dp,
-                divider = { HorizontalDivider(color = HairlineBorder) }
-            ) {
-                subTabs.forEachIndexed { idx, (key, title) ->
-                    Tab(
-                        selected = safeIndex == idx,
-                        onClick = {
-                            selectedSubTab = idx
-                            if (key != "CHAT") activeChatClientId = null
-                        },
-                        modifier = Modifier.testTag("pt_mgmt_subtab_$key"),
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = title,
-                                    fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
-                                )
-                                if (key == "CHAT" && state.unreadPtChatCount > 0) {
-                                    Badge(containerColor = DangerRed, contentColor = TextPrimaryDark) {
-                                        Text(state.unreadPtChatCount.toString())
-                                    }
+        ScrollableTabRow(
+            selectedTabIndex = safeIndex,
+            containerColor = CharcoalSurface,
+            contentColor = NewShapeGold,
+            edgePadding = 12.dp,
+            divider = { HorizontalDivider(color = HairlineBorder) }
+        ) {
+            subTabs.forEachIndexed { idx, (key, title) ->
+                val badgeNum = when (key) {
+                    "CHAT" -> state.unreadPtChatCount
+                    "ATTENDANCE" -> inactiveCount
+                    "FIDELIZACOES" -> expiringFidCount
+                    else -> 0
+                }
+                Tab(
+                    selected = safeIndex == idx,
+                    onClick = {
+                        selectedSubTab = idx
+                        if (key != "CHAT") activeChatClientId = null
+                    },
+                    modifier = Modifier.testTag("pt_mgmt_subtab_$key"),
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = title,
+                                fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
+                                color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
+                            )
+                            if (badgeNum > 0) {
+                                Badge(
+                                    containerColor = if (key == "CHAT") DangerRed else PendingAmber,
+                                    contentColor = if (key == "CHAT") TextPrimaryDark else TextOnGold
+                                ) {
+                                    Text(badgeNum.toString())
                                 }
                             }
                         }
-                    )
-                }
-            }
-        } else {
-            TabRow(
-                selectedTabIndex = safeIndex,
-                containerColor = CharcoalSurface,
-                contentColor = NewShapeGold,
-                divider = { HorizontalDivider(color = HairlineBorder) }
-            ) {
-                subTabs.forEachIndexed { idx, (key, title) ->
-                    Tab(
-                        selected = safeIndex == idx,
-                        onClick = {
-                            selectedSubTab = idx
-                            if (key != "CHAT") activeChatClientId = null
-                        },
-                        modifier = Modifier.testTag("pt_mgmt_subtab_$key"),
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = title,
-                                    fontWeight = if (safeIndex == idx) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (safeIndex == idx) NewShapeGold else TextSecondaryDark
-                                )
-                                if (key == "CHAT" && state.unreadPtChatCount > 0) {
-                                    Badge(containerColor = DangerRed, contentColor = TextPrimaryDark) {
-                                        Text(state.unreadPtChatCount.toString())
-                                    }
-                                }
-                            }
-                        }
-                    )
-                }
+                    }
+                )
             }
         }
 
         when (currentKey) {
             "FINANCES" -> if (state.isSuperAdmin) FinancesSection(state = state, viewModel = viewModel)
+            "ATTENDANCE" -> PtAttendanceSection(state = state)
             "FIDELIZACOES" -> FidelizacoesSection(state = state, viewModel = viewModel)
             "CHAT" -> PtChatSection(
                 state = state,
@@ -928,20 +914,63 @@ private fun FidelizacoesSection(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val context = LocalContext.current
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
     var showCreateChooser by remember { mutableStateOf(false) }
     var targetClientForCreate by remember { mutableStateOf<ClientRecord?>(null) }
     var editingFid by remember { mutableStateOf<FidelizacaoRecord?>(null) }
     var searchQuery by remember { mutableStateOf("") }
+    var statusFilter by remember { mutableStateOf("ALL") } // ALL, EXPIRING, EXPIRED
 
-    val filteredFidelizacoes = remember(state.fidelizacoes, clientMap, searchQuery) {
-        val q = searchQuery.trim().lowercase()
-        if (q.isEmpty()) state.fidelizacoes
-        else state.fidelizacoes.filter { fid ->
-            val c = clientMap[fid.clientId]
-            val haystack = "${c?.name.orEmpty()} ${c?.phone.orEmpty()} ${fid.notes} ${fid.durationMonths} meses".lowercase()
-            haystack.contains(q)
+    val now = remember(state.fidelizacoes) { System.currentTimeMillis() }
+
+    fun renewalMessage(fid: FidelizacaoRecord, client: ClientRecord?): String {
+        val rawName = client?.name ?: "aluno"
+        val firstName = rawName.trim().split(" ").firstOrNull().orEmpty().ifBlank { rawName }
+        val endLabel = formatShortDate(fid.endDateMillis)
+        val daysLeft = ((fid.endDateMillis - now) / 86_400_000L).toInt()
+        return if (daysLeft < 0) {
+            "Olá $firstName! A tua fidelização de ${fid.durationMonths} meses na New Shape terminou em $endLabel. Vamos combinar a renovação para continuares a evoluir connosco? 💪"
+        } else {
+            "Olá $firstName! A tua fidelização de ${fid.durationMonths} meses na New Shape termina em $endLabel (faltam $daysLeft dias). Vamos combinar a renovação para manteres o teu ritmo? 💪"
         }
+    }
+
+    val expiringSoon = remember(state.fidelizacoes, now) {
+        state.fidelizacoes
+            .filter {
+                val d = ((it.endDateMillis - now) / 86_400_000L).toInt()
+                d in 0..30
+            }
+            .sortedBy { it.endDateMillis }
+    }
+    val expiredList = remember(state.fidelizacoes, now) {
+        state.fidelizacoes
+            .filter { ((it.endDateMillis - now) / 86_400_000L).toInt() < 0 }
+            .sortedByDescending { it.endDateMillis }
+    }
+    val urgentAlerts = remember(expiringSoon, expiredList) { expiringSoon + expiredList }
+
+    val filteredFidelizacoes = remember(state.fidelizacoes, clientMap, searchQuery, statusFilter, now) {
+        val q = searchQuery.trim().lowercase()
+        state.fidelizacoes
+            .filter { fid ->
+                val daysLeft = ((fid.endDateMillis - now) / 86_400_000L).toInt()
+                when (statusFilter) {
+                    "EXPIRING" -> daysLeft in 0..30
+                    "EXPIRED" -> daysLeft < 0
+                    else -> true
+                }
+            }
+            .filter { fid ->
+                if (q.isEmpty()) true
+                else {
+                    val c = clientMap[fid.clientId]
+                    val haystack = "${c?.name.orEmpty()} ${c?.phone.orEmpty()} ${fid.notes} ${fid.durationMonths} meses".lowercase()
+                    haystack.contains(q)
+                }
+            }
+            .sortedBy { it.endDateMillis }
     }
 
     LazyColumn(
@@ -955,9 +984,9 @@ private fun FidelizacoesSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("Fidelizações", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-                    Text("Contratos de 6 e 12 meses", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                    Text("Contratos, alertas ≤30 dias e renovação WhatsApp", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
                 }
                 GoldPrimaryButton(
                     text = "+ Fidelização",
@@ -967,36 +996,135 @@ private fun FidelizacoesSection(
             }
         }
 
-        if (state.fidelizacoes.isNotEmpty()) {
+        if (urgentAlerts.isNotEmpty()) {
             item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Pesquisar aluno por nome, telemóvel ou notas...") },
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = "Pesquisar aluno",
-                            tint = TextSecondaryDark
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Limpar pesquisa",
-                                    tint = TextSecondaryDark
-                                )
+                BrandCard(highlightBorder = true) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.WarningAmber,
+                                contentDescription = "Renovações prioritárias",
+                                tint = PendingAmber,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Renovações Prioritárias (${urgentAlerts.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = NewShapeGoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        urgentAlerts.take(5).forEach { fid ->
+                            val c = clientMap[fid.clientId]
+                            val daysLeft = ((fid.endDateMillis - now) / 86_400_000L).toInt()
+                            Surface(
+                                color = ElevatedCharcoal,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, (if (daysLeft < 0) DangerRed else PendingAmber).copy(alpha = 0.55f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(c?.name ?: "Aluno", style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                                        Text(
+                                            text = if (daysLeft < 0) "Expirada · Fim ${formatShortDate(fid.endDateMillis)}"
+                                            else "Termina em $daysLeft dias (${formatShortDate(fid.endDateMillis)})",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (daysLeft < 0) DangerRed else PendingAmber
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            openWhatsApp(
+                                                context,
+                                                c?.phone?.ifBlank { null },
+                                                renewalMessage(fid, c),
+                                                state.settings.whatsappWebMode
+                                            )
+                                        },
+                                        modifier = Modifier.testTag("fid_alert_wa_${fid.id}")
+                                    ) {
+                                        Text("Renovar", color = ConfirmedGreen, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("fidelizacoes_search_input"),
-                    colors = darkFieldColors()
-                )
+                    }
+                }
+            }
+        }
+
+        if (state.fidelizacoes.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Pesquisar aluno por nome, telemóvel ou notas...") },
+                        singleLine = true,
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = "Pesquisar aluno",
+                                tint = TextSecondaryDark
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Limpar pesquisa",
+                                        tint = TextSecondaryDark
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("fidelizacoes_search_input"),
+                        colors = darkFieldColors()
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "ALL" to "Todas (${state.fidelizacoes.size})",
+                            "EXPIRING" to "≤30 dias (${expiringSoon.size})",
+                            "EXPIRED" to "Expiradas (${expiredList.size})"
+                        ).forEach { (key, label) ->
+                            FilterChip(
+                                selected = statusFilter == key,
+                                onClick = { statusFilter = key },
+                                label = { Text(label, fontWeight = FontWeight.Bold) },
+                                modifier = Modifier.testTag("fid_filter_${key.lowercase()}"),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = NewShapeGold,
+                                    selectedLabelColor = TextOnGold
+                                )
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -1013,19 +1141,24 @@ private fun FidelizacoesSection(
                 EmptyStateBox(
                     icon = Icons.Default.Search,
                     title = "Nenhum aluno encontrado",
-                    subtitle = "Sem fidelizações correspondentes a \"${searchQuery.trim()}\"."
+                    subtitle = if (searchQuery.isNotBlank()) {
+                        "Sem fidelizações correspondentes a \"${searchQuery.trim()}\"."
+                    } else {
+                        "Sem fidelizações neste filtro."
+                    }
                 )
             }
         } else {
             items(filteredFidelizacoes, key = { it.id }) { fid ->
-                val clientName = clientMap[fid.clientId]?.name ?: "Aluno"
-                val now = System.currentTimeMillis()
+                val client = clientMap[fid.clientId]
+                val clientName = client?.name ?: "Aluno"
                 val totalMs = (fid.endDateMillis - fid.startDateMillis).coerceAtLeast(1L)
                 val elapsedMs = (now - fid.startDateMillis).coerceIn(0L, totalMs)
                 val progress = (elapsedMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
                 val daysLeft = ((fid.endDateMillis - now) / 86_400_000L).toInt()
+                val isUrgent = daysLeft <= 30
 
-                BrandCard {
+                BrandCard(highlightBorder = isUrgent) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1037,8 +1170,8 @@ private fun FidelizacoesSection(
                         }
                         StatusPill(
                             text = if (daysLeft < 0) "Expirada" else "$daysLeft dias rest.",
-                            textColor = if (daysLeft < 0) DangerRed else if (daysLeft < 30) PendingAmber else ConfirmedGreen,
-                            containerColor = if (daysLeft < 0) DangerRedContainer else if (daysLeft < 30) PendingAmberContainer else ConfirmedGreenContainer
+                            textColor = if (daysLeft < 0) DangerRed else if (daysLeft <= 30) PendingAmber else ConfirmedGreen,
+                            containerColor = if (daysLeft < 0) DangerRedContainer else if (daysLeft <= 30) PendingAmberContainer else ConfirmedGreenContainer
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -1053,17 +1186,36 @@ private fun FidelizacoesSection(
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = { progress },
-                        color = NewShapeGold,
+                        color = if (daysLeft < 0) DangerRed else if (daysLeft <= 30) PendingAmber else NewShapeGold,
                         trackColor = ElevatedCharcoal,
                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp))
                     )
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = { editingFid = fid }) {
-                            Text("Editar", color = NewShapeGold)
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        TextButton(
+                            onClick = {
+                                openWhatsApp(
+                                    context,
+                                    client?.phone?.ifBlank { null },
+                                    renewalMessage(fid, client),
+                                    state.settings.whatsappWebMode
+                                )
+                            },
+                            modifier = Modifier.testTag("fid_wa_renew_${fid.id}")
+                        ) {
+                            Text("WhatsApp Renovação", color = ConfirmedGreen, fontWeight = FontWeight.Bold)
                         }
-                        TextButton(onClick = { viewModel.deleteFidelizacao(fid.id) }) {
-                            Text("Apagar", color = DangerRed)
+                        Row {
+                            TextButton(onClick = { editingFid = fid }) {
+                                Text("Editar", color = NewShapeGold)
+                            }
+                            TextButton(onClick = { viewModel.deleteFidelizacao(fid.id) }) {
+                                Text("Apagar", color = DangerRed)
+                            }
                         }
                     }
                 }

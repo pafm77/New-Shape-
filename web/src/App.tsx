@@ -1427,6 +1427,7 @@ export function App() {
               activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
+              fidelizacoes={fidelizacoes}
               waitlistEntries={waitlistEntries}
               weekResponses={weekResponses}
               ptNotifications={ptNotifications}
@@ -1445,6 +1446,14 @@ export function App() {
               onConfirmCard={handleConfirmCard}
               onJumpToTeamApprovals={() => {
                 setMgmtSubTab('team');
+                setPtTab('management');
+              }}
+              onJumpToFidelizacoes={() => {
+                setMgmtSubTab('fidelizacao');
+                setPtTab('management');
+              }}
+              onJumpToAttendance={() => {
+                setMgmtSubTab('attendance');
                 setPtTab('management');
               }}
               onBanner={showBanner}
@@ -1526,6 +1535,11 @@ export function App() {
             <PtAssessmentSection
               clients={clients}
               assessments={assessments}
+              workoutLoadLogs={workoutLoadLogs}
+              workoutPlans={workoutPlans}
+              workoutPlanItems={workoutPlanItems}
+              bookings={bookings}
+              sessions={sessions}
             />
           )}
 
@@ -1534,6 +1548,8 @@ export function App() {
               uid={studioUid}
               isSuperAdmin={isSuperAdmin}
               clients={clients}
+              sessions={sessions}
+              bookings={bookings}
               payments={payments}
               fidelizacoes={fidelizacoes}
               chatMessages={chatMessages}

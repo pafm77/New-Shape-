@@ -87,6 +87,7 @@ import {
 } from './UiPrimitives';
 import { AddFoodToMealModal, DailyMacrosSummaryCard } from './PtNutritionSection';
 import { AssessmentDashboard, NewAssessmentModal } from './PtAssessmentSection';
+import { StrengthEvolutionChartCard, StudentConsistencyCard } from './StudentProgressCharts';
 import { PrivateChatPanel } from './PtManagementSection';
 import { ExerciseProgressModal } from './ExerciseProgressModal';
 import { StudentInstallBanner } from './StudentInstallBanner';
@@ -890,12 +891,25 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   </GoldButton>
                 </div>
               </div>
+              <StudentConsistencyCard
+                clientId={client.id}
+                bookings={bookings}
+                sessions={sessions}
+              />
+
               <AssessmentDashboard
                 assessments={clientAssessments}
                 onDelete={async (id) => {
                   await repo.deletePhysicalAssessment(uid, id);
                   onBanner('Avaliação apagada.');
                 }}
+              />
+
+              <StrengthEvolutionChartCard
+                clientId={client.id}
+                workoutLoadLogs={workoutLoadLogs}
+                workoutPlans={workoutPlans}
+                workoutPlanItems={workoutPlanItems}
               />
 
               {showNewAssessmentModal && (

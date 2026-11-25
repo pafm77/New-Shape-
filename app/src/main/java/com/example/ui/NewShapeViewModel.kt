@@ -672,21 +672,41 @@ class NewShapeViewModel(
             }
             val prevKey = SeedCatalog.formatWeekKey(cal)
             val prevSessions = data.sessions.filter { it.weekKey == prevKey }
+            if (prevSessions.isEmpty()) {
+                _statusBanner.value = "A semana anterior não tem treinos para duplicar."
+                return@launch
+            }
             val existingTarget = data.sessions.filter { it.weekKey == targetWeek.weekKey }
-            repository.duplicatePreviousWeek(targetWeek, prevSessions, existingTarget)
-                .onSuccess { createdSessions ->
-                    val count = createdSessions.size
-                    val mergedSessions = data.sessions + createdSessions
+            val prevBookings = data.bookings.filter { it.weekKey == prevKey }
+            val existingTargetBookings = data.bookings.filter { it.weekKey == targetWeek.weekKey }
+            repository.duplicatePreviousWeek(
+                targetWeek = targetWeek,
+                prevSessions = prevSessions,
+                existingTargetSessions = existingTarget,
+                prevBookings = prevBookings,
+                existingTargetBookings = existingTargetBookings
+            )
+                .onSuccess { res ->
+                    val count = res.createdSessions.size
+                    val privateBookingsCount = res.createdBookings.size
+                    val mergedSessions = data.sessions + res.createdSessions
+                    val mergedBookings = data.bookings + res.createdBookings
                     val fixedCount = repository.applyFixedSchedulesForWeek(
                         targetWeek = targetWeek,
                         clients = data.clients,
                         existingSessions = mergedSessions,
-                        existingBookings = data.bookings,
+                        existingBookings = mergedBookings,
                         weekResponses = data.weekResponses
                     ).getOrNull()?.first ?: 0
-                    val baseMsg = if (count > 0) "$count treinos copiados da semana anterior." else "Sem novos treinos para copiar."
-                    val fixedMsg = if (fixedCount > 0) " · $fixedCount horário(s) fixo(s) enviados para Por confirmar." else ""
-                    _statusBanner.value = "$baseMsg$fixedMsg"
+                    val parts = mutableListOf<String>()
+                    if (count > 0) parts.add("$count treino(s) copiado(s)")
+                    if (privateBookingsCount > 0) parts.add("$privateBookingsCount marcação(ões) privada(s) PT")
+                    if (fixedCount > 0) parts.add("$fixedCount horário(s) fixo(s) em Por confirmar")
+                    _statusBanner.value = if (parts.isEmpty()) {
+                        "Esta semana já tem todos os treinos e horários fixos da semana anterior."
+                    } else {
+                        "Semana duplicada: ${parts.joinToString(" · ")} ✓"
+                    }
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }

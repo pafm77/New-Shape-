@@ -1,6 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { Scale, Trash2 } from 'lucide-react';
-import { ClientRecord, PhysicalAssessmentRecord } from '../types/studio';
+import {
+  BookingRecord,
+  ClientRecord,
+  PhysicalAssessmentRecord,
+  TrainingSessionRecord,
+  WorkoutLoadLogRecord,
+  WorkoutPlanItemRecord,
+  WorkoutPlanRecord,
+} from '../types/studio';
 import {
   bmiClassification,
   calculateBmi,
@@ -18,6 +26,7 @@ import {
   StatusPill,
   Textarea,
 } from './UiPrimitives';
+import { StrengthEvolutionChartCard, StudentConsistencyCard } from './StudentProgressCharts';
 
 type MetricKey = 'weightKg' | 'bmi' | 'bodyFatPct' | 'muscleMassKg' | 'visceralFat' | 'bmrKcal';
 
@@ -33,7 +42,20 @@ const METRICS: { key: MetricKey; label: string; unit: string; decimals: number }
 export const PtAssessmentSection: React.FC<{
   clients: ClientRecord[];
   assessments: PhysicalAssessmentRecord[];
-}> = ({ clients, assessments }) => {
+  workoutLoadLogs?: WorkoutLoadLogRecord[];
+  workoutPlans?: WorkoutPlanRecord[];
+  workoutPlanItems?: WorkoutPlanItemRecord[];
+  bookings?: BookingRecord[];
+  sessions?: TrainingSessionRecord[];
+}> = ({
+  clients,
+  assessments,
+  workoutLoadLogs = [],
+  workoutPlans = [],
+  workoutPlanItems = [],
+  bookings = [],
+  sessions = [],
+}) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
   const [selectedClientId, setSelectedClientId] = useState(activeClients[0]?.id || '');
   const effectiveClient =
@@ -52,9 +74,9 @@ export const PtAssessmentSection: React.FC<{
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-bold text-[#F4F4F5]">Avaliação Física</h2>
+        <h2 className="text-xl font-bold text-[#F4F4F5]">Avaliação & Progresso Visual</h2>
         <p className="text-xs text-[#A1A1AA]">
-          Apenas leitura · Preenchido pelo aluno (IMC, TMB e gráfico de evolução)
+          Evolução de peso, % massa gorda, massa muscular, cargas nos exercícios e assiduidade
         </p>
       </div>
 
@@ -77,7 +99,24 @@ export const PtAssessmentSection: React.FC<{
         </select>
       </BrandCard>
 
+      {effectiveClient && (
+        <StudentConsistencyCard
+          clientId={effectiveClient.id}
+          bookings={bookings}
+          sessions={sessions}
+        />
+      )}
+
       <AssessmentDashboard assessments={clientAssessments} />
+
+      {effectiveClient && (
+        <StrengthEvolutionChartCard
+          clientId={effectiveClient.id}
+          workoutLoadLogs={workoutLoadLogs}
+          workoutPlans={workoutPlans}
+          workoutPlanItems={workoutPlanItems}
+        />
+      )}
     </div>
   );
 };

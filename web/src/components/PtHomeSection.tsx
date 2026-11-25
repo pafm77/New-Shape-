@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
+  Award,
   Bell,
   Check,
   ChevronDown,
@@ -28,6 +30,7 @@ import {
   BookingRecord,
   BookingWithSession,
   ClientRecord,
+  FidelizacaoRecord,
   MessageTemplateRecord,
   PendingConfirmationCard,
   PtNotificationRecord,
@@ -75,6 +78,7 @@ import {
   Textarea,
 } from './UiPrimitives';
 import { PtMarcacoesView } from './PtMarcacoesView';
+import { computeInactiveStudentsCount } from './PtAttendanceSubTab';
 
 export type PtHomeSubTab = 'confirm' | 'marcacoes' | 'weeks' | 'responses' | 'messages' | 'settings';
 
@@ -86,6 +90,7 @@ interface PtHomeSectionProps {
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  fidelizacoes?: FidelizacaoRecord[];
   waitlistEntries: WaitlistEntryRecord[];
   weekResponses: WeekResponseRecord[];
   ptNotifications: PtNotificationRecord[];
@@ -99,6 +104,8 @@ interface PtHomeSectionProps {
   onWhatsAppOpened: () => void;
   onConfirmCard: (card: PendingConfirmationCard) => Promise<void>;
   onJumpToTeamApprovals: () => void;
+  onJumpToFidelizacoes?: () => void;
+  onJumpToAttendance?: () => void;
   onBanner: (msg: string) => void;
 }
 
@@ -109,6 +116,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   activeWeek,
   sessions,
   bookings,
+  fidelizacoes = [],
   waitlistEntries,
   weekResponses,
   ptNotifications,
@@ -122,6 +130,8 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   onWhatsAppOpened,
   onConfirmCard,
   onJumpToTeamApprovals,
+  onJumpToFidelizacoes,
+  onJumpToAttendance,
   onBanner,
 }) => {
   const [subTab, setSubTab] = useState<PtHomeSubTab>('confirm');
@@ -176,6 +186,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
           activeWeek={activeWeek}
           sessions={sessions}
           bookings={bookings}
+          fidelizacoes={fidelizacoes}
           weekResponses={weekResponses}
           ptNotifications={ptNotifications}
           pendingPtCount={pendingPtCount}
@@ -185,6 +196,8 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
           lockedByWhatsApp={lockedByWhatsApp}
           onJumpToResponses={() => setSubTab('responses')}
           onJumpToTeamApprovals={onJumpToTeamApprovals}
+          onJumpToFidelizacoes={onJumpToFidelizacoes}
+          onJumpToAttendance={onJumpToAttendance}
           onConfirmCard={onConfirmCard}
           onOpenWhatsApp={(phone, msg) => openWa(phone, msg, true)}
           onBanner={onBanner}
@@ -268,6 +281,7 @@ const PorConfirmarView: React.FC<{
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  fidelizacoes: FidelizacaoRecord[];
   weekResponses: WeekResponseRecord[];
   ptNotifications: PtNotificationRecord[];
   pendingPtCount: number;
@@ -277,6 +291,8 @@ const PorConfirmarView: React.FC<{
   lockedByWhatsApp: boolean;
   onJumpToResponses: () => void;
   onJumpToTeamApprovals: () => void;
+  onJumpToFidelizacoes?: () => void;
+  onJumpToAttendance?: () => void;
   onConfirmCard: (card: PendingConfirmationCard) => Promise<void>;
   onOpenWhatsApp: (phone: string | null, msg: string) => void;
   onBanner: (msg: string) => void;
@@ -287,6 +303,7 @@ const PorConfirmarView: React.FC<{
   activeWeek,
   sessions,
   bookings,
+  fidelizacoes,
   weekResponses,
   ptNotifications,
   pendingPtCount,
@@ -296,6 +313,8 @@ const PorConfirmarView: React.FC<{
   lockedByWhatsApp,
   onJumpToResponses,
   onJumpToTeamApprovals,
+  onJumpToFidelizacoes,
+  onJumpToAttendance,
   onConfirmCard,
   onOpenWhatsApp,
   onBanner,
@@ -305,6 +324,20 @@ const PorConfirmarView: React.FC<{
     () => ptNotifications.filter((n) => !n.read),
     [ptNotifications]
   );
+
+  const expiringFidsCount = useMemo(() => {
+    const now = Date.now();
+    return fidelizacoes.filter((f) => {
+      const daysLeft = Math.floor((f.endDateMillis - now) / 86_400_000);
+      return daysLeft <= 30;
+    }).length;
+  }, [fidelizacoes]);
+
+  const inactiveStudentsCount = useMemo(
+    () => computeInactiveStudentsCount(clients, sessions, bookings, 7),
+    [clients, sessions, bookings]
+  );
+
   const weekBookedIds = useMemo(() => {
     if (!activeWeek) return new Set<string>();
     return new Set(
@@ -343,6 +376,59 @@ const PorConfirmarView: React.FC<{
             </div>
           </div>
           <GoldButton onClick={onJumpToTeamApprovals}>Ver pedidos PT</GoldButton>
+        </div>
+      )}
+
+      {(expiringFidsCount > 0 || inactiveStudentsCount > 0) && (
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          {expiringFidsCount > 0 && (
+            <div className="flex items-center justify-between gap-2.5 rounded-2xl border border-[#F59E0B]/60 bg-[#3D2E10]/50 px-3.5 py-3">
+              <div className="flex items-start gap-2 min-w-0">
+                <Award className="mt-0.5 h-4 w-4 shrink-0 text-[#FACC15]" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-[#FDE68A]">
+                    {expiringFidsCount} fidelização(ões) a terminar (≤30d)
+                  </p>
+                  <p className="text-[11px] text-[#D4D4D8]">
+                    Envia mensagem de renovação pelo WhatsApp
+                  </p>
+                </div>
+              </div>
+              {onJumpToFidelizacoes && (
+                <button
+                  type="button"
+                  onClick={onJumpToFidelizacoes}
+                  className="shrink-0 rounded-xl bg-[#EAB308] px-2.5 py-1.5 text-[11px] font-extrabold text-[#121214]"
+                >
+                  Ver
+                </button>
+              )}
+            </div>
+          )}
+          {inactiveStudentsCount > 0 && (
+            <div className="flex items-center justify-between gap-2.5 rounded-2xl border border-[#F59E0B]/50 bg-[#242429] px-3.5 py-3">
+              <div className="flex items-start gap-2 min-w-0">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#F59E0B]" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-[#F4F4F5]">
+                    {inactiveStudentsCount} aluno(s) inativo(s) (≥7 dias)
+                  </p>
+                  <p className="text-[11px] text-[#A1A1AA]">
+                    Consulta assiduidade e faz check-in rápido
+                  </p>
+                </div>
+              </div>
+              {onJumpToAttendance && (
+                <button
+                  type="button"
+                  onClick={onJumpToAttendance}
+                  className="shrink-0 rounded-xl border border-[#EAB308]/60 bg-[#3D3314]/60 px-2.5 py-1.5 text-[11px] font-extrabold text-[#FACC15]"
+                >
+                  Assiduidade
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -755,6 +841,7 @@ const SemanasView: React.FC<{
   const [showFixedManager, setShowFixedManager] = useState(false);
   const [fixedManagerInitialClientId, setFixedManagerInitialClientId] = useState<string>('');
   const [applyingFixed, setApplyingFixed] = useState(false);
+  const [duplicatingWeek, setDuplicatingWeek] = useState(false);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   const [editSession, setEditSession] = useState<TrainingSessionRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TrainingSessionRecord | null>(null);
@@ -819,35 +906,54 @@ const SemanasView: React.FC<{
   };
 
   const handleDuplicatePrev = async () => {
-    if (!activeWeek) return;
-    const prevMonday = new Date(activeWeek.startDateMillis);
-    prevMonday.setDate(prevMonday.getDate() - 7);
-    const { weekKey: prevKey } = await repo.ensureWeekExists(uid, prevMonday.getTime());
-    const prevSessions = sessions.filter((s) => s.weekKey === prevKey);
-    if (prevSessions.length === 0) {
-      onBanner('A semana anterior não tem treinos para duplicar.');
-      return;
+    if (!activeWeek || duplicatingWeek) return;
+    setDuplicatingWeek(true);
+    try {
+      const prevMonday = new Date(activeWeek.startDateMillis);
+      prevMonday.setDate(prevMonday.getDate() - 7);
+      const { weekKey: prevKey } = await repo.ensureWeekExists(uid, prevMonday.getTime());
+      const prevSessions = sessions.filter((s) => s.weekKey === prevKey);
+      if (prevSessions.length === 0) {
+        onBanner('A semana anterior não tem treinos para duplicar.');
+        return;
+      }
+      const prevBookings = bookings.filter((b) => b.weekKey === prevKey);
+      const targetBookings = bookings.filter((b) => b.weekKey === activeWeek.weekKey);
+      const { added, addedPrivateBookings, createdSessions, createdBookings } =
+        await repo.duplicatePreviousWeek(
+          uid,
+          activeWeek,
+          prevSessions,
+          weekSessions,
+          prevBookings,
+          targetBookings
+        );
+      const mergedSessions = [...sessions, ...createdSessions];
+      const mergedBookings = [...bookings, ...createdBookings];
+      const fixedRes = await repo.applyFixedSchedulesForWeek(
+        uid,
+        activeWeek,
+        clients,
+        mergedSessions,
+        mergedBookings,
+        weekResponses
+      );
+      const parts: string[] = [];
+      if (added > 0) parts.push(`${added} treino(s) copiado(s)`);
+      if (addedPrivateBookings > 0) {
+        parts.push(`${addedPrivateBookings} marcação(ões) privada(s) PT`);
+      }
+      if (fixedRes.createdBookings > 0) {
+        parts.push(`${fixedRes.createdBookings} horário(s) fixo(s) em Por confirmar`);
+      }
+      onBanner(
+        parts.length > 0
+          ? `Semana duplicada: ${parts.join(' · ')} ✓`
+          : 'Esta semana já tem todos os treinos e horários fixos da semana anterior.'
+      );
+    } finally {
+      setDuplicatingWeek(false);
     }
-    const { added, createdSessions } = await repo.duplicatePreviousWeek(
-      uid,
-      activeWeek,
-      prevSessions,
-      weekSessions
-    );
-    const mergedSessions = [...sessions, ...createdSessions];
-    const fixedRes = await repo.applyFixedSchedulesForWeek(
-      uid,
-      activeWeek,
-      clients,
-      mergedSessions,
-      bookings,
-      weekResponses
-    );
-    const extraFixedMsg =
-      fixedRes.createdBookings > 0
-        ? ` · ${fixedRes.createdBookings} horário(s) fixo(s) enviados para Por confirmar.`
-        : '';
-    onBanner(`${added} treino(s) copiado(s) da semana anterior.${extraFixedMsg}`);
   };
 
   const handleExportCsv = () => {
@@ -963,9 +1069,9 @@ const SemanasView: React.FC<{
               >
                 {activeWeek.published ? 'Despublicar' : 'Publicar'}
               </SecondaryButton>
-              <SecondaryButton onClick={handleDuplicatePrev}>
+              <SecondaryButton disabled={duplicatingWeek} onClick={handleDuplicatePrev}>
                 <Copy className="h-4 w-4" />
-                Duplicar
+                {duplicatingWeek ? 'A duplicar...' : 'Duplicar anterior'}
               </SecondaryButton>
               <SecondaryButton onClick={handleExportCsv}>
                 <Download className="h-4 w-4" />
@@ -1104,19 +1210,29 @@ const SemanasView: React.FC<{
       </div>
 
       {filteredWeekSessions.length === 0 ? (
-        <EmptyState
-          icon={<Calendar className="h-6 w-6" />}
-          title={
-            visibilityFilter === 'PRIVATE'
-              ? 'Sem horários personalizados (Só PT) nesta semana'
-              : 'Sem treinos nesta semana'
-          }
-          subtitle={
-            visibilityFilter === 'PRIVATE'
-              ? "Carrega em 'Horário Personalizado (Só PT)' para criar horários ocultos dos alunos."
-              : "Carrega em '+ Novo treino' ou 'Duplicar' para criar os horários."
-          }
-        />
+        <div className="space-y-3">
+          <EmptyState
+            icon={<Calendar className="h-6 w-6" />}
+            title={
+              visibilityFilter === 'PRIVATE'
+                ? 'Sem horários personalizados (Só PT) nesta semana'
+                : 'Sem treinos nesta semana'
+            }
+            subtitle={
+              visibilityFilter === 'PRIVATE'
+                ? "Carrega em 'Horário Personalizado (Só PT)' para criar horários ocultos dos alunos."
+                : 'Copia todos os treinos (incluindo horários privados PT e dias fixos) da semana anterior com 1 clique.'
+            }
+          />
+          {visibilityFilter !== 'PRIVATE' && activeWeek && (
+            <div className="flex justify-center">
+              <GoldButton disabled={duplicatingWeek} onClick={handleDuplicatePrev}>
+                <Copy className="h-4 w-4" />
+                {duplicatingWeek ? 'A duplicar semana anterior...' : 'Duplicar semana anterior (1 clique)'}
+              </GoldButton>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="space-y-2.5">
           {filteredWeekSessions.map((session) => {

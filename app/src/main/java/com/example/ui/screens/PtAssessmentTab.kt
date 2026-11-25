@@ -89,8 +89,8 @@ fun PtAssessmentTab(
     ) {
         item {
             Column {
-                Text("Avaliação Física", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
-                Text("Apenas leitura · Preenchido pelo aluno", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                Text("Avaliação & Progresso", style = MaterialTheme.typography.headlineMedium, color = TextPrimaryDark)
+                Text("Peso, %MG, massa muscular, cargas nos exercícios e assiduidade", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
             }
         }
 
@@ -128,10 +128,31 @@ fun PtAssessmentTab(
             }
         }
 
+        if (selectedClient != null) {
+            item {
+                StudentConsistencyCard(
+                    clientId = selectedClient.id,
+                    bookings = state.bookings,
+                    sessions = state.sessions
+                )
+            }
+        }
+
         assessmentDashboardItems(
             assessments = clientAssessments,
             onDelete = null
         )
+
+        if (selectedClient != null) {
+            item {
+                StrengthEvolutionChartCard(
+                    clientId = selectedClient.id,
+                    workoutLoadLogs = state.workoutLoadLogs,
+                    workoutPlans = state.workoutPlans,
+                    workoutPlanItems = state.workoutPlanItems
+                )
+            }
+        }
     }
 }
 

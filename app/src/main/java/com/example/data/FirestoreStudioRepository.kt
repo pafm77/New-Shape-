@@ -1316,25 +1316,53 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
+    data class DuplicateWeekResult(
+        val createdSessions: List<TrainingSessionRecord>,
+        val createdBookings: List<BookingRecord>
+    )
+
     suspend fun duplicatePreviousWeek(
         targetWeek: TrainingWeekRecord,
         prevSessions: List<TrainingSessionRecord>,
-        existingTargetSessions: List<TrainingSessionRecord>
-    ): Result<List<TrainingSessionRecord>> = try {
+        existingTargetSessions: List<TrainingSessionRecord>,
+        prevBookings: List<BookingRecord> = emptyList(),
+        existingTargetBookings: List<BookingRecord> = emptyList()
+    ): Result<DuplicateWeekResult> = try {
         val uid = requireUserId()
         val batch = db.batch()
-        val created = mutableListOf<TrainingSessionRecord>()
+        val createdSessions = mutableListOf<TrainingSessionRecord>()
+        val createdBookings = mutableListOf<BookingRecord>()
+
+        val targetSessionByKey = mutableMapOf<String, TrainingSessionRecord>()
+        existingTargetSessions.forEach { s ->
+            val key = "${s.dayOfWeek}|${s.timeLabel}|${s.ptPrivatePersonal}"
+            targetSessionByKey.putIfAbsent(key, s)
+        }
+        val existingBookingKeys = existingTargetBookings
+            .filter { it.status != BookingStatus.CANCELLED.name }
+            .map { "${it.sessionId}|${it.clientId}" }
+            .toMutableSet()
+
+        var writeCount = 0
         prevSessions.forEach { prev ->
             val parts = prev.timeLabel.split(":")
             val h = parts.getOrNull(0)?.toIntOrNull() ?: 18
             val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
-            val exists = existingTargetSessions.any {
-                it.dayOfWeek == prev.dayOfWeek &&
-                    it.timeLabel == prev.timeLabel &&
-                    it.ptPrivatePersonal == prev.ptPrivatePersonal
-            }
-            if (!exists) {
-                val s = SeedCatalog.createSession(uid, targetWeek.weekKey, targetWeek.startDateMillis, prev.dayOfWeek, h, m, prev.durationMinutes, prev.capacity, prev.note)
+            val slotKey = "${prev.dayOfWeek}|${prev.timeLabel}|${prev.ptPrivatePersonal}"
+            var targetSession = targetSessionByKey[slotKey]
+
+            if (targetSession == null) {
+                val s = SeedCatalog.createSession(
+                    uid,
+                    targetWeek.weekKey,
+                    targetWeek.startDateMillis,
+                    prev.dayOfWeek,
+                    h,
+                    m,
+                    prev.durationMinutes,
+                    prev.capacity,
+                    prev.note
+                )
                 val ref = userDoc(uid).collection("sessions").document()
                 batch.set(
                     ref,
@@ -1353,11 +1381,54 @@ class FirestoreStudioRepository(
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 )
-                created.add(s.copy(id = ref.id, ptPrivatePersonal = prev.ptPrivatePersonal))
+                targetSession = s.copy(id = ref.id, ptPrivatePersonal = prev.ptPrivatePersonal)
+                createdSessions.add(targetSession)
+                targetSessionByKey[slotKey] = targetSession
+                writeCount++
+            }
+
+            if (prev.ptPrivatePersonal) {
+                val activePrevBookings = prevBookings.filter {
+                    it.sessionId == prev.id && it.status != BookingStatus.CANCELLED.name
+                }
+                activePrevBookings.forEach { prevB ->
+                    val bkKey = "${targetSession.id}|${prevB.clientId}"
+                    if (existingBookingKeys.add(bkKey)) {
+                        val bRef = userDoc(uid).collection("bookings").document()
+                        val nowMs = System.currentTimeMillis()
+                        batch.set(
+                            bRef,
+                            mapOf(
+                                "userId" to uid,
+                                "sessionId" to targetSession.id,
+                                "weekKey" to targetWeek.weekKey,
+                                "clientId" to prevB.clientId,
+                                "status" to BookingStatus.CONFIRMED.name,
+                                "attendanceStatus" to "",
+                                "requestedAtMillis" to nowMs,
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        )
+                        createdBookings.add(
+                            BookingRecord(
+                                id = bRef.id,
+                                userId = uid,
+                                sessionId = targetSession.id,
+                                weekKey = targetWeek.weekKey,
+                                clientId = prevB.clientId,
+                                status = BookingStatus.CONFIRMED.name,
+                                attendanceStatus = "",
+                                requestedAtMillis = nowMs
+                            )
+                        )
+                        writeCount++
+                    }
+                }
             }
         }
-        if (created.isNotEmpty()) batch.commit().await()
-        Result.success(created)
+        if (writeCount > 0) batch.commit().await()
+        Result.success(DuplicateWeekResult(createdSessions, createdBookings))
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
