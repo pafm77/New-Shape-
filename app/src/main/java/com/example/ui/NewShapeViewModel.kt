@@ -425,6 +425,24 @@ class NewShapeViewModel(
         }
     }
 
+    fun deleteClientAccount(client: ClientRecord, onDone: (Boolean) -> Unit = {}) {
+        if (!isSuperAdmin) return
+        viewModelScope.launch {
+            repository.deleteClientAccount(client.id)
+                .onSuccess {
+                    if (_activeStudentId.value == client.id) {
+                        _activeStudentId.value = null
+                    }
+                    _statusBanner.value = "Conta de ${client.name} eliminada permanentemente."
+                    onDone(true)
+                }
+                .onFailure {
+                    _statusBanner.value = it.localizedMessage ?: "Erro ao eliminar conta do aluno."
+                    onDone(false)
+                }
+        }
+    }
+
     fun selectStudentProfile(studentId: String) {
         _activeStudentId.value = studentId
     }

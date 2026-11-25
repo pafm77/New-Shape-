@@ -3,6 +3,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -1211,6 +1212,61 @@ export async function updateClientPinHash(
     loginPinHash: loginPinHash.trim().slice(0, 160),
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function deleteClientAccount(uid: string, clientId: string): Promise<void> {
+  if (!clientId) return;
+  const refsToDelete: DocumentReference[] = [];
+  const clientScopedCollections = [
+    'bookings',
+    'week_responses',
+    'waitlist_entries',
+    'payments',
+    'fidelizacoes',
+    'workout_load_logs',
+    'nutrition_entries',
+    'physical_assessments',
+    'chat_messages',
+    'pt_notifications',
+    'portal_members',
+  ];
+
+  for (const colName of clientScopedCollections) {
+    try {
+      const snap = await getDocs(query(subcol(uid, colName), where('clientId', '==', clientId)));
+      snap.forEach((d) => refsToDelete.push(d.ref));
+    } catch {
+      // Ignore optional/empty subcollections if inaccessible
+    }
+  }
+
+  try {
+    const plansSnap = await getDocs(
+      query(subcol(uid, 'workout_plans'), where('clientId', '==', clientId))
+    );
+    for (const planDoc of plansSnap.docs) {
+      refsToDelete.push(planDoc.ref);
+      try {
+        const itemsSnap = await getDocs(
+          query(subcol(uid, 'workout_plan_items'), where('planId', '==', planDoc.id))
+        );
+        itemsSnap.forEach((itemDoc) => refsToDelete.push(itemDoc.ref));
+      } catch {
+        // Ignore
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  refsToDelete.push(doc(subcol(uid, 'clients'), clientId));
+
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < refsToDelete.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    refsToDelete.slice(i, i + CHUNK_SIZE).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
 }
 
 export async function applyFixedSchedulesForWeek(

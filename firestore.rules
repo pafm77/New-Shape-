@@ -331,7 +331,7 @@ service cloud.firestore {
                              )
                            )
                          );
-        allow delete: if isOwner(userId) && isValidId(clientId);
+        allow delete: if isOwner(userId) && isSuperAdmin() && isValidId(clientId);
       }
 
       match /weeks/{weekId} {

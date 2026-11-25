@@ -111,6 +111,7 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   const [showNewModal, setShowNewModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [payTarget, setPayTarget] = useState<ClientRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ClientRecord | null>(null);
 
   const recentMonths = useMemo(() => buildRecentMonthOptions(), []);
   const currentMonthYear = recentMonths[0].monthYear;
@@ -409,13 +410,25 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                   ) : (
                     <span className="text-[11px] text-[#71717A]">Perfil & Assiduidade</span>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedClientId(c.id)}
-                    className="text-xs font-semibold text-[#A1A1AA] hover:text-white"
-                  >
-                    Ver perfil →
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(c)}
+                        className="inline-flex items-center gap-1 text-xs font-bold text-[#EF4444] hover:underline"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Eliminar
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedClientId(c.id)}
+                      className="text-xs font-semibold text-[#A1A1AA] hover:text-white"
+                    >
+                      Ver perfil →
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -470,6 +483,22 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                   ).toFixed(2)}/mês)${extraSuffix} registado e adicionado às Fidelizações!`
                 : `Pagamento registado${extraSuffix ? ` (${extraParts.join(' + ')})` : ''}!`
             );
+          }}
+        />
+      )}
+
+      {isSuperAdmin && deleteTarget && (
+        <DeleteClientConfirmModal
+          client={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={async () => {
+            const name = deleteTarget.name;
+            await repo.deleteClientAccount(uid, deleteTarget.id);
+            if (selectedClientId === deleteTarget.id) {
+              setSelectedClientId(null);
+            }
+            setDeleteTarget(null);
+            onBanner(`Conta de ${name} eliminada permanentemente.`);
           }}
         />
       )}
@@ -547,6 +576,7 @@ const ClientProfileView: React.FC<{
   const [savingFixed, setSavingFixed] = useState(false);
   const [showPay, setShowPay] = useState(false);
   const [splitTargetPayment, setSplitTargetPayment] = useState<PaymentRecord | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const monthPayment = payments.find(
     (p) => p.monthYear === currentMonthYear && p.paid && !isExtraFeePayment(p.note)
@@ -1261,7 +1291,45 @@ const ClientProfileView: React.FC<{
           </div>
         </BrandCard>
       )}
+
+      {isSuperAdmin && (
+        <div className="rounded-2xl border border-[#EF4444]/40 bg-[#3B1518]/35 p-4 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-[#FCA5A5]">
+                Zona de Administrador · Eliminar Conta
+              </h3>
+              <p className="text-xs text-[#A1A1AA]">
+                Remove permanentemente a conta de {client.name} e todos os seus dados (marcações,
+                planos de treino, nutrição, avaliações, pagamentos, fidelizações e chat).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[#EF4444] bg-[#EF4444]/15 px-3.5 py-2 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#EF4444] hover:text-white"
+            >
+              <Trash2 className="h-4 w-4" />
+              Eliminar conta
+            </button>
+          </div>
+        </div>
+      )}
         </>
+      )}
+
+      {isSuperAdmin && showDeleteConfirm && (
+        <DeleteClientConfirmModal
+          client={client}
+          onClose={() => setShowDeleteConfirm(false)}
+          onConfirm={async () => {
+            const name = client.name;
+            await repo.deleteClientAccount(uid, client.id);
+            setShowDeleteConfirm(false);
+            onBack();
+            onBanner(`Conta de ${name} eliminada permanentemente.`);
+          }}
+        />
       )}
 
       {isSuperAdmin && showPay && (
@@ -1306,6 +1374,70 @@ const ClientProfileView: React.FC<{
         />
       )}
     </div>
+  );
+};
+
+const DeleteClientConfirmModal: React.FC<{
+  client: ClientRecord;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}> = ({ client, onClose, onConfirm }) => {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Modal
+      open
+      title="Eliminar conta do aluno?"
+      subtitle="Esta ação é permanente e não pode ser anulada."
+      onClose={() => {
+        if (!deleting) onClose();
+      }}
+    >
+      <div className="space-y-4">
+        <div className="rounded-xl border border-[#EF4444]/40 bg-[#3B1518]/50 p-3.5 text-xs space-y-1.5">
+          <p className="font-bold text-[#FCA5A5]">
+            {client.name}
+            {client.phone ? ` · ${formatPhoneDisplay(client.phone)}` : ''}
+          </p>
+          <p className="text-[#D4D4D8] leading-relaxed">
+            Serão eliminados permanentemente o perfil do aluno, marcações, planos de treino,
+            registos de cargas, nutrição, avaliações físicas, pagamentos, fidelizações e mensagens
+            de chat.
+          </p>
+        </div>
+
+        {error && <p className="text-xs font-medium text-[#EF4444]">{error}</p>}
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <SecondaryButton disabled={deleting} onClick={onClose}>
+            Cancelar
+          </SecondaryButton>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={async () => {
+              setDeleting(true);
+              setError(null);
+              try {
+                await onConfirm();
+              } catch (err) {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : 'Não foi possível eliminar a conta. Tenta novamente.'
+                );
+                setDeleting(false);
+              }
+            }}
+            className="inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl bg-[#EF4444] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#DC2626] disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {deleting ? 'A eliminar...' : 'Eliminar permanentemente'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 };
 

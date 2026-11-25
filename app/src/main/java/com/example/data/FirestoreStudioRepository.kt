@@ -896,6 +896,78 @@ class FirestoreStudioRepository(
         return updateClient(client.copy(active = active))
     }
 
+    suspend fun deleteClientAccount(clientId: String): Result<Unit> {
+        var path = "users/unknown/clients/$clientId"
+        return try {
+            val uid = requireUserId()
+            require(clientId.isNotBlank())
+            val userRef = userDoc(uid)
+            val clientDocRef = userRef.collection("clients").document(clientId)
+            path = clientDocRef.path
+
+            val refsToDelete = mutableListOf<com.google.firebase.firestore.DocumentReference>()
+            val clientScopedCollections = listOf(
+                "bookings",
+                "week_responses",
+                "waitlist_entries",
+                "payments",
+                "fidelizacoes",
+                "workout_load_logs",
+                "nutrition_entries",
+                "physical_assessments",
+                "chat_messages",
+                "pt_notifications",
+                "portal_members"
+            )
+            for (colName in clientScopedCollections) {
+                try {
+                    val snap = userRef.collection(colName)
+                        .whereEqualTo("clientId", clientId)
+                        .get()
+                        .await()
+                    snap.documents.forEach { refsToDelete.add(it.reference) }
+                } catch (_: Exception) {
+                    // Ignore optional/empty subcollections
+                }
+            }
+
+            try {
+                val plansSnap = userRef.collection("workout_plans")
+                    .whereEqualTo("clientId", clientId)
+                    .get()
+                    .await()
+                for (planDoc in plansSnap.documents) {
+                    refsToDelete.add(planDoc.reference)
+                    try {
+                        val itemsSnap = userRef.collection("workout_plan_items")
+                            .whereEqualTo("planId", planDoc.id)
+                            .get()
+                            .await()
+                        itemsSnap.documents.forEach { refsToDelete.add(it.reference) }
+                    } catch (_: Exception) {
+                        // Ignore
+                    }
+                }
+            } catch (_: Exception) {
+                // Ignore
+            }
+
+            refsToDelete.add(clientDocRef)
+
+            refsToDelete.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { ref -> batch.delete(ref) }
+                batch.commit().await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateClientFixedSlots(clientId: String, fixedSlots: List<String>): Result<Unit> {
         var path = "users/unknown/clients/$clientId"
         return try {

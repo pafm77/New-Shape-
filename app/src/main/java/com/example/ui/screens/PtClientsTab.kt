@@ -63,6 +63,7 @@ fun PtClientsTab(
     var showNewClientDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var paymentTargetClient by remember { mutableStateOf<ClientRecord?>(null) }
+    var deleteTargetClient by remember { mutableStateOf<ClientRecord?>(null) }
 
     val selectedClient = selectedClientId?.let { id -> state.clients.find { it.id == id } }
     if (selectedClient != null) {
@@ -446,7 +447,19 @@ fun PtClientsTab(
                                     )
                                 }
                             }
-                            Text("Ver perfil →", style = MaterialTheme.typography.labelLarge, color = TextSecondaryDark)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (state.isSuperAdmin) {
+                                    TextButton(
+                                        onClick = { deleteTargetClient = client },
+                                        modifier = Modifier.testTag("delete_client_${client.id}")
+                                    ) {
+                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Eliminar conta", tint = DangerRed, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Eliminar", color = DangerRed, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Text("Ver perfil →", style = MaterialTheme.typography.labelLarge, color = TextSecondaryDark)
+                            }
                         }
                     }
                 }
@@ -494,6 +507,20 @@ fun PtClientsTab(
                         joiaEur = joiaEur
                     )
                     paymentTargetClient = null
+                }
+            )
+        }
+        deleteTargetClient?.let { target ->
+            DeleteClientConfirmDialog(
+                client = target,
+                onDismiss = { deleteTargetClient = null },
+                onConfirm = {
+                    viewModel.deleteClientAccount(target) { ok ->
+                        if (ok) {
+                            if (selectedClientId == target.id) selectedClientId = null
+                            deleteTargetClient = null
+                        }
+                    }
                 }
             )
         }
@@ -585,6 +612,7 @@ fun PtClientProfileScreen(
     val donePct = if (markedCount > 0) (presentCount * 100.0 / markedCount) else 0.0
     val absentPct = if (markedCount > 0) (absentCount * 100.0 / markedCount) else 0.0
     var showResetPinConfirm by remember { mutableStateOf(false) }
+    var showDeleteClientConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Header + Profile Tabs
@@ -1266,6 +1294,49 @@ fun PtClientProfileScreen(
                         }
                     }
                 }
+
+                // Zona de Administrador · Eliminar Conta
+                if (state.isSuperAdmin) {
+                    item {
+                        Surface(
+                            color = DangerRedContainer.copy(alpha = 0.55f),
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Zona de Administrador · Eliminar Conta",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = DangerRed,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Remove permanentemente a conta de ${client.name} e todos os dados associados (marcações, planos de treino, nutrição, avaliações, mensalidades, fidelizações e chat).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark
+                                )
+                                OutlinedButton(
+                                    onClick = { showDeleteClientConfirm = true },
+                                    border = BorderStroke(1.dp, DangerRed),
+                                    modifier = Modifier.fillMaxWidth().testTag("profile_delete_client_btn")
+                                ) {
+                                    Icon(
+                                        Icons.Default.DeleteOutline,
+                                        contentDescription = "Eliminar conta do aluno",
+                                        tint = DangerRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Eliminar conta permanentemente", color = DangerRed, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else {
             // Tab 1: Assiduidade
@@ -1454,6 +1525,21 @@ fun PtClientProfileScreen(
                 }
             }
         }
+    }
+
+    if (state.isSuperAdmin && showDeleteClientConfirm) {
+        DeleteClientConfirmDialog(
+            client = client,
+            onDismiss = { showDeleteClientConfirm = false },
+            onConfirm = {
+                viewModel.deleteClientAccount(client) { ok ->
+                    if (ok) {
+                        showDeleteClientConfirm = false
+                        onBack()
+                    }
+                }
+            }
+        )
     }
 
     if (state.isSuperAdmin && showPayDialog) {
@@ -2494,4 +2580,75 @@ fun buildRecentMonthOptions(): List<Pair<String, String>> {
         val lbl = "${months[c.get(Calendar.MONTH)]} ${c.get(Calendar.YEAR)}"
         key to lbl
     }
+}
+
+@Composable
+private fun DeleteClientConfirmDialog(
+    client: ClientRecord,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    var deleting by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { if (!deleting) onDismiss() },
+        containerColor = CharcoalSurface,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.DeleteOutline,
+                contentDescription = "Eliminar conta",
+                tint = DangerRed,
+                modifier = Modifier.size(28.dp)
+            )
+        },
+        title = {
+            Text("Eliminar conta do aluno?", color = TextPrimaryDark, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = buildString {
+                        append(client.name)
+                        if (client.phone.isNotBlank()) append(" · ${client.phone}")
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    color = DangerRed,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Esta ação é permanente e não pode ser anulada. Serão eliminados o perfil do aluno, marcações, planos de treino, cargas, nutrição, avaliações físicas, mensalidades, fidelizações e mensagens de chat.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = !deleting,
+                onClick = {
+                    deleting = true
+                    onConfirm()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = DangerRed,
+                    contentColor = TextPrimaryDark
+                ),
+                modifier = Modifier.testTag("confirm_delete_client_btn")
+            ) {
+                Text(
+                    if (deleting) "A eliminar..." else "Eliminar permanentemente",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                enabled = !deleting,
+                onClick = onDismiss,
+                modifier = Modifier.testTag("cancel_delete_client_btn")
+            ) {
+                Text("Cancelar", color = TextSecondaryDark)
+            }
+        }
+    )
 }
