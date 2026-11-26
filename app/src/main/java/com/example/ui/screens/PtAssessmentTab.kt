@@ -63,16 +63,24 @@ enum class AssessmentMetric(val label: String, val unit: String, val decimals: I
 fun PtAssessmentTab(
     state: StudioUiState,
     viewModel: NewShapeViewModel,
-    initialClientId: String? = null
+    initialClientId: String? = null,
+    jumpNonce: Int = 0
 ) {
     val activeClients = remember(state.clients) { state.clients.filter { it.active } }
-    var selectedClientId by remember(activeClients, initialClientId) {
+    var selectedClientId by remember(activeClients) {
         mutableStateOf(
-            initialClientId?.takeIf { id -> activeClients.any { it.id == id } }
+            initialClientId?.takeIf { id -> state.clients.any { it.id == id } }
                 ?: activeClients.firstOrNull()?.id.orEmpty()
         )
     }
-    val selectedClient = activeClients.find { it.id == selectedClientId } ?: activeClients.firstOrNull()
+    LaunchedEffect(initialClientId, jumpNonce, state.clients) {
+        if (!initialClientId.isNullOrBlank() && state.clients.any { it.id == initialClientId }) {
+            selectedClientId = initialClientId
+        }
+    }
+    val selectedClient = activeClients.find { it.id == selectedClientId }
+        ?: state.clients.find { it.id == selectedClientId }
+        ?: activeClients.firstOrNull()
     var dropdownExpanded by remember { mutableStateOf(false) }
 
     val clientAssessments = remember(state.physicalAssessments, selectedClient?.id) {

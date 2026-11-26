@@ -46,8 +46,16 @@ fun PtMainScaffold(
     var homeSubTabNonce by remember { mutableIntStateOf(0) }
     var mgmtInitialSubTab by remember { mutableIntStateOf(0) }
     var mgmtChatClientId by remember { mutableStateOf<String?>(null) }
+    var assessmentClientId by remember { mutableStateOf<String?>(null) }
+    var assessmentJumpNonce by remember { mutableIntStateOf(0) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
     var seenNotificationIds by remember { mutableStateOf<Set<String>?>(null) }
+
+    val openClientAssessment: (String) -> Unit = { clientId ->
+        assessmentClientId = clientId.takeIf { it.isNotBlank() }
+        assessmentJumpNonce += 1
+        selectedTab = 4
+    }
 
     val openPtSettings: () -> Unit = {
         selectedTab = 0
@@ -405,6 +413,9 @@ fun PtMainScaffold(
                                 onJumpToAttendance = {
                                     mgmtInitialSubTab = if (state.isSuperAdmin) 1 else 0
                                     selectedTab = 5
+                                },
+                                onJumpToAssessment = { cid ->
+                                    openClientAssessment(cid)
                                 }
                             )
                             1 -> PtClientsTab(
@@ -420,7 +431,12 @@ fun PtMainScaffold(
                             )
                             2 -> PtTrainingTab(state = state, viewModel = viewModel)
                             3 -> PtNutritionTab(state = state, viewModel = viewModel)
-                            4 -> PtAssessmentTab(state = state, viewModel = viewModel)
+                            4 -> PtAssessmentTab(
+                                state = state,
+                                viewModel = viewModel,
+                                initialClientId = assessmentClientId,
+                                jumpNonce = assessmentJumpNonce
+                            )
                             5 -> PtManagementTab(
                                 state = state,
                                 viewModel = viewModel,
@@ -445,9 +461,9 @@ fun PtMainScaffold(
                 showNotificationsDialog = false
                 openPtSettings()
             },
-            onOpenAssessment = {
+            onOpenAssessment = { clientId ->
                 showNotificationsDialog = false
-                selectedTab = 4
+                openClientAssessment(clientId)
             },
             onOpenChat = { clientId ->
                 showNotificationsDialog = false
@@ -471,7 +487,7 @@ private fun PtNotificationsDialog(
     onMarkAllRead: () -> Unit,
     onDelete: (String) -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenAssessment: () -> Unit,
+    onOpenAssessment: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenTraining: () -> Unit
 ) {
@@ -625,7 +641,7 @@ private fun PtNotificationsDialog(
                                     when {
                                         isChat -> onOpenChat(notif.clientId)
                                         isFeedback -> onOpenTraining()
-                                        else -> onOpenAssessment()
+                                        else -> onOpenAssessment(notif.clientId)
                                     }
                                 }
                         ) {
@@ -685,6 +701,17 @@ private fun PtNotificationsDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.End
                                 ) {
+                                    if (isAssessment && notif.clientId.isNotBlank()) {
+                                        TextButton(
+                                            onClick = {
+                                                if (!notif.read) onMarkRead(notif.id)
+                                                onOpenAssessment(notif.clientId)
+                                            },
+                                            modifier = Modifier.testTag("notif_view_assessment_${notif.id}")
+                                        ) {
+                                            Text("Ver avaliação", color = ConfirmedGreen, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
                                     if (isChat && notif.clientId.isNotBlank()) {
                                         TextButton(
                                             onClick = {

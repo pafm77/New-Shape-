@@ -107,6 +107,7 @@ interface PtHomeSectionProps {
   onJumpToTeamApprovals: () => void;
   onJumpToFidelizacoes?: () => void;
   onJumpToAttendance?: () => void;
+  onJumpToAssessment?: (clientId: string) => void;
   onBanner: (msg: string) => void;
 }
 
@@ -133,6 +134,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   onJumpToTeamApprovals,
   onJumpToFidelizacoes,
   onJumpToAttendance,
+  onJumpToAssessment,
   onBanner,
 }) => {
   const [subTab, setSubTab] = useState<PtHomeSubTab>('confirm');
@@ -199,6 +201,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
           onJumpToTeamApprovals={onJumpToTeamApprovals}
           onJumpToFidelizacoes={onJumpToFidelizacoes}
           onJumpToAttendance={onJumpToAttendance}
+          onJumpToAssessment={onJumpToAssessment}
           onConfirmCard={onConfirmCard}
           onOpenWhatsApp={(phone, msg) => openWa(phone, msg, true)}
           onBanner={onBanner}
@@ -294,6 +297,7 @@ const PorConfirmarView: React.FC<{
   onJumpToTeamApprovals: () => void;
   onJumpToFidelizacoes?: () => void;
   onJumpToAttendance?: () => void;
+  onJumpToAssessment?: (clientId: string) => void;
   onConfirmCard: (card: PendingConfirmationCard) => Promise<void>;
   onOpenWhatsApp: (phone: string | null, msg: string) => void;
   onBanner: (msg: string) => void;
@@ -316,6 +320,7 @@ const PorConfirmarView: React.FC<{
   onJumpToTeamApprovals,
   onJumpToFidelizacoes,
   onJumpToAttendance,
+  onJumpToAssessment,
   onConfirmCard,
   onOpenWhatsApp,
   onBanner,
@@ -491,13 +496,27 @@ const PorConfirmarView: React.FC<{
                   </div>
                   <p className="mt-1 text-xs text-[#D4D4D8]">{n.summary}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => repo.markPtNotificationRead(uid, n.id)}
-                  className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1 text-[11px] font-bold text-[#FACC15] hover:border-[#EAB308]"
-                >
-                  OK
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {n.type === 'ASSESSMENT' && n.clientId && onJumpToAssessment && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void repo.markPtNotificationRead(uid, n.id);
+                        onJumpToAssessment(n.clientId);
+                      }}
+                      className="rounded-lg border border-[#22C55E]/50 bg-[#143524]/40 px-2.5 py-1 text-[11px] font-bold text-[#22C55E] hover:bg-[#143524]"
+                    >
+                      Ver avaliação →
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => repo.markPtNotificationRead(uid, n.id)}
+                    className="rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1 text-[11px] font-bold text-[#FACC15] hover:border-[#EAB308]"
+                  >
+                    OK
+                  </button>
+                </div>
               </div>
             ))}
           </div>

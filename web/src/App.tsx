@@ -272,6 +272,7 @@ export function App() {
     nonce: number;
   } | null>(null);
   const [jumpClientId, setJumpClientId] = useState<string | undefined>(undefined);
+  const [assessmentJumpNonce, setAssessmentJumpNonce] = useState(0);
   const [mgmtSubTab, setMgmtSubTab] = useState<ManagementSubTab>('finance');
   const [showNotifModal, setShowNotifModal] = useState(false);
   const [ptNotifPerm, setPtNotifPerm] = useState(() => getNotificationPermission());
@@ -1491,6 +1492,11 @@ export function App() {
                 setMgmtSubTab('attendance');
                 setPtTab('management');
               }}
+              onJumpToAssessment={(cid) => {
+                setJumpClientId(cid);
+                setAssessmentJumpNonce((n) => n + 1);
+                setPtTab('assessment');
+              }}
               onBanner={showBanner}
             />
           )}
@@ -1576,6 +1582,8 @@ export function App() {
               workoutPlanItems={workoutPlanItems}
               bookings={bookings}
               sessions={sessions}
+              initialClientId={jumpClientId}
+              jumpNonce={assessmentJumpNonce}
             />
           )}
 
@@ -1830,6 +1838,7 @@ export function App() {
                                 void repo.markPtNotificationRead(studioUid, n.id);
                               }
                               setJumpClientId(n.clientId);
+                              setAssessmentJumpNonce((prev) => prev + 1);
                               setPtTab('assessment');
                               setShowNotifModal(false);
                             }}

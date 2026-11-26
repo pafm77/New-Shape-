@@ -32,7 +32,8 @@ fun PtHomeTab(
     requestedSubTab: Pair<Int, Int>? = null,
     onJumpToPtApprovals: () -> Unit = {},
     onJumpToFidelizacoes: () -> Unit = {},
-    onJumpToAttendance: () -> Unit = {}
+    onJumpToAttendance: () -> Unit = {},
+    onJumpToAssessment: (String) -> Unit = {}
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) }
     val subTabs = listOf("Por confirmar", "Marcações", "Semanas", "Respostas", "Mensagens", "Definições")
@@ -81,7 +82,8 @@ fun PtHomeTab(
                 onJumpToResponses = { selectedSubTab = 3 },
                 onJumpToPtApprovals = onJumpToPtApprovals,
                 onJumpToFidelizacoes = onJumpToFidelizacoes,
-                onJumpToAttendance = onJumpToAttendance
+                onJumpToAttendance = onJumpToAttendance,
+                onJumpToAssessment = onJumpToAssessment
             )
             1 -> PtMarcacoesSection(state = state, viewModel = viewModel)
             2 -> SemanasSection(state = state, viewModel = viewModel)
@@ -99,7 +101,8 @@ private fun PorConfirmarSection(
     onJumpToResponses: () -> Unit,
     onJumpToPtApprovals: () -> Unit,
     onJumpToFidelizacoes: () -> Unit,
-    onJumpToAttendance: () -> Unit
+    onJumpToAttendance: () -> Unit,
+    onJumpToAssessment: (String) -> Unit
 ) {
     val context = LocalContext.current
     val activeWeek = state.activeWeek
@@ -315,6 +318,23 @@ private fun PorConfirmarSection(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextPrimaryDark
                                     )
+                                    if (alert.type == "ASSESSMENT" && alert.clientId.isNotBlank()) {
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.markPtNotificationRead(alert.id)
+                                                onJumpToAssessment(alert.clientId)
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                            modifier = Modifier.testTag("home_view_assessment_${alert.id}")
+                                        ) {
+                                            Text(
+                                                "Ver avaliação →",
+                                                color = ConfirmedGreen,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
                                 IconButton(
                                     onClick = { viewModel.markPtNotificationRead(alert.id) },

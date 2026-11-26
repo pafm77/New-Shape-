@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Scale, Trash2 } from 'lucide-react';
 import {
   BookingRecord,
@@ -47,6 +47,8 @@ export const PtAssessmentSection: React.FC<{
   workoutPlanItems?: WorkoutPlanItemRecord[];
   bookings?: BookingRecord[];
   sessions?: TrainingSessionRecord[];
+  initialClientId?: string;
+  jumpNonce?: number;
 }> = ({
   clients,
   assessments,
@@ -55,11 +57,25 @@ export const PtAssessmentSection: React.FC<{
   workoutPlanItems = [],
   bookings = [],
   sessions = [],
+  initialClientId,
+  jumpNonce = 0,
 }) => {
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
-  const [selectedClientId, setSelectedClientId] = useState(activeClients[0]?.id || '');
+  const [selectedClientId, setSelectedClientId] = useState(
+    initialClientId || activeClients[0]?.id || ''
+  );
+
+  useEffect(() => {
+    if (initialClientId && clients.some((c) => c.id === initialClientId)) {
+      setSelectedClientId(initialClientId);
+    }
+  }, [initialClientId, jumpNonce, clients]);
+
   const effectiveClient =
-    activeClients.find((c) => c.id === selectedClientId) || activeClients[0] || null;
+    activeClients.find((c) => c.id === selectedClientId) ||
+    clients.find((c) => c.id === selectedClientId) ||
+    activeClients[0] ||
+    null;
 
   const clientAssessments = useMemo(
     () =>
