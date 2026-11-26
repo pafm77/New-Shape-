@@ -5,6 +5,8 @@ import {
   Cake,
   Calendar,
   Check,
+  ChevronDown,
+  ChevronUp,
   Clock,
   CreditCard,
   Dumbbell,
@@ -13,7 +15,9 @@ import {
   KeyRound,
   Lock,
   LogOut,
+  Maximize2,
   MessageCircle,
+  Minimize2,
   Play,
   Plus,
   Scale,
@@ -229,6 +233,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [completedItemIds, setCompletedItemIds] = useState<Set<string>>(new Set());
   const [restSecondsLeft, setRestSecondsLeft] = useState<number>(0);
   const restIntervalRef = useRef<number | null>(null);
+  const [collapsedPlanIds, setCollapsedPlanIds] = useState<Set<string>>(() => new Set());
+
+  const togglePlanCollapsed = (planId: string) => {
+    setCollapsedPlanIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(planId)) next.delete(planId);
+      else next.add(planId);
+      return next;
+    });
+  };
 
   const visibleSessions = useMemo(
     () => sessions.filter((s) => !s.ptPrivatePersonal),
@@ -714,28 +728,89 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   subtitle="O teu Personal Trainer vai publicar o teu plano de treino aqui."
                 />
               ) : (
-                clientPlans.map((plan) => {
+                <>
+                  {clientPlans.length > 1 && (() => {
+                    const allCollapsed = clientPlans.every((p) => collapsedPlanIds.has(p.id));
+                    return (
+                      <div className="flex items-center justify-between gap-2 px-1">
+                        <span className="text-xs font-semibold text-[#A1A1AA]">
+                          {clientPlans.length} planos de treino
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCollapsedPlanIds(
+                              allCollapsed ? new Set() : new Set(clientPlans.map((p) => p.id))
+                            );
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#323238] bg-[#242429] px-3 py-1.5 text-xs font-bold text-[#FACC15] transition hover:border-[#EAB308]"
+                        >
+                          {allCollapsed ? (
+                            <>
+                              <Maximize2 className="h-3.5 w-3.5" />
+                              Maximizar todos
+                            </>
+                          ) : (
+                            <>
+                              <Minimize2 className="h-3.5 w-3.5" />
+                              Minimizar todos
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {clientPlans.map((plan) => {
                   const items = workoutPlanItems
                     .filter((i) => i.planId === plan.id)
                     .sort((a, b) => a.orderIndex - b.orderIndex);
                   const isExecuting = executingPlanId === plan.id;
                   const doneCount = items.filter((i) => completedItemIds.has(i.id)).length;
+                  const isExpanded = !collapsedPlanIds.has(plan.id);
 
                   return (
                     <BrandCard key={plan.id} highlight>
                       <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
+                        <button
+                          type="button"
+                          onClick={() => togglePlanCollapsed(plan.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
                           <h3 className="text-base font-bold text-[#FACC15]">{plan.title}</h3>
-                          {plan.splitLabel && (
-                            <p className="text-xs text-[#A1A1AA]">{plan.splitLabel}</p>
+                          {(plan.splitLabel || !isExpanded) && (
+                            <p className="text-xs text-[#A1A1AA]">
+                              {[plan.splitLabel, !isExpanded ? `${items.length} exercício(s)` : '']
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </p>
                           )}
                           {isExecuting && (
                             <p className="mt-1 text-xs font-bold text-[#22C55E]">
                               Em execução · {doneCount}/{items.length} exercício(s) concluído(s)
                             </p>
                           )}
-                        </div>
+                        </button>
                         <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => togglePlanCollapsed(plan.id)}
+                            aria-label={isExpanded ? 'Minimizar plano' : 'Maximizar plano'}
+                            title={isExpanded ? 'Minimizar plano' : 'Maximizar plano'}
+                            className="inline-flex items-center gap-1 rounded-lg border border-[#323238] bg-[#242429] px-2.5 py-1.5 text-xs font-bold text-[#FACC15] transition hover:border-[#EAB308]"
+                          >
+                            {isExpanded ? (
+                              <>
+                                <ChevronUp className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Minimizar</span>
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Maximizar</span>
+                              </>
+                            )}
+                          </button>
                           {isExecuting ? (
                             <SecondaryButton
                               onClick={() => {
@@ -760,7 +835,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               </SecondaryButton>
                               <GoldButton
                                 disabled={items.length === 0}
-                                onClick={() => startWorkoutExecution(plan.id, items)}
+                                onClick={() => {
+                                  setCollapsedPlanIds((prev) => {
+                                    if (!prev.has(plan.id)) return prev;
+                                    const next = new Set(prev);
+                                    next.delete(plan.id);
+                                    return next;
+                                  });
+                                  startWorkoutExecution(plan.id, items);
+                                }}
                               >
                                 <Play className="h-3.5 w-3.5" />
                                 Executar Treino
@@ -770,6 +853,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         </div>
                       </div>
 
+                      {isExpanded && (
                       <div className="mt-3 space-y-2.5 border-t border-[#323238] pt-3">
                         {(() => {
                           const blocks = groupWorkoutPlanItems(items);
@@ -889,9 +973,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           });
                         })()}
                       </div>
+                      )}
                     </BrandCard>
                   );
-                })
+                })}
+                </>
               )}
 
               {historyTarget && (

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Calendar, Dumbbell, ExternalLink, Eye, Link2, Plus, Search, Trash2, Unlink, Users, X, Zap } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronUp, Dumbbell, ExternalLink, Eye, Link2, Maximize2, Minimize2, Plus, Search, Trash2, Unlink, Users, X, Zap } from 'lucide-react';
 import {
   BookingRecord,
   ClientRecord,
@@ -91,6 +91,16 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
     item: WorkoutPlanItemRecord;
     clientId: string;
   } | null>(null);
+  const [collapsedPlanIds, setCollapsedPlanIds] = useState<Set<string>>(() => new Set());
+
+  const togglePlanCollapsed = (planId: string) => {
+    setCollapsedPlanIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(planId)) next.delete(planId);
+      else next.add(planId);
+      return next;
+    });
+  };
 
   const todayIso = useMemo(() => getTodayIsoDate(), []);
 
@@ -241,6 +251,44 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
             />
           ) : (
             <div className="space-y-4">
+              {displayedPlans.length > 1 && (() => {
+                const allCollapsed = displayedPlans.every((p) => collapsedPlanIds.has(p.id));
+                return (
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <span className="text-xs font-semibold text-[#A1A1AA]">
+                      {displayedPlans.length} planos de treino
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCollapsedPlanIds((prev) => {
+                          const next = new Set(prev);
+                          if (allCollapsed) {
+                            displayedPlans.forEach((p) => next.delete(p.id));
+                          } else {
+                            displayedPlans.forEach((p) => next.add(p.id));
+                          }
+                          return next;
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#323238] bg-[#242429] px-3 py-1.5 text-xs font-bold text-[#FACC15] transition hover:border-[#EAB308]"
+                    >
+                      {allCollapsed ? (
+                        <>
+                          <Maximize2 className="h-3.5 w-3.5" />
+                          Maximizar todos
+                        </>
+                      ) : (
+                        <>
+                          <Minimize2 className="h-3.5 w-3.5" />
+                          Minimizar todos
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })()}
+
               {displayedPlans.map((plan) => {
                 const items = workoutPlanItems
                   .filter((i) => i.planId === plan.id)
@@ -249,27 +297,57 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                 const scheduledDate = (plan.availableFromDate || '').trim();
                 const isScheduledFuture =
                   !isDraft && /^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) && scheduledDate > todayIso;
+                const isExpanded = !collapsedPlanIds.has(plan.id);
 
                 return (
                   <BrandCard key={plan.id} highlight>
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-lg font-bold text-[#F4F4F5]">{plan.title}</h3>
-                        {plan.splitLabel && (
-                          <p className="text-xs font-semibold text-[#FACC15]">{plan.splitLabel}</p>
-                        )}
-                      </div>
                       <button
                         type="button"
-                        onClick={async () => {
-                          await repo.deleteWorkoutPlan(uid, plan.id, workoutPlanItems);
-                          onBanner('Plano apagado.');
-                        }}
-                        aria-label="Apagar plano"
-                        className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+                        onClick={() => togglePlanCollapsed(plan.id)}
+                        className="min-w-0 flex-1 text-left"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <h3 className="text-lg font-bold text-[#F4F4F5]">{plan.title}</h3>
+                        {(plan.splitLabel || !isExpanded) && (
+                          <p className="text-xs font-semibold text-[#FACC15]">
+                            {[plan.splitLabel, !isExpanded ? `${items.length} exercício(s)` : '']
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                        )}
                       </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => togglePlanCollapsed(plan.id)}
+                          aria-label={isExpanded ? 'Minimizar plano' : 'Maximizar plano'}
+                          title={isExpanded ? 'Minimizar plano' : 'Maximizar plano'}
+                          className="inline-flex items-center gap-1 rounded-lg border border-[#323238] bg-[#242429] px-2 py-1.5 text-[11px] font-bold text-[#FACC15] transition hover:border-[#EAB308]"
+                        >
+                          {isExpanded ? (
+                            <>
+                              <ChevronUp className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Minimizar</span>
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Maximizar</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await repo.deleteWorkoutPlan(uid, plan.id, workoutPlanItems);
+                            onBanner('Plano apagado.');
+                          }}
+                          aria-label="Apagar plano"
+                          className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
@@ -320,6 +398,8 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                       )}
                     </div>
 
+                    {isExpanded && (
+                      <>
                     <div className="my-3 border-t border-[#323238]" />
 
                     {items.length === 0 ? (
@@ -505,6 +585,8 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                         </SecondaryButton>
                       )}
                     </div>
+                      </>
+                    )}
                   </BrandCard>
                 );
               })}

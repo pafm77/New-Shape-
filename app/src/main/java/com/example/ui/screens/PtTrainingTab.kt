@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -124,6 +125,7 @@ private fun WorkoutPlansBuilderSection(
     var targetPlanToAssign by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
     var targetPlanToSchedule by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
     var historyTargetItem by remember { mutableStateOf<WorkoutPlanItemRecord?>(null) }
+    var collapsedPlanIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val todayIso = remember { currentLocalIsoDate() }
     val unassignedPlans = remember(state.workoutPlans) {
@@ -257,24 +259,92 @@ private fun WorkoutPlansBuilderSection(
                 )
             }
         } else {
+            if (displayedPlans.size > 1) {
+                item(key = "plans_collapse_controls") {
+                    val allCollapsed = displayedPlans.all { it.id in collapsedPlanIds }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${displayedPlans.size} planos de treino",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondaryDark
+                        )
+                        TextButton(
+                            onClick = {
+                                collapsedPlanIds = if (allCollapsed) {
+                                    collapsedPlanIds - displayedPlans.map { it.id }.toSet()
+                                } else {
+                                    collapsedPlanIds + displayedPlans.map { it.id }.toSet()
+                                }
+                            },
+                            modifier = Modifier.testTag("pt_toggle_all_plans_collapse")
+                        ) {
+                            Icon(
+                                imageVector = if (allCollapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
+                                contentDescription = if (allCollapsed) "Maximizar todos os planos" else "Minimizar todos os planos",
+                                tint = NewShapeGoldBright,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (allCollapsed) "Maximizar todos" else "Minimizar todos",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = NewShapeGoldBright
+                            )
+                        }
+                    }
+                }
+            }
+
             items(displayedPlans, key = { it.id }) { plan ->
                 val items = state.workoutPlanItems.filter { it.planId == plan.id }.sortedBy { it.orderIndex }
                 val isDraft = plan.isUnassignedDraft()
                 val isScheduledFuture = !isDraft && plan.isScheduledForFuture(todayIso)
+                val isExpanded = plan.id !in collapsedPlanIds
+                val togglePlanExpanded = {
+                    collapsedPlanIds = if (isExpanded) collapsedPlanIds + plan.id else collapsedPlanIds - plan.id
+                }
                 BrandCard(highlightBorder = true) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = togglePlanExpanded),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(plan.title, style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
-                            if (plan.splitLabel.isNotBlank()) {
-                                Text(plan.splitLabel, style = MaterialTheme.typography.bodySmall, color = NewShapeGoldBright)
+                            val subtitleParts = buildList {
+                                if (plan.splitLabel.isNotBlank()) add(plan.splitLabel)
+                                if (!isExpanded) add("${items.size} exercício(s)")
+                            }
+                            if (subtitleParts.isNotEmpty()) {
+                                Text(
+                                    subtitleParts.joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = NewShapeGoldBright
+                                )
                             }
                         }
-                        IconButton(onClick = { viewModel.deleteWorkoutPlan(plan.id) }) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar plano", tint = DangerRed)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = togglePlanExpanded,
+                                modifier = Modifier.testTag("pt_toggle_plan_${plan.id}")
+                            ) {
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (isExpanded) "Minimizar plano" else "Maximizar plano",
+                                    tint = NewShapeGoldBright
+                                )
+                            }
+                            IconButton(onClick = { viewModel.deleteWorkoutPlan(plan.id) }) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar plano", tint = DangerRed)
+                            }
                         }
                     }
 
@@ -361,6 +431,8 @@ private fun WorkoutPlansBuilderSection(
                         }
                     }
 
+                    AnimatedVisibility(visible = isExpanded) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                     Spacer(Modifier.height(10.dp))
                     HorizontalDivider(color = HairlineBorder)
                     Spacer(Modifier.height(8.dp))
@@ -534,6 +606,8 @@ private fun WorkoutPlansBuilderSection(
                                 .fillMaxWidth()
                                 .testTag("assign_plan_more_clients_${plan.id}")
                         )
+                    }
+                        }
                     }
                 }
             }

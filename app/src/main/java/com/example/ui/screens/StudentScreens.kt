@@ -5,6 +5,7 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -998,6 +999,7 @@ private fun StudentWorkoutScreen(
     var restExerciseName by remember { mutableStateOf("") }
     var historyTargetItem by remember { mutableStateOf<WorkoutPlanItemRecord?>(null) }
     var feedbackTargetPlan by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
+    var collapsedPlanIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     LaunchedEffect(restSecondsLeft) {
         if (restSecondsLeft > 0) {
@@ -1073,52 +1075,128 @@ private fun StudentWorkoutScreen(
                 )
             }
         } else {
+            if (plans.size > 1) {
+                item(key = "student_plans_collapse_controls") {
+                    val allCollapsed = plans.all { it.id in collapsedPlanIds }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${plans.size} planos de treino",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondaryDark
+                        )
+                        TextButton(
+                            onClick = {
+                                collapsedPlanIds = if (allCollapsed) {
+                                    emptySet()
+                                } else {
+                                    plans.map { it.id }.toSet()
+                                }
+                            },
+                            modifier = Modifier.testTag("student_toggle_all_plans_collapse")
+                        ) {
+                            Icon(
+                                imageVector = if (allCollapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
+                                contentDescription = if (allCollapsed) "Maximizar todos os planos" else "Minimizar todos os planos",
+                                tint = NewShapeGoldBright,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (allCollapsed) "Maximizar todos" else "Minimizar todos",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = NewShapeGoldBright
+                            )
+                        }
+                    }
+                }
+            }
+
             items(plans, key = { it.id }) { plan ->
                 val items = state.workoutPlanItems.filter { it.planId == plan.id }.sortedBy { it.orderIndex }
                 val isExecuting = executingPlanId == plan.id
                 val doneCount = items.count { it.id in completedExerciseIds }
+                val isExpanded = plan.id !in collapsedPlanIds
+                val togglePlanExpanded = {
+                    collapsedPlanIds = if (isExpanded) collapsedPlanIds + plan.id else collapsedPlanIds - plan.id
+                }
 
                 BrandCard(highlightBorder = true) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = togglePlanExpanded),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(plan.title, style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
-                            if (plan.splitLabel.isNotBlank()) {
-                                Text(plan.splitLabel, style = MaterialTheme.typography.bodySmall, color = NewShapeGoldBright)
+                            val subtitleParts = buildList {
+                                if (plan.splitLabel.isNotBlank()) add(plan.splitLabel)
+                                if (!isExpanded) add("${items.size} exercício(s)")
+                            }
+                            if (subtitleParts.isNotEmpty()) {
+                                Text(
+                                    subtitleParts.joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = NewShapeGoldBright
+                                )
                             }
                         }
-                        if (items.isNotEmpty()) {
-                            if (isExecuting) {
-                                StatusPill(
-                                    text = "$doneCount/${items.size} feitos",
-                                    textColor = ConfirmedGreen,
-                                    containerColor = ConfirmedGreenContainer
-                                )
-                            } else {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(
-                                        onClick = { feedbackTargetPlan = plan },
-                                        modifier = Modifier.testTag("student_feedback_btn_${plan.id}")
-                                    ) {
-                                        Text("Feedback", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
-                                    }
-                                    GoldPrimaryButton(
-                                        text = "Executar",
-                                        icon = Icons.Default.PlayArrow,
-                                        onClick = {
-                                            executingPlanId = plan.id
-                                            completedExerciseIds = emptySet()
-                                        },
-                                        testTag = "student_start_workout_${plan.id}"
-                                    )
+                        IconButton(
+                            onClick = togglePlanExpanded,
+                            modifier = Modifier.testTag("student_toggle_plan_${plan.id}")
+                        ) {
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isExpanded) "Minimizar plano" else "Maximizar plano",
+                                tint = NewShapeGoldBright
+                            )
+                        }
+                    }
+
+                    if (items.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        if (isExecuting) {
+                            StatusPill(
+                                text = "$doneCount/${items.size} feitos",
+                                textColor = ConfirmedGreen,
+                                containerColor = ConfirmedGreenContainer
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = { feedbackTargetPlan = plan },
+                                    modifier = Modifier.testTag("student_feedback_btn_${plan.id}")
+                                ) {
+                                    Text("Feedback", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
                                 }
+                                Spacer(Modifier.width(6.dp))
+                                GoldPrimaryButton(
+                                    text = "Executar",
+                                    icon = Icons.Default.PlayArrow,
+                                    onClick = {
+                                        collapsedPlanIds = collapsedPlanIds - plan.id
+                                        executingPlanId = plan.id
+                                        completedExerciseIds = emptySet()
+                                    },
+                                    testTag = "student_start_workout_${plan.id}"
+                                )
                             }
                         }
                     }
 
+                    AnimatedVisibility(visible = isExpanded) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                     if (isExecuting) {
                         Spacer(Modifier.height(10.dp))
                         Row(
@@ -1276,6 +1354,8 @@ private fun StudentWorkoutScreen(
                             if (blockIdx < blocks.lastIndex) {
                                 HorizontalDivider(color = HairlineBorder.copy(alpha = 0.5f))
                             }
+                        }
+                    }
                         }
                     }
                 }
