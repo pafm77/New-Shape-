@@ -407,6 +407,7 @@ export function subscribeStudioData(
       clientId: String(d.clientId ?? ''),
       title: String(d.title ?? ''),
       splitLabel: String(d.splitLabel ?? ''),
+      availableFromDate: typeof d.availableFromDate === 'string' ? d.availableFromDate : '',
       createdAtMillis: Number(d.createdAtMillis ?? 0),
     }),
     (list) => list.sort((a, b) => b.createdAtMillis - a.createdAtMillis),
@@ -2401,26 +2402,53 @@ export async function deleteExercise(uid: string, id: string): Promise<void> {
   await deleteDoc(doc(subcol(uid, 'exercises'), id));
 }
 
+function normalizeAvailableFromDate(raw?: string): string {
+  const clean = (raw || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(clean) ? clean : '';
+}
+
 export async function createWorkoutPlan(
   uid: string,
   clientId: string,
   title: string,
-  splitLabel: string
+  splitLabel: string,
+  availableFromDate = ''
 ): Promise<void> {
-  await createWorkoutPlansForClients(uid, [clientId], title, splitLabel);
+  await createWorkoutPlansForClients(
+    uid,
+    clientId ? [clientId] : [],
+    title,
+    splitLabel,
+    availableFromDate
+  );
 }
 
 export async function createWorkoutPlansForClients(
   uid: string,
   clientIds: string[],
   title: string,
-  splitLabel: string
+  splitLabel: string,
+  availableFromDate = ''
 ): Promise<number> {
   const uniqueIds = Array.from(new Set(clientIds.filter(Boolean)));
-  if (uniqueIds.length === 0) return 0;
   const cleanTitle = title.trim().slice(0, 120);
   const cleanSplit = splitLabel.trim().slice(0, 120);
   const now = Date.now();
+  if (uniqueIds.length === 0) {
+    // Unassigned draft / reusable template plan (not attached to any student yet)
+    await setDoc(doc(subcol(uid, 'workout_plans')), {
+      userId: uid,
+      clientId: '',
+      title: cleanTitle,
+      splitLabel: cleanSplit,
+      availableFromDate: '',
+      createdAtMillis: now,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return 0;
+  }
+  const cleanDate = normalizeAvailableFromDate(availableFromDate);
   const writes: Array<[DocumentReference, Record<string, unknown>]> = uniqueIds.map((cid) => [
     doc(subcol(uid, 'workout_plans')),
     {
@@ -2428,6 +2456,7 @@ export async function createWorkoutPlansForClients(
       clientId: cid,
       title: cleanTitle,
       splitLabel: cleanSplit,
+      availableFromDate: cleanDate,
       createdAtMillis: now,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -2441,12 +2470,14 @@ export async function assignWorkoutPlanToClients(
   uid: string,
   sourcePlan: WorkoutPlanRecord,
   sourceItems: WorkoutPlanItemRecord[],
-  targetClientIds: string[]
+  targetClientIds: string[],
+  availableFromDate = ''
 ): Promise<number> {
   const uniqueTargets = Array.from(
     new Set(targetClientIds.filter((cid) => cid && cid !== sourcePlan.clientId))
   );
   if (uniqueTargets.length === 0) return 0;
+  const cleanDate = normalizeAvailableFromDate(availableFromDate);
   const now = Date.now();
   const sortedItems = sourceItems
     .filter((i) => i.planId === sourcePlan.id)
@@ -2462,6 +2493,7 @@ export async function assignWorkoutPlanToClients(
         clientId: cid,
         title: sourcePlan.title.trim().slice(0, 120),
         splitLabel: sourcePlan.splitLabel.trim().slice(0, 120),
+        availableFromDate: cleanDate,
         createdAtMillis: now,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -2492,6 +2524,17 @@ export async function assignWorkoutPlanToClients(
 
   await commitWrites(writes);
   return uniqueTargets.length;
+}
+
+export async function updateWorkoutPlanSchedule(
+  uid: string,
+  planId: string,
+  availableFromDate: string
+): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'workout_plans'), planId), {
+    availableFromDate: normalizeAvailableFromDate(availableFromDate),
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export async function deleteWorkoutPlan(

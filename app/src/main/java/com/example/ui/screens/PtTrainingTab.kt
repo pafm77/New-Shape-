@@ -30,10 +30,17 @@ import com.example.data.model.ExerciseRecord
 import com.example.data.model.WorkoutLoadLogRecord
 import com.example.data.model.WorkoutPlanItemRecord
 import com.example.data.model.WorkoutPlanRecord
+import com.example.data.model.currentLocalIsoDate
+import com.example.data.model.formatIsoDatePt
+import com.example.data.model.isScheduledForFuture
+import com.example.data.model.isUnassignedDraft
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import java.util.Calendar
+import java.util.Locale
+import java.util.TimeZone
 
 @Composable
 fun PtTrainingTab(
@@ -109,16 +116,23 @@ private fun WorkoutPlansBuilderSection(
     val activeClients = remember(state.clients) { state.clients.filter { it.active } }
     val selectedClient = activeClients.find { it.id == selectedClientId } ?: activeClients.firstOrNull()
     var clientMenuExpanded by remember { mutableStateOf(false) }
+    var viewMode by remember { mutableStateOf("CLIENT") } // "CLIENT" | "DRAFTS"
 
     var showNewPlanDialog by remember { mutableStateOf(false) }
     var targetPlanForExercise by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
     var targetPlanToAssign by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
+    var targetPlanToSchedule by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
     var historyTargetItem by remember { mutableStateOf<WorkoutPlanItemRecord?>(null) }
 
+    val todayIso = remember { currentLocalIsoDate() }
+    val unassignedPlans = remember(state.workoutPlans) {
+        state.workoutPlans.filter { it.isUnassignedDraft() }
+    }
     val clientPlans = remember(state.workoutPlans, selectedClient?.id) {
         if (selectedClient == null) emptyList()
         else state.workoutPlans.filter { it.clientId == selectedClient.id }
     }
+    val displayedPlans = if (viewMode == "DRAFTS") unassignedPlans else clientPlans
     val clientFeedback = remember(state.workoutFeedback, selectedClient?.id) {
         if (selectedClient == null) emptyList()
         else state.workoutFeedback.filter { it.clientId == selectedClient.id }
@@ -131,40 +145,97 @@ private fun WorkoutPlansBuilderSection(
     ) {
         item {
             BrandCard {
-                Text("Selecionar Aluno", style = MaterialTheme.typography.labelMedium, color = NewShapeGold)
-                Spacer(Modifier.height(6.dp))
-                ExposedDropdownMenuBox(
-                    expanded = clientMenuExpanded,
-                    onExpandedChange = { clientMenuExpanded = !clientMenuExpanded }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
-                        value = selectedClient?.name ?: "Sem alunos ativos",
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = clientMenuExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        colors = darkFieldColors()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = clientMenuExpanded,
-                        onDismissRequest = { clientMenuExpanded = false }
-                    ) {
-                        activeClients.forEach { client ->
-                            DropdownMenuItem(
-                                text = { Text(client.name) },
-                                onClick = {
-                                    onSelectClient(client.id)
-                                    clientMenuExpanded = false
-                                }
+                    FilterChip(
+                        selected = viewMode == "CLIENT",
+                        onClick = { viewMode = "CLIENT" },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("plans_mode_client"),
+                        label = {
+                            Text(
+                                "Por Aluno",
+                                maxLines = 1,
+                                fontWeight = FontWeight.Bold
                             )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold,
+                            containerColor = ElevatedCharcoal,
+                            labelColor = TextSecondaryDark
+                        )
+                    )
+                    FilterChip(
+                        selected = viewMode == "DRAFTS",
+                        onClick = { viewMode = "DRAFTS" },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("plans_mode_drafts"),
+                        label = {
+                            Text(
+                                "Sem Aluno (${unassignedPlans.size})",
+                                maxLines = 1,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold,
+                            containerColor = ElevatedCharcoal,
+                            labelColor = TextSecondaryDark
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                if (viewMode == "CLIENT") {
+                    Text("Selecionar Aluno", style = MaterialTheme.typography.labelMedium, color = NewShapeGold)
+                    Spacer(Modifier.height(6.dp))
+                    ExposedDropdownMenuBox(
+                        expanded = clientMenuExpanded,
+                        onExpandedChange = { clientMenuExpanded = !clientMenuExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedClient?.name ?: "Sem alunos ativos",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = clientMenuExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            colors = darkFieldColors()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = clientMenuExpanded,
+                            onDismissRequest = { clientMenuExpanded = false }
+                        ) {
+                            activeClients.forEach { client ->
+                                DropdownMenuItem(
+                                    text = { Text(client.name) },
+                                    onClick = {
+                                        onSelectClient(client.id)
+                                        clientMenuExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
+                } else {
+                    Text(
+                        "Cria planos e modelos de treino sem aluno associado. Quando estiverem prontos, atribui-os aos alunos e escolhe o dia em que ficam visíveis.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark
+                    )
                 }
+
                 Spacer(Modifier.height(12.dp))
                 GoldPrimaryButton(
                     text = "+ Novo Plano de Treino",
                     icon = Icons.Default.Add,
-                    enabled = selectedClient != null,
+                    enabled = true,
                     onClick = { showNewPlanDialog = true },
                     modifier = Modifier.fillMaxWidth(),
                     testTag = "create_workout_plan_btn"
@@ -172,17 +243,23 @@ private fun WorkoutPlansBuilderSection(
             }
         }
 
-        if (clientPlans.isEmpty()) {
+        if (displayedPlans.isEmpty()) {
             item {
                 EmptyStateBox(
                     icon = Icons.Default.FitnessCenter,
-                    title = "Sem planos atribuídos",
-                    subtitle = "Cria um plano para ${selectedClient?.name ?: "este aluno"} e escolhe exercícios da biblioteca."
+                    title = if (viewMode == "DRAFTS") "Sem planos por atribuir" else "Sem planos atribuídos",
+                    subtitle = if (viewMode == "DRAFTS") {
+                        "Cria um plano sem aluno para montar os exercícios primeiro e atribuí-lo mais tarde."
+                    } else {
+                        "Cria um plano para ${selectedClient?.name ?: "este aluno"} e escolhe exercícios da biblioteca."
+                    }
                 )
             }
         } else {
-            items(clientPlans, key = { it.id }) { plan ->
+            items(displayedPlans, key = { it.id }) { plan ->
                 val items = state.workoutPlanItems.filter { it.planId == plan.id }.sortedBy { it.orderIndex }
+                val isDraft = plan.isUnassignedDraft()
+                val isScheduledFuture = !isDraft && plan.isScheduledForFuture(todayIso)
                 BrandCard(highlightBorder = true) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -197,6 +274,89 @@ private fun WorkoutPlansBuilderSection(
                         }
                         IconButton(onClick = { viewModel.deleteWorkoutPlan(plan.id) }) {
                             Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar plano", tint = DangerRed)
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    if (isDraft) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            StatusPill("Sem aluno · Modelo", NewShapeGoldBright, NewShapeGoldMuted)
+                            Text(
+                                "${items.size} exercício(s)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                    } else if (isScheduledFuture) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            StatusPill(
+                                "Agendado · ${formatIsoDatePt(plan.availableFromDate)}",
+                                PendingAmber,
+                                PendingAmberContainer
+                            )
+                            Text(
+                                "Oculto para o aluno até ${formatIsoDatePt(plan.availableFromDate)}.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondaryDark
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = { targetPlanToSchedule = plan },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.testTag("reschedule_plan_${plan.id}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.CalendarMonth,
+                                        contentDescription = null,
+                                        tint = NewShapeGoldBright,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Alterar data", color = NewShapeGoldBright, style = MaterialTheme.typography.labelMedium)
+                                }
+                                TextButton(
+                                    onClick = { viewModel.updateWorkoutPlanSchedule(plan.id, "") },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.testTag("release_plan_now_${plan.id}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Visibility,
+                                        contentDescription = null,
+                                        tint = ConfirmedGreen,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Libertar agora", color = ConfirmedGreen, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            StatusPill("Visível para o aluno", ConfirmedGreen, ConfirmedGreenContainer)
+                            TextButton(
+                                onClick = { targetPlanToSchedule = plan },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("schedule_plan_${plan.id}")
+                            ) {
+                                Icon(
+                                    Icons.Default.CalendarMonth,
+                                    contentDescription = null,
+                                    tint = TextSecondaryDark,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("Agendar dia", color = TextSecondaryDark, style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
 
@@ -219,7 +379,7 @@ private fun WorkoutPlansBuilderSection(
                                 workoutPlans = state.workoutPlans,
                                 workoutPlanItems = state.workoutPlanItems,
                                 workoutLoadLogs = state.workoutLoadLogs,
-                                onOpenHistory = { historyTargetItem = exItem },
+                                onOpenHistory = if (isDraft) null else ({ historyTargetItem = exItem }),
                                 onRemove = { viewModel.removeExerciseFromPlan(exItem.id) }
                             )
                             if (idx < items.lastIndex) {
@@ -235,7 +395,17 @@ private fun WorkoutPlansBuilderSection(
                         onClick = { targetPlanForExercise = plan },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (activeClients.size > 1) {
+                    if (isDraft) {
+                        Spacer(Modifier.height(8.dp))
+                        GoldPrimaryButton(
+                            text = "Atribuir a alunos...",
+                            icon = Icons.Default.GroupAdd,
+                            enabled = activeClients.isNotEmpty(),
+                            onClick = { targetPlanToAssign = plan },
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = "assign_draft_plan_${plan.id}"
+                        )
+                    } else if (activeClients.size > 1) {
                         Spacer(Modifier.height(8.dp))
                         DarkSecondaryButton(
                             text = "Adicionar a mais alunos",
@@ -250,7 +420,7 @@ private fun WorkoutPlansBuilderSection(
             }
         }
 
-        if (selectedClient != null && clientFeedback.isNotEmpty()) {
+        if (viewMode == "CLIENT" && selectedClient != null && clientFeedback.isNotEmpty()) {
             item(key = "client_recent_feedback") {
                 PtRecentFeedbackCard(
                     clientName = selectedClient.name,
@@ -261,28 +431,53 @@ private fun WorkoutPlansBuilderSection(
         }
     }
 
-    if (showNewPlanDialog && selectedClient != null) {
+    if (showNewPlanDialog) {
         NewWorkoutPlanDialog(
             clients = activeClients,
-            initialClientId = selectedClient.id,
+            initialClientId = if (viewMode == "CLIENT") selectedClient?.id.orEmpty() else "",
+            defaultUnassigned = viewMode == "DRAFTS" || activeClients.isEmpty(),
             onDismiss = { showNewPlanDialog = false },
-            onCreate = { selectedIds, title, split ->
-                viewModel.createWorkoutPlansForClients(selectedIds, title, split)
+            onCreate = { selectedIds, title, split, availableFromDate ->
+                viewModel.createWorkoutPlansForClients(selectedIds, title, split, availableFromDate)
+                if (selectedIds.isEmpty()) {
+                    viewMode = "DRAFTS"
+                } else {
+                    viewMode = "CLIENT"
+                    if (selectedClient == null || selectedClient.id !in selectedIds) {
+                        onSelectClient(selectedIds.first())
+                    }
+                }
                 showNewPlanDialog = false
             }
         )
     }
 
     targetPlanToAssign?.let { plan ->
-        val otherClients = activeClients.filter { it.id != plan.clientId }
+        val candidates = if (plan.isUnassignedDraft()) {
+            activeClients
+        } else {
+            activeClients.filter { it.id != plan.clientId }
+        }
         AssignWorkoutPlanDialog(
             plan = plan,
             exerciseCount = state.workoutPlanItems.count { it.planId == plan.id },
-            candidates = otherClients,
+            candidates = candidates,
             onDismiss = { targetPlanToAssign = null },
-            onAssign = { targetIds ->
-                viewModel.assignWorkoutPlanToClients(plan, targetIds)
+            onAssign = { targetIds, availableFromDate ->
+                viewModel.assignWorkoutPlanToClients(plan, targetIds, availableFromDate)
                 targetPlanToAssign = null
+            }
+        )
+    }
+
+    targetPlanToSchedule?.let { plan ->
+        SchedulePlanAccessDialog(
+            plan = plan,
+            todayIso = todayIso,
+            onDismiss = { targetPlanToSchedule = null },
+            onSave = { availableFromDate ->
+                viewModel.updateWorkoutPlanSchedule(plan.id, availableFromDate)
+                targetPlanToSchedule = null
             }
         )
     }
@@ -345,14 +540,16 @@ fun WorkoutPlanExerciseRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = NewShapeGold
             )
-            ExerciseLastLoadBadge(
-                item = item,
-                clientId = clientId,
-                workoutPlans = workoutPlans,
-                workoutPlanItems = workoutPlanItems,
-                workoutLoadLogs = workoutLoadLogs,
-                onOpenHistory = onOpenHistory
-            )
+            if (clientId.isNotBlank()) {
+                ExerciseLastLoadBadge(
+                    item = item,
+                    clientId = clientId,
+                    workoutPlans = workoutPlans,
+                    workoutPlanItems = workoutPlanItems,
+                    workoutLoadLogs = workoutLoadLogs,
+                    onOpenHistory = onOpenHistory
+                )
+            }
             if (item.notes.isNotBlank()) {
                 Text(item.notes, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
             }
@@ -528,18 +725,259 @@ private fun ExerciseLibrarySection(
     }
 }
 
+private fun addDaysLocalIso(days: Int): String {
+    val cal = Calendar.getInstance()
+    cal.add(Calendar.DAY_OF_MONTH, days)
+    return String.format(
+        Locale.US,
+        "%04d-%02d-%02d",
+        cal.get(Calendar.YEAR),
+        cal.get(Calendar.MONTH) + 1,
+        cal.get(Calendar.DAY_OF_MONTH)
+    )
+}
+
+private fun nextMondayLocalIso(): String {
+    val cal = Calendar.getInstance()
+    val dow = cal.get(Calendar.DAY_OF_WEEK)
+    val daysUntilMonday = when (dow) {
+        Calendar.MONDAY -> 7
+        Calendar.SUNDAY -> 1
+        else -> (Calendar.SATURDAY - dow) + 2
+    }
+    cal.add(Calendar.DAY_OF_MONTH, daysUntilMonday)
+    return String.format(
+        Locale.US,
+        "%04d-%02d-%02d",
+        cal.get(Calendar.YEAR),
+        cal.get(Calendar.MONTH) + 1,
+        cal.get(Calendar.DAY_OF_MONTH)
+    )
+}
+
+private fun isoDateToUtcMillis(iso: String): Long? {
+    val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").matchEntire(iso.trim()) ?: return null
+    val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+    cal.clear()
+    cal.set(
+        m.groupValues[1].toInt(),
+        m.groupValues[2].toInt() - 1,
+        m.groupValues[3].toInt(),
+        12,
+        0,
+        0
+    )
+    return cal.timeInMillis
+}
+
+private fun utcMillisToIsoDate(millis: Long): String {
+    val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+    cal.timeInMillis = millis
+    return String.format(
+        Locale.US,
+        "%04d-%02d-%02d",
+        cal.get(Calendar.YEAR),
+        cal.get(Calendar.MONTH) + 1,
+        cal.get(Calendar.DAY_OF_MONTH)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlanAccessScheduleSelector(
+    isScheduled: Boolean,
+    onIsScheduledChange: (Boolean) -> Unit,
+    selectedIsoDate: String,
+    onSelectedIsoDateChange: (String) -> Unit
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    val tomorrowIso = remember { addDaysLocalIso(1) }
+    val nextMonIso = remember { nextMondayLocalIso() }
+    val plus7Iso = remember { addDaysLocalIso(7) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Acesso do aluno",
+            style = MaterialTheme.typography.labelMedium,
+            color = NewShapeGoldBright
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = !isScheduled,
+                onClick = { onIsScheduledChange(false) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("plan_access_immediate_chip"),
+                label = { Text("Imediato", maxLines = 1) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = NewShapeGold,
+                    selectedLabelColor = TextOnGold,
+                    containerColor = ElevatedCharcoal,
+                    labelColor = TextSecondaryDark
+                )
+            )
+            FilterChip(
+                selected = isScheduled,
+                onClick = {
+                    if (selectedIsoDate.isBlank()) {
+                        onSelectedIsoDateChange(tomorrowIso)
+                    }
+                    onIsScheduledChange(true)
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("plan_access_scheduled_chip"),
+                label = { Text("Agendar dia", maxLines = 1) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = NewShapeGold,
+                    selectedLabelColor = TextOnGold,
+                    containerColor = ElevatedCharcoal,
+                    labelColor = TextSecondaryDark
+                )
+            )
+        }
+
+        if (isScheduled) {
+            val activeDate = selectedIsoDate.ifBlank { tomorrowIso }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item {
+                    FilterChip(
+                        selected = activeDate == tomorrowIso,
+                        onClick = { onSelectedIsoDateChange(tomorrowIso) },
+                        label = { Text("Amanhã") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PendingAmber,
+                            selectedLabelColor = TextOnGold,
+                            containerColor = ElevatedCharcoal,
+                            labelColor = TextSecondaryDark
+                        )
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = activeDate == nextMonIso,
+                        onClick = { onSelectedIsoDateChange(nextMonIso) },
+                        label = { Text("Próx. Segunda") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PendingAmber,
+                            selectedLabelColor = TextOnGold,
+                            containerColor = ElevatedCharcoal,
+                            labelColor = TextSecondaryDark
+                        )
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = activeDate == plus7Iso,
+                        onClick = { onSelectedIsoDateChange(plus7Iso) },
+                        label = { Text("+7 dias") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PendingAmber,
+                            selectedLabelColor = TextOnGold,
+                            containerColor = ElevatedCharcoal,
+                            labelColor = TextSecondaryDark
+                        )
+                    )
+                }
+            }
+
+            Surface(
+                color = ElevatedCharcoal,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, PendingAmber.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDatePicker = true }
+                    .testTag("plan_access_date_picker_btn")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CalendarMonth,
+                            contentDescription = "Escolher data de acesso",
+                            tint = PendingAmber,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            "Disponível em ${formatIsoDatePt(activeDate)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimaryDark
+                        )
+                    }
+                    Text(
+                        "Alterar",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NewShapeGoldBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Text(
+                "O aluno só terá acesso a este plano a partir do dia ${formatIsoDatePt(activeDate)}.",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondaryDark
+            )
+
+            if (showDatePicker) {
+                val datePickerState = rememberDatePickerState(
+                    initialSelectedDateMillis = isoDateToUtcMillis(activeDate)
+                )
+                DatePickerDialog(
+                    onDismissRequest = { showDatePicker = false },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                datePickerState.selectedDateMillis?.let { millis ->
+                                    onSelectedIsoDateChange(utcMillisToIsoDate(millis))
+                                }
+                                showDatePicker = false
+                            }
+                        ) {
+                            Text("Confirmar", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDatePicker = false }) {
+                            Text("Cancelar", color = TextSecondaryDark)
+                        }
+                    }
+                ) {
+                    DatePicker(state = datePickerState)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun NewWorkoutPlanDialog(
     clients: List<ClientRecord>,
     initialClientId: String,
+    defaultUnassigned: Boolean = false,
     onDismiss: () -> Unit,
-    onCreate: (List<String>, String, String) -> Unit
+    onCreate: (List<String>, String, String, String) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var splitLabel by remember { mutableStateOf("Treino A · Corpo Inteiro") }
+    var assignNow by remember(defaultUnassigned, clients.isEmpty()) {
+        mutableStateOf(!defaultUnassigned && clients.isNotEmpty())
+    }
     var selectedIds by remember(initialClientId) {
         mutableStateOf(if (initialClientId.isNotBlank()) setOf(initialClientId) else emptySet())
     }
+    var isScheduled by remember { mutableStateOf(false) }
+    var scheduledDate by remember { mutableStateOf(addDaysLocalIso(1)) }
     val allSelected = clients.isNotEmpty() && selectedIds.size == clients.size
 
     AlertDialog(
@@ -567,75 +1005,153 @@ private fun NewWorkoutPlanDialog(
                     modifier = Modifier.fillMaxWidth(),
                     colors = darkFieldColors()
                 )
+
+                Text(
+                    "Destino do plano",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = NewShapeGoldBright
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "Atribuir a alunos (${selectedIds.size})",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = NewShapeGoldBright
+                    FilterChip(
+                        selected = !assignNow,
+                        onClick = { assignNow = false },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("new_plan_unassigned_chip"),
+                        label = { Text("Sem aluno", maxLines = 1) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold,
+                            containerColor = ElevatedCharcoal,
+                            labelColor = TextSecondaryDark
+                        )
                     )
-                    TextButton(
+                    FilterChip(
+                        selected = assignNow,
+                        enabled = clients.isNotEmpty(),
                         onClick = {
-                            selectedIds = if (allSelected) emptySet() else clients.map { it.id }.toSet()
-                        }
+                            assignNow = true
+                            if (selectedIds.isEmpty() && initialClientId.isNotBlank()) {
+                                selectedIds = setOf(initialClientId)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("new_plan_assign_now_chip"),
+                        label = { Text("Atribuir já", maxLines = 1) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = NewShapeGold,
+                            selectedLabelColor = TextOnGold,
+                            containerColor = ElevatedCharcoal,
+                            labelColor = TextSecondaryDark
+                        )
+                    )
+                }
+
+                if (!assignNow) {
+                    Surface(
+                        color = ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, HairlineBorder),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            if (allSelected) "Limpar" else "Selecionar todos",
-                            color = NewShapeGold,
-                            style = MaterialTheme.typography.labelSmall
+                            "O plano fica guardado em \"Sem Aluno\" para poderes montar os exercícios com calma e atribuir depois aos alunos (com data agendada se quiseres).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark,
+                            modifier = Modifier.padding(12.dp)
                         )
                     }
-                }
-                Surface(
-                    color = ElevatedCharcoal,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)
-                ) {
-                    LazyColumn {
-                        items(clients, key = { it.id }) { c ->
-                            val checked = c.id in selectedIds
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Atribuir a alunos (${selectedIds.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = NewShapeGoldBright
+                        )
+                        TextButton(
+                            onClick = {
+                                selectedIds = if (allSelected) emptySet() else clients.map { it.id }.toSet()
+                            }
+                        ) {
+                            Text(
+                                if (allSelected) "Limpar" else "Selecionar todos",
+                                color = NewShapeGold,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                    Surface(
+                        color = ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp)
+                    ) {
+                        LazyColumn {
+                            items(clients, key = { it.id }) { c ->
+                                val checked = c.id in selectedIds
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = checked,
+                                        onCheckedChange = {
+                                            selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
+                                        },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = NewShapeGold,
+                                            checkmarkColor = TextOnGold,
+                                            uncheckedColor = TextSecondaryDark
+                                        )
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(c.name, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
+                                        Text(
+                                            if (c.trainingType == "PERSONALIZADO") "Personalizado" else "Grupo",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (c.trainingType == "PERSONALIZADO") NewShapeGold else TextSecondaryDark
+                                        )
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = checked,
-                                    onCheckedChange = {
-                                        selectedIds = if (checked) selectedIds - c.id else selectedIds + c.id
-                                    },
-                                    colors = CheckboxDefaults.colors(
-                                        checkedColor = NewShapeGold,
-                                        checkmarkColor = TextOnGold,
-                                        uncheckedColor = TextSecondaryDark
-                                    )
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(c.name, style = MaterialTheme.typography.bodySmall, color = TextPrimaryDark)
-                                    Text(
-                                        if (c.trainingType == "PERSONALIZADO") "Personalizado" else "Grupo",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (c.trainingType == "PERSONALIZADO") NewShapeGold else TextSecondaryDark
-                                    )
                                 }
                             }
                         }
                     }
+
+                    PlanAccessScheduleSelector(
+                        isScheduled = isScheduled,
+                        onIsScheduledChange = { isScheduled = it },
+                        selectedIsoDate = scheduledDate,
+                        onSelectedIsoDateChange = { scheduledDate = it }
+                    )
                 }
             }
         },
         confirmButton = {
+            val canSubmit = title.isNotBlank() && (!assignNow || selectedIds.isNotEmpty())
             GoldPrimaryButton(
-                text = if (selectedIds.size > 1) "Criar (${selectedIds.size} alunos)" else "Criar Plano",
-                enabled = title.isNotBlank() && selectedIds.isNotEmpty(),
-                onClick = { onCreate(selectedIds.toList(), title, splitLabel) },
+                text = when {
+                    !assignNow -> "Guardar sem aluno"
+                    selectedIds.size > 1 -> "Criar (${selectedIds.size} alunos)"
+                    else -> "Criar Plano"
+                },
+                enabled = canSubmit,
+                onClick = {
+                    val targetIds = if (assignNow) selectedIds.toList() else emptyList()
+                    val dateToSave = if (assignNow && isScheduled) scheduledDate else ""
+                    onCreate(targetIds, title, splitLabel, dateToSave)
+                },
                 testTag = "confirm_create_plan_btn"
             )
         },
@@ -651,19 +1167,30 @@ private fun AssignWorkoutPlanDialog(
     exerciseCount: Int,
     candidates: List<ClientRecord>,
     onDismiss: () -> Unit,
-    onAssign: (List<String>) -> Unit
+    onAssign: (List<String>, String) -> Unit
 ) {
     var selectedIds by remember(plan.id) { mutableStateOf(emptySet<String>()) }
+    var isScheduled by remember(plan.id) { mutableStateOf(false) }
+    var scheduledDate by remember(plan.id) { mutableStateOf(addDaysLocalIso(1)) }
     val allSelected = candidates.isNotEmpty() && selectedIds.size == candidates.size
+    val isDraft = plan.isUnassignedDraft()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = CharcoalSurface,
-        title = { Text("Adicionar a mais alunos", color = TextPrimaryDark) },
+        title = {
+            Text(
+                if (isDraft) "Atribuir plano a alunos" else "Adicionar a mais alunos",
+                color = TextPrimaryDark
+            )
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
-                    "Copia o plano \"${plan.title}\" ($exerciseCount exercício(s)) para os alunos selecionados. Cada aluno pode depois registar as suas cargas em kg.",
+                    "Copia o plano \"${plan.title}\" ($exerciseCount exercício(s)) para os alunos selecionados. Cada aluno recebe uma cópia independente para registar cargas em kg.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondaryDark
                 )
@@ -692,7 +1219,7 @@ private fun AssignWorkoutPlanDialog(
                 Surface(
                     color = ElevatedCharcoal,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)
                 ) {
                     LazyColumn {
                         items(candidates, key = { it.id }) { c ->
@@ -729,14 +1256,69 @@ private fun AssignWorkoutPlanDialog(
                         }
                     }
                 }
+
+                PlanAccessScheduleSelector(
+                    isScheduled = isScheduled,
+                    onIsScheduledChange = { isScheduled = it },
+                    selectedIsoDate = scheduledDate,
+                    onSelectedIsoDateChange = { scheduledDate = it }
+                )
             }
         },
         confirmButton = {
             GoldPrimaryButton(
-                text = "Adicionar (${selectedIds.size})",
+                text = if (isDraft) "Atribuir (${selectedIds.size})" else "Adicionar (${selectedIds.size})",
                 enabled = selectedIds.isNotEmpty(),
-                onClick = { onAssign(selectedIds.toList()) },
+                onClick = {
+                    val dateToSave = if (isScheduled) scheduledDate else ""
+                    onAssign(selectedIds.toList(), dateToSave)
+                },
                 testTag = "confirm_assign_plan_btn"
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar", color = TextSecondaryDark) }
+        }
+    )
+}
+
+@Composable
+private fun SchedulePlanAccessDialog(
+    plan: WorkoutPlanRecord,
+    todayIso: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    val initialScheduled = plan.isScheduledForFuture(todayIso)
+    var isScheduled by remember(plan.id) { mutableStateOf(initialScheduled) }
+    var scheduledDate by remember(plan.id) {
+        mutableStateOf(if (initialScheduled) plan.availableFromDate else addDaysLocalIso(1))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        title = { Text("Agendar acesso do aluno", color = TextPrimaryDark) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Define quando o plano \"${plan.title}\" fica disponível no portal do aluno.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+                PlanAccessScheduleSelector(
+                    isScheduled = isScheduled,
+                    onIsScheduledChange = { isScheduled = it },
+                    selectedIsoDate = scheduledDate,
+                    onSelectedIsoDateChange = { scheduledDate = it }
+                )
+            }
+        },
+        confirmButton = {
+            GoldPrimaryButton(
+                text = if (isScheduled) "Guardar data" else "Libertar agora",
+                onClick = { onSave(if (isScheduled) scheduledDate else "") },
+                testTag = "confirm_schedule_plan_btn"
             )
         },
         dismissButton = {

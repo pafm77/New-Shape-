@@ -1287,28 +1287,57 @@ class NewShapeViewModel(
         }
     }
 
-    fun createWorkoutPlansForClients(clientIds: List<String>, title: String, splitLabel: String) {
-        if (title.isBlank() || clientIds.isEmpty()) return
+    fun createWorkoutPlansForClients(
+        clientIds: List<String>,
+        title: String,
+        splitLabel: String,
+        availableFromDate: String = ""
+    ) {
+        if (title.isBlank()) return
         viewModelScope.launch {
-            repository.createWorkoutPlansForClients(clientIds, title, splitLabel)
+            repository.createWorkoutPlansForClients(clientIds, title, splitLabel, availableFromDate)
                 .onSuccess { count ->
-                    _statusBanner.value = if (count > 1) {
-                        "Plano criado e atribuído a $count alunos!"
-                    } else {
-                        "Plano de treino criado."
+                    val schedSuffix = if (availableFromDate.isNotBlank() && availableFromDate > currentLocalIsoDate()) {
+                        " (acesso a partir de ${formatIsoDatePt(availableFromDate)})"
+                    } else ""
+                    _statusBanner.value = when {
+                        count == 0 -> "Plano guardado em Sem Aluno / Modelos! Adiciona os exercícios e atribui quando quiseres."
+                        count > 1 -> "Plano criado para $count alunos$schedSuffix!"
+                        else -> "Plano de treino criado$schedSuffix!"
                     }
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
 
-    fun assignWorkoutPlanToClients(sourcePlan: WorkoutPlanRecord, targetClientIds: List<String>) {
+    fun assignWorkoutPlanToClients(
+        sourcePlan: WorkoutPlanRecord,
+        targetClientIds: List<String>,
+        availableFromDate: String = ""
+    ) {
         if (targetClientIds.isEmpty()) return
         val items = currentData?.workoutPlanItems?.filter { it.planId == sourcePlan.id }.orEmpty()
         viewModelScope.launch {
-            repository.assignWorkoutPlanToClients(sourcePlan, items, targetClientIds)
+            repository.assignWorkoutPlanToClients(sourcePlan, items, targetClientIds, availableFromDate)
                 .onSuccess { count ->
-                    _statusBanner.value = "Plano \"${sourcePlan.title}\" atribuído a mais $count aluno(s)!"
+                    val schedSuffix = if (availableFromDate.isNotBlank() && availableFromDate > currentLocalIsoDate()) {
+                        " · acesso em ${formatIsoDatePt(availableFromDate)}"
+                    } else ""
+                    _statusBanner.value = "Plano \"${sourcePlan.title}\" atribuído a $count aluno(s)$schedSuffix!"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun updateWorkoutPlanSchedule(planId: String, availableFromDate: String) {
+        viewModelScope.launch {
+            repository.updateWorkoutPlanSchedule(planId, availableFromDate)
+                .onSuccess {
+                    _statusBanner.value = if (availableFromDate.isNotBlank() && availableFromDate > currentLocalIsoDate()) {
+                        "Acesso do aluno agendado para ${formatIsoDatePt(availableFromDate)}."
+                    } else {
+                        "Plano disponível imediatamente para o aluno!"
+                    }
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }

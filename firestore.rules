@@ -133,9 +133,10 @@ service cloud.firestore {
 
     function isValidWorkoutPlan(data) {
       return data.userId is string && data.userId.size() <= 128 &&
-             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() <= 128 &&
              data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
              data.splitLabel is string && data.splitLabel.size() <= 120 &&
+             (!('availableFromDate' in data) || (data.availableFromDate is string && (data.availableFromDate == '' || data.availableFromDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))) &&
              data.createdAtMillis is int;
     }
 
@@ -509,7 +510,7 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(planId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'clientId', 'title', 'splitLabel', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'clientId', 'title', 'splitLabel', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'title', 'splitLabel', 'availableFromDate', 'createdAtMillis', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidWorkoutPlan(incoming());
         allow update: if isOwner(userId) && isValidId(planId) &&
@@ -517,7 +518,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'splitLabel', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'splitLabel', 'availableFromDate', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(planId);
       }
 

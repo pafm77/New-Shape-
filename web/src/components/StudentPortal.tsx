@@ -352,9 +352,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       )
     : undefined;
 
+  const todayIso = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
   const clientPlans = useMemo(
-    () => workoutPlans.filter((p) => p.clientId === client.id),
-    [workoutPlans, client.id]
+    () =>
+      workoutPlans.filter(
+        (p) =>
+          p.clientId === client.id &&
+          (!p.availableFromDate || p.availableFromDate <= todayIso)
+      ),
+    [workoutPlans, client.id, todayIso]
   );
 
   const clientNutrition = useMemo(

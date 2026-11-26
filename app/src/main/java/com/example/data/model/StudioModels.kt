@@ -148,10 +148,38 @@ data class WorkoutPlanRecord(
     val clientId: String = "",
     val title: String = "",
     val splitLabel: String = "",
+    val availableFromDate: String = "",
     val createdAtMillis: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
+
+fun currentLocalIsoDate(): String {
+    val cal = java.util.Calendar.getInstance()
+    return String.format(
+        java.util.Locale.US,
+        "%04d-%02d-%02d",
+        cal.get(java.util.Calendar.YEAR),
+        cal.get(java.util.Calendar.MONTH) + 1,
+        cal.get(java.util.Calendar.DAY_OF_MONTH)
+    )
+}
+
+fun formatIsoDatePt(iso: String): String {
+    val clean = iso.trim()
+    val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").matchEntire(clean) ?: return clean
+    return "${m.groupValues[3]}/${m.groupValues[2]}/${m.groupValues[1]}"
+}
+
+fun WorkoutPlanRecord.isUnassignedDraft(): Boolean = clientId.isBlank()
+
+fun WorkoutPlanRecord.isScheduledForFuture(todayIso: String = currentLocalIsoDate()): Boolean {
+    val d = availableFromDate.trim()
+    return d.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) && d > todayIso
+}
+
+fun WorkoutPlanRecord.isAvailableToStudent(todayIso: String = currentLocalIsoDate()): Boolean =
+    !isUnassignedDraft() && !isScheduledForFuture(todayIso)
 
 @Keep
 @IgnoreExtraProperties

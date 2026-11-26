@@ -1081,6 +1081,85 @@ test("Studio announcements, read receipts, birthDate/weeklyGoalSessions, and pos
   await assertFails(bobDb.collection(`users/${ALICE_UID}/workout_feedback`).get());
 });
 
+test("Unassigned workout plan drafts (clientId '') and scheduled availableFromDate rules", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID, { email: BOB_EMAIL }).firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+  const nowMs = Date.now() - 5000;
+
+  // Owner creates unassigned draft/template workout plan (clientId == "")
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plans`).doc("wp_draft_1").set({
+      userId: ALICE_UID,
+      clientId: "",
+      title: "Modelo Full Body",
+      splitLabel: "Treino A · Base",
+      availableFromDate: "",
+      createdAtMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Owner creates scheduled assigned workout plan for a future date
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plans`).doc("wp_sched_1").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      title: "Hipertrofia Dezembro",
+      splitLabel: "Treino B",
+      availableFromDate: "2026-12-01",
+      createdAtMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Owner updates availableFromDate (reschedule and release immediately)
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plans`).doc("wp_sched_1").update({
+      availableFromDate: "2026-12-10",
+      updatedAt: updated,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plans`).doc("wp_sched_1").update({
+      availableFromDate: "",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Invalid date format rejected
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plans`).doc("wp_bad_date").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      title: "Plano Inválido",
+      splitLabel: "Treino C",
+      availableFromDate: "01/12/2026",
+      createdAtMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Non-owner cannot create or modify workout plans
+  await assertFails(
+    bobDb.collection(`users/${ALICE_UID}/workout_plans`).doc("wp_bob").set({
+      userId: ALICE_UID,
+      clientId: "",
+      title: "Injected",
+      splitLabel: "",
+      availableFromDate: "",
+      createdAtMillis: nowMs,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+});
+
+
 
 
 

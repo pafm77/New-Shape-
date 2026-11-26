@@ -2289,14 +2289,26 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
-    suspend fun createWorkoutPlan(clientId: String, title: String, splitLabel: String): Result<Unit> = try {
+    private fun normalizeAvailableFromDate(raw: String): String {
+        val clean = raw.trim()
+        return if (clean.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) clean else ""
+    }
+
+    suspend fun createWorkoutPlan(
+        clientId: String,
+        title: String,
+        splitLabel: String,
+        availableFromDate: String = ""
+    ): Result<Unit> = try {
         val uid = requireUserId()
+        val cleanDate = if (clientId.isBlank()) "" else normalizeAvailableFromDate(availableFromDate)
         userDoc(uid).collection("workout_plans").document().set(
             mapOf(
                 "userId" to uid,
-                "clientId" to clientId,
+                "clientId" to clientId.trim().take(128),
                 "title" to title.trim().take(120),
                 "splitLabel" to splitLabel.trim().take(120),
+                "availableFromDate" to cleanDate,
                 "createdAtMillis" to System.currentTimeMillis(),
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -2313,34 +2325,53 @@ class FirestoreStudioRepository(
     suspend fun createWorkoutPlansForClients(
         clientIds: List<String>,
         title: String,
-        splitLabel: String
+        splitLabel: String,
+        availableFromDate: String = ""
     ): Result<Int> = try {
         val uid = requireUserId()
         val uniqueIds = clientIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-        require(uniqueIds.isNotEmpty()) { "Seleciona pelo menos um aluno." }
         val cleanTitle = title.trim().take(120)
         val cleanSplit = splitLabel.trim().take(120)
         val now = System.currentTimeMillis()
-        uniqueIds.chunked(400).forEach { chunk ->
-            val batch = db.batch()
-            chunk.forEach { cid ->
-                val ref = userDoc(uid).collection("workout_plans").document()
-                batch.set(
-                    ref,
-                    mapOf(
-                        "userId" to uid,
-                        "clientId" to cid,
-                        "title" to cleanTitle,
-                        "splitLabel" to cleanSplit,
-                        "createdAtMillis" to now,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
+        if (uniqueIds.isEmpty()) {
+            // Unassigned draft / reusable template plan (not attached to any student yet)
+            userDoc(uid).collection("workout_plans").document().set(
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to "",
+                    "title" to cleanTitle,
+                    "splitLabel" to cleanSplit,
+                    "availableFromDate" to "",
+                    "createdAtMillis" to now,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
                 )
+            ).await()
+            Result.success(0)
+        } else {
+            val cleanDate = normalizeAvailableFromDate(availableFromDate)
+            uniqueIds.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { cid ->
+                    val ref = userDoc(uid).collection("workout_plans").document()
+                    batch.set(
+                        ref,
+                        mapOf(
+                            "userId" to uid,
+                            "clientId" to cid,
+                            "title" to cleanTitle,
+                            "splitLabel" to cleanSplit,
+                            "availableFromDate" to cleanDate,
+                            "createdAtMillis" to now,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                batch.commit().await()
             }
-            batch.commit().await()
+            Result.success(uniqueIds.size)
         }
-        Result.success(uniqueIds.size)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -2351,15 +2382,17 @@ class FirestoreStudioRepository(
     suspend fun assignWorkoutPlanToClients(
         sourcePlan: WorkoutPlanRecord,
         sourceItems: List<WorkoutPlanItemRecord>,
-        targetClientIds: List<String>
+        targetClientIds: List<String>,
+        availableFromDate: String = ""
     ): Result<Int> = try {
         val uid = requireUserId()
         val uniqueIds = targetClientIds
             .map { it.trim() }
             .filter { it.isNotEmpty() && it != sourcePlan.clientId }
             .distinct()
-        require(uniqueIds.isNotEmpty()) { "Seleciona pelo menos outro aluno." }
+        require(uniqueIds.isNotEmpty()) { "Seleciona pelo menos um aluno." }
         val sortedItems = sourceItems.sortedBy { it.orderIndex }
+        val cleanDate = normalizeAvailableFromDate(availableFromDate)
         val now = System.currentTimeMillis()
         val writes = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Map<String, Any>>>()
         uniqueIds.forEach { cid ->
@@ -2369,6 +2402,7 @@ class FirestoreStudioRepository(
                 "clientId" to cid,
                 "title" to sourcePlan.title.trim().take(120),
                 "splitLabel" to sourcePlan.splitLabel.trim().take(120),
+                "availableFromDate" to cleanDate,
                 "createdAtMillis" to now,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -2402,6 +2436,26 @@ class FirestoreStudioRepository(
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.WRITE, "users/$uidOrUnknown/workout_plans")
+        Result.failure(e)
+    }
+
+    suspend fun updateWorkoutPlanSchedule(
+        planId: String,
+        availableFromDate: String
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        val cleanDate = normalizeAvailableFromDate(availableFromDate)
+        userDoc(uid).collection("workout_plans").document(planId).update(
+            mapOf(
+                "availableFromDate" to cleanDate,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/workout_plans/$planId")
         Result.failure(e)
     }
 

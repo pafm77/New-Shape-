@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Dumbbell, ExternalLink, Plus, Search, Trash2, Users, X } from 'lucide-react';
+import { Calendar, Dumbbell, ExternalLink, Eye, Plus, Search, Trash2, Users, X } from 'lucide-react';
 import {
   BookingRecord,
   ClientRecord,
@@ -80,13 +80,22 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   const effectiveClient =
     activeClients.find((c) => c.id === selectedClientId) || activeClients[0] || null;
 
+  const [plansViewMode, setPlansViewMode] = useState<'client' | 'drafts'>('client');
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [targetPlan, setTargetPlan] = useState<WorkoutPlanRecord | null>(null);
   const [assignPlan, setAssignPlan] = useState<WorkoutPlanRecord | null>(null);
+  const [schedulePlan, setSchedulePlan] = useState<WorkoutPlanRecord | null>(null);
   const [historyItem, setHistoryItem] = useState<{
     item: WorkoutPlanItemRecord;
     clientId: string;
   } | null>(null);
+
+  const todayIso = useMemo(() => getTodayIsoDate(), []);
+
+  const unassignedPlans = useMemo(
+    () => workoutPlans.filter((p) => !p.clientId || !p.clientId.trim()),
+    [workoutPlans]
+  );
 
   const clientPlans = useMemo(
     () =>
@@ -95,6 +104,8 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
         : [],
     [workoutPlans, effectiveClient]
   );
+
+  const displayedPlans = plansViewMode === 'drafts' ? unassignedPlans : clientPlans;
 
   const clientFeedback = useMemo(
     () =>
@@ -156,44 +167,87 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
       {subTab === 'plans' ? (
         <div className="space-y-4">
           <BrandCard>
+            <div className="mb-3 grid grid-cols-2 gap-1.5 rounded-xl border border-[#323238] bg-[#121214] p-1">
+              <button
+                type="button"
+                onClick={() => setPlansViewMode('client')}
+                className={`min-h-[38px] rounded-lg text-xs font-bold transition ${
+                  plansViewMode === 'client'
+                    ? 'bg-[#EAB308] text-[#121214]'
+                    : 'text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                Por Aluno
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlansViewMode('drafts')}
+                className={`min-h-[38px] rounded-lg text-xs font-bold transition ${
+                  plansViewMode === 'drafts'
+                    ? 'bg-[#EAB308] text-[#121214]'
+                    : 'text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                Sem Aluno / Modelos ({unassignedPlans.length})
+              </button>
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-              <div className="flex-1">
-                <FieldLabel>Selecionar Aluno</FieldLabel>
-                <select
-                  value={effectiveClient?.id || ''}
-                  onChange={(e) => setSelectedClientId(e.target.value)}
-                  className="w-full rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5 text-sm text-[#F4F4F5] outline-none focus:border-[#EAB308]"
-                >
-                  {activeClients.length === 0 ? (
-                    <option value="">Sem alunos ativos</option>
-                  ) : (
-                    activeClients.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
-              <GoldButton disabled={!effectiveClient} onClick={() => setShowNewPlan(true)}>
+              {plansViewMode === 'client' ? (
+                <div className="flex-1">
+                  <FieldLabel>Selecionar Aluno</FieldLabel>
+                  <select
+                    value={effectiveClient?.id || ''}
+                    onChange={(e) => setSelectedClientId(e.target.value)}
+                    className="w-full rounded-xl border border-[#323238] bg-[#242429] px-3.5 py-2.5 text-sm text-[#F4F4F5] outline-none focus:border-[#EAB308]"
+                  >
+                    {activeClients.length === 0 ? (
+                      <option value="">Sem alunos ativos</option>
+                    ) : (
+                      activeClients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              ) : (
+                <p className="flex-1 text-xs text-[#A1A1AA]">
+                  Cria modelos ou planos de treino sem aluno associado. Monta os exercícios primeiro e
+                  atribui-os aos alunos quando quiseres, com data agendada se preferires.
+                </p>
+              )}
+              <GoldButton onClick={() => setShowNewPlan(true)}>
                 <Plus className="h-4 w-4" />
                 Novo Plano de Treino
               </GoldButton>
             </div>
           </BrandCard>
 
-          {clientPlans.length === 0 ? (
+          {displayedPlans.length === 0 ? (
             <EmptyState
               icon={<Dumbbell className="h-6 w-6" />}
-              title="Sem planos atribuídos"
-              subtitle={`Cria um plano para ${effectiveClient?.name || 'este aluno'} e escolhe exercícios da biblioteca.`}
+              title={
+                plansViewMode === 'drafts' ? 'Sem planos por atribuir' : 'Sem planos atribuídos'
+              }
+              subtitle={
+                plansViewMode === 'drafts'
+                  ? 'Cria um plano sem aluno para montar os exercícios primeiro e atribuí-lo mais tarde.'
+                  : `Cria um plano para ${effectiveClient?.name || 'este aluno'} e escolhe exercícios da biblioteca.`
+              }
             />
           ) : (
             <div className="space-y-4">
-              {clientPlans.map((plan) => {
+              {displayedPlans.map((plan) => {
                 const items = workoutPlanItems
                   .filter((i) => i.planId === plan.id)
                   .sort((a, b) => a.orderIndex - b.orderIndex);
+                const isDraft = !plan.clientId || !plan.clientId.trim();
+                const scheduledDate = (plan.availableFromDate || '').trim();
+                const isScheduledFuture =
+                  !isDraft && /^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) && scheduledDate > todayIso;
+
                 return (
                   <BrandCard key={plan.id} highlight>
                     <div className="flex items-start justify-between gap-2">
@@ -216,6 +270,54 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                       </button>
                     </div>
 
+                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                      {isDraft ? (
+                        <div className="flex items-center gap-2">
+                          <StatusPill tone="gold">Sem aluno · Modelo</StatusPill>
+                          <span className="text-xs text-[#A1A1AA]">
+                            {items.length} exercício(s)
+                          </span>
+                        </div>
+                      ) : isScheduledFuture ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusPill tone="amber">
+                            Agendado · {formatIsoPt(scheduledDate)}
+                          </StatusPill>
+                          <span className="text-xs text-[#A1A1AA]">
+                            Oculto para o aluno até {formatIsoPt(scheduledDate)}
+                          </span>
+                        </div>
+                      ) : (
+                        <StatusPill tone="green">Visível para o aluno</StatusPill>
+                      )}
+
+                      {!isDraft && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSchedulePlan(plan)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-[#323238] bg-[#242429] px-2.5 py-1 text-xs font-semibold text-[#FACC15] hover:border-[#EAB308]"
+                          >
+                            <Calendar className="h-3.5 w-3.5" />
+                            {isScheduledFuture ? 'Alterar data' : 'Agendar dia'}
+                          </button>
+                          {isScheduledFuture && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await repo.updateWorkoutPlanSchedule(uid, plan.id, '');
+                                onBanner('Plano disponibilizado imediatamente ao aluno!');
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#22C55E]/40 bg-[#143521] px-2.5 py-1 text-xs font-semibold text-[#22C55E] hover:bg-[#19452A]"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              Libertar agora
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="my-3 border-t border-[#323238]" />
 
                     {items.length === 0 ? (
@@ -236,16 +338,18 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                                 {item.loadKg ? ` · ${item.loadKg}` : ''} · Descanso{' '}
                                 {item.restSeconds}s
                               </p>
-                              <ExerciseLastLoadBadge
-                                item={item}
-                                clientId={plan.clientId}
-                                workoutPlans={workoutPlans}
-                                workoutPlanItems={workoutPlanItems}
-                                workoutLoadLogs={workoutLoadLogs}
-                                onOpenHistory={() =>
-                                  setHistoryItem({ item, clientId: plan.clientId })
-                                }
-                              />
+                              {!isDraft && (
+                                <ExerciseLastLoadBadge
+                                  item={item}
+                                  clientId={plan.clientId}
+                                  workoutPlans={workoutPlans}
+                                  workoutPlanItems={workoutPlanItems}
+                                  workoutLoadLogs={workoutLoadLogs}
+                                  onOpenHistory={() =>
+                                    setHistoryItem({ item, clientId: plan.clientId })
+                                  }
+                                />
+                              )}
                               {item.notes && (
                                 <p className="text-xs text-[#A1A1AA]">{item.notes}</p>
                               )}
@@ -267,14 +371,25 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                         <Plus className="h-4 w-4" />
                         Adicionar Exercício
                       </SecondaryButton>
-                      <SecondaryButton
-                        fullWidth
-                        disabled={activeClients.length <= 1}
-                        onClick={() => setAssignPlan(plan)}
-                      >
-                        <Users className="h-4 w-4" />
-                        Adicionar a mais alunos
-                      </SecondaryButton>
+                      {isDraft ? (
+                        <GoldButton
+                          fullWidth
+                          disabled={activeClients.length === 0}
+                          onClick={() => setAssignPlan(plan)}
+                        >
+                          <Users className="h-4 w-4" />
+                          Atribuir a alunos...
+                        </GoldButton>
+                      ) : (
+                        <SecondaryButton
+                          fullWidth
+                          disabled={activeClients.length <= 1}
+                          onClick={() => setAssignPlan(plan)}
+                        >
+                          <Users className="h-4 w-4" />
+                          Adicionar a mais alunos
+                        </SecondaryButton>
+                      )}
                     </div>
                   </BrandCard>
                 );
@@ -282,7 +397,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
             </div>
           )}
 
-          {effectiveClient && clientFeedback.length > 0 && (
+          {plansViewMode === 'client' && effectiveClient && clientFeedback.length > 0 && (
             <PtRecentFeedbackCard
               clientName={effectiveClient.name}
               feedbackItems={clientFeedback}
@@ -293,24 +408,38 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
             />
           )}
 
-          {showNewPlan && effectiveClient && (
+          {showNewPlan && (
             <NewPlanModal
               clients={activeClients}
-              initialClientId={effectiveClient.id}
+              initialClientId={plansViewMode === 'client' ? effectiveClient?.id || '' : ''}
+              defaultUnassigned={plansViewMode === 'drafts' || activeClients.length === 0}
               onClose={() => setShowNewPlan(false)}
-              onCreate={async (selectedIds, title, split) => {
+              onCreate={async (selectedIds, title, split, availableFromDate) => {
                 const count = await repo.createWorkoutPlansForClients(
                   uid,
                   selectedIds,
                   title,
-                  split
+                  split,
+                  availableFromDate
                 );
                 setShowNewPlan(false);
-                onBanner(
-                  count > 1
-                    ? `Plano de treino criado para ${count} alunos!`
-                    : 'Plano de treino criado!'
-                );
+                if (selectedIds.length === 0) {
+                  setPlansViewMode('drafts');
+                  onBanner('Plano guardado em "Sem Aluno / Modelos"!');
+                } else {
+                  setPlansViewMode('client');
+                  if (!effectiveClient || !selectedIds.includes(effectiveClient.id)) {
+                    setSelectedClientId(selectedIds[0]);
+                  }
+                  const schedSuffix = availableFromDate
+                    ? ` (visível a ${formatIsoPt(availableFromDate)})`
+                    : '';
+                  onBanner(
+                    count > 1
+                      ? `Plano de treino criado para ${count} alunos${schedSuffix}!`
+                      : `Plano de treino criado${schedSuffix}!`
+                  );
+                }
               }}
             />
           )}
@@ -318,21 +447,46 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
           {assignPlan && (
             <AssignPlanToClientsModal
               plan={assignPlan}
-              clients={activeClients.filter((c) => c.id !== assignPlan.clientId)}
+              clients={
+                !assignPlan.clientId || !assignPlan.clientId.trim()
+                  ? activeClients
+                  : activeClients.filter((c) => c.id !== assignPlan.clientId)
+              }
               itemCount={workoutPlanItems.filter((i) => i.planId === assignPlan.id).length}
               onClose={() => setAssignPlan(null)}
-              onAssign={async (targetIds) => {
+              onAssign={async (targetIds, availableFromDate) => {
                 const count = await repo.assignWorkoutPlanToClients(
                   uid,
                   assignPlan,
                   workoutPlanItems,
-                  targetIds
+                  targetIds,
+                  availableFromDate
                 );
                 setAssignPlan(null);
+                const schedSuffix = availableFromDate
+                  ? ` (visível a ${formatIsoPt(availableFromDate)})`
+                  : '';
                 onBanner(
                   count === 1
-                    ? 'Plano copiado para 1 aluno!'
-                    : `Plano copiado para ${count} alunos!`
+                    ? `Plano atribuído a 1 aluno${schedSuffix}!`
+                    : `Plano atribuído a ${count} alunos${schedSuffix}!`
+                );
+              }}
+            />
+          )}
+
+          {schedulePlan && (
+            <SchedulePlanModal
+              plan={schedulePlan}
+              todayIso={todayIso}
+              onClose={() => setSchedulePlan(null)}
+              onSave={async (availableFromDate) => {
+                await repo.updateWorkoutPlanSchedule(uid, schedulePlan.id, availableFromDate);
+                setSchedulePlan(null);
+                onBanner(
+                  availableFromDate
+                    ? `Acesso agendado para ${formatIsoPt(availableFromDate)}.`
+                    : 'Plano disponibilizado imediatamente ao aluno!'
                 );
               }}
             />
@@ -547,17 +701,143 @@ const ExerciseLibraryView: React.FC<{
   );
 };
 
+function getTodayIsoDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function addDaysIsoDate(days: number): string {
+  const dt = new Date();
+  dt.setDate(dt.getDate() + days);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function nextMondayIsoDate(): string {
+  const dt = new Date();
+  const dow = dt.getDay(); // 0=Sun..6=Sat
+  const daysUntilMonday = dow === 1 ? 7 : dow === 0 ? 1 : 8 - dow;
+  dt.setDate(dt.getDate() + daysUntilMonday);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatIsoPt(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso || '').trim());
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+const AccessSchedulePicker: React.FC<{
+  isScheduled: boolean;
+  onIsScheduledChange: (val: boolean) => void;
+  selectedDate: string;
+  onSelectedDateChange: (val: string) => void;
+}> = ({ isScheduled, onIsScheduledChange, selectedDate, onSelectedDateChange }) => {
+  const todayIso = useMemo(() => getTodayIsoDate(), []);
+  const tomorrowIso = useMemo(() => addDaysIsoDate(1), []);
+  const nextMonIso = useMemo(() => nextMondayIsoDate(), []);
+  const plus7Iso = useMemo(() => addDaysIsoDate(7), []);
+
+  return (
+    <div className="space-y-2 rounded-xl border border-[#323238] bg-[#1B1B1E] p-3">
+      <FieldLabel>Acesso do aluno</FieldLabel>
+      <div className="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          onClick={() => onIsScheduledChange(false)}
+          className={`min-h-[36px] rounded-xl border text-xs font-bold transition ${
+            !isScheduled
+              ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+              : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+          }`}
+        >
+          Imediato
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (!selectedDate) onSelectedDateChange(tomorrowIso);
+            onIsScheduledChange(true);
+          }}
+          className={`min-h-[36px] rounded-xl border text-xs font-bold transition ${
+            isScheduled
+              ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+              : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+          }`}
+        >
+          Agendar dia
+        </button>
+      </div>
+      {isScheduled && (
+        <div className="space-y-2 pt-1">
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { label: 'Amanhã', value: tomorrowIso },
+              { label: 'Próx. Segunda', value: nextMonIso },
+              { label: '+7 dias', value: plus7Iso },
+            ].map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => onSelectedDateChange(preset.value)}
+                className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
+                  selectedDate === preset.value
+                    ? 'border-[#F59E0B] bg-[#F59E0B] text-[#121214]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <input
+            type="date"
+            min={todayIso}
+            value={selectedDate || tomorrowIso}
+            onChange={(e) => onSelectedDateChange(e.target.value)}
+            className="w-full rounded-xl border border-[#F59E0B]/50 bg-[#242429] px-3 py-2 text-sm text-[#F4F4F5] outline-none focus:border-[#EAB308]"
+          />
+          <p className="text-[11px] text-[#A1A1AA]">
+            O aluno só verá este plano a partir do dia{' '}
+            <span className="font-semibold text-[#FACC15]">
+              {formatIsoPt(selectedDate || tomorrowIso)}
+            </span>
+            .
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const NewPlanModal: React.FC<{
   clients: ClientRecord[];
   initialClientId: string;
+  defaultUnassigned?: boolean;
   onClose: () => void;
-  onCreate: (clientIds: string[], title: string, split: string) => Promise<void>;
-}> = ({ clients, initialClientId, onClose, onCreate }) => {
+  onCreate: (
+    clientIds: string[],
+    title: string,
+    split: string,
+    availableFromDate: string
+  ) => Promise<void>;
+}> = ({ clients, initialClientId, defaultUnassigned = false, onClose, onCreate }) => {
   const [title, setTitle] = useState('');
   const [split, setSplit] = useState('Treino A · Corpo Inteiro');
+  const [assignNow, setAssignNow] = useState(!defaultUnassigned && clients.length > 0);
   const [selectedIds, setSelectedIds] = useState<string[]>(
     initialClientId ? [initialClientId] : clients[0] ? [clients[0].id] : []
   );
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState(() => addDaysIsoDate(1));
 
   const toggleClient = (id: string) => {
     setSelectedIds((prev) =>
@@ -566,6 +846,7 @@ const NewPlanModal: React.FC<{
   };
 
   const allSelected = clients.length > 0 && selectedIds.length === clients.length;
+  const canSubmit = Boolean(title.trim()) && (!assignNow || selectedIds.length > 0);
 
   return (
     <Modal open title="Novo Plano de Treino" onClose={onClose}>
@@ -582,51 +863,108 @@ const NewPlanModal: React.FC<{
           <FieldLabel>Divisão / Dia</FieldLabel>
           <Input value={split} onChange={(e) => setSplit(e.target.value)} />
         </div>
+
         <div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <FieldLabel>Alunos ({selectedIds.length} selecionado(s))</FieldLabel>
+          <FieldLabel>Destino do plano</FieldLabel>
+          <div className="grid grid-cols-2 gap-1.5">
             <button
               type="button"
-              onClick={() =>
-                setSelectedIds(allSelected ? [] : clients.map((c) => c.id))
-              }
-              className="text-xs font-bold text-[#FACC15] hover:underline"
+              onClick={() => setAssignNow(false)}
+              className={`min-h-[38px] rounded-xl border text-xs font-bold transition ${
+                !assignNow
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+              }`}
             >
-              {allSelected ? 'Limpar seleção' : 'Selecionar todos'}
+              Guardar sem aluno
+            </button>
+            <button
+              type="button"
+              disabled={clients.length === 0}
+              onClick={() => setAssignNow(true)}
+              className={`min-h-[38px] rounded-xl border text-xs font-bold transition disabled:opacity-40 ${
+                assignNow
+                  ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
+                  : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+              }`}
+            >
+              Atribuir já a alunos
             </button>
           </div>
-          <div className="max-h-44 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
-            {clients.map((c) => {
-              const checked = selectedIds.includes(c.id);
-              return (
-                <label
-                  key={c.id}
-                  className="flex cursor-pointer items-center justify-between gap-2.5 px-3 py-2 text-xs hover:bg-[#2E2E35]"
-                >
-                  <span className="flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleClient(c.id)}
-                      className="h-4 w-4 accent-[#EAB308]"
-                    />
-                    <span className="font-semibold text-[#F4F4F5]">{c.name}</span>
-                  </span>
-                  <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
-                    {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
-                  </StatusPill>
-                </label>
-              );
-            })}
-          </div>
         </div>
+
+        {!assignNow ? (
+          <div className="rounded-xl border border-[#323238] bg-[#242429] p-3 text-xs text-[#A1A1AA]">
+            O plano fica guardado em <strong className="text-[#F4F4F5]">Sem Aluno / Modelos</strong>{' '}
+            para adicionares exercícios primeiro e atribuíres aos alunos mais tarde (com data
+            agendada se quiseres).
+          </div>
+        ) : (
+          <>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <FieldLabel>Alunos ({selectedIds.length} selecionado(s))</FieldLabel>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedIds(allSelected ? [] : clients.map((c) => c.id))
+                  }
+                  className="text-xs font-bold text-[#FACC15] hover:underline"
+                >
+                  {allSelected ? 'Limpar seleção' : 'Selecionar todos'}
+                </button>
+              </div>
+              <div className="max-h-40 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
+                {clients.map((c) => {
+                  const checked = selectedIds.includes(c.id);
+                  return (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-center justify-between gap-2.5 px-3 py-2 text-xs hover:bg-[#2E2E35]"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleClient(c.id)}
+                          className="h-4 w-4 accent-[#EAB308]"
+                        />
+                        <span className="font-semibold text-[#F4F4F5]">{c.name}</span>
+                      </span>
+                      <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
+                        {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
+                      </StatusPill>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <AccessSchedulePicker
+              isScheduled={isScheduled}
+              onIsScheduledChange={setIsScheduled}
+              selectedDate={scheduledDate}
+              onSelectedDateChange={setScheduledDate}
+            />
+          </>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
           <GoldButton
-            disabled={!title.trim() || selectedIds.length === 0}
-            onClick={() => onCreate(selectedIds, title, split)}
+            disabled={!canSubmit}
+            onClick={() =>
+              onCreate(
+                assignNow ? selectedIds : [],
+                title,
+                split,
+                assignNow && isScheduled ? scheduledDate : ''
+              )
+            }
           >
-            {selectedIds.length > 1
+            {!assignNow
+              ? 'Guardar sem aluno'
+              : selectedIds.length > 1
               ? `Criar para ${selectedIds.length} alunos`
               : 'Criar Plano'}
           </GoldButton>
@@ -641,9 +979,11 @@ const AssignPlanToClientsModal: React.FC<{
   clients: ClientRecord[];
   itemCount: number;
   onClose: () => void;
-  onAssign: (targetClientIds: string[]) => Promise<void>;
+  onAssign: (targetClientIds: string[], availableFromDate: string) => Promise<void>;
 }> = ({ plan, clients, itemCount, onClose, onAssign }) => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState(() => addDaysIsoDate(1));
   const [saving, setSaving] = useState(false);
 
   const toggleClient = (id: string) => {
@@ -653,11 +993,12 @@ const AssignPlanToClientsModal: React.FC<{
   };
 
   const allSelected = clients.length > 0 && selectedIds.length === clients.length;
+  const isDraft = !plan.clientId || !plan.clientId.trim();
 
   return (
     <Modal
       open
-      title="Adicionar Plano a Mais Alunos"
+      title={isDraft ? 'Atribuir Plano a Alunos' : 'Adicionar Plano a Mais Alunos'}
       subtitle={`${plan.title} · ${itemCount} exercício(s) serão copiados`}
       onClose={onClose}
     >
@@ -667,43 +1008,52 @@ const AssignPlanToClientsModal: React.FC<{
           exercícios) para poder registar as suas próprias cargas.
         </p>
         {clients.length === 0 ? (
-          <p className="text-xs text-[#A1A1AA]">Não existem outros alunos ativos disponíveis.</p>
+          <p className="text-xs text-[#A1A1AA]">Não existem alunos ativos disponíveis.</p>
         ) : (
-          <div>
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <FieldLabel>Escolher alunos ({selectedIds.length})</FieldLabel>
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedIds(allSelected ? [] : clients.map((c) => c.id))
-                }
-                className="text-xs font-bold text-[#FACC15] hover:underline"
-              >
-                {allSelected ? 'Limpar seleção' : 'Selecionar todos'}
-              </button>
-            </div>
-            <div className="max-h-52 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
-              {clients.map((c) => (
-                <label
-                  key={c.id}
-                  className="flex cursor-pointer items-center justify-between gap-2.5 px-3 py-2 text-xs hover:bg-[#2E2E35]"
+          <>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <FieldLabel>Escolher alunos ({selectedIds.length})</FieldLabel>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedIds(allSelected ? [] : clients.map((c) => c.id))
+                  }
+                  className="text-xs font-bold text-[#FACC15] hover:underline"
                 >
-                  <span className="flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(c.id)}
-                      onChange={() => toggleClient(c.id)}
-                      className="h-4 w-4 accent-[#EAB308]"
-                    />
-                    <span className="font-semibold text-[#F4F4F5]">{c.name}</span>
-                  </span>
-                  <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
-                    {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
-                  </StatusPill>
-                </label>
-              ))}
+                  {allSelected ? 'Limpar seleção' : 'Selecionar todos'}
+                </button>
+              </div>
+              <div className="max-h-44 overflow-y-auto rounded-xl border border-[#323238] bg-[#242429] divide-y divide-[#323238]/60">
+                {clients.map((c) => (
+                  <label
+                    key={c.id}
+                    className="flex cursor-pointer items-center justify-between gap-2.5 px-3 py-2 text-xs hover:bg-[#2E2E35]"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(c.id)}
+                        onChange={() => toggleClient(c.id)}
+                        className="h-4 w-4 accent-[#EAB308]"
+                      />
+                      <span className="font-semibold text-[#F4F4F5]">{c.name}</span>
+                    </span>
+                    <StatusPill tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}>
+                      {c.trainingType === 'PERSONALIZADO' ? 'Personalizado' : 'Grupo'}
+                    </StatusPill>
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
+
+            <AccessSchedulePicker
+              isScheduled={isScheduled}
+              onIsScheduledChange={setIsScheduled}
+              selectedDate={scheduledDate}
+              onSelectedDateChange={setScheduledDate}
+            />
+          </>
         )}
         <div className="flex justify-end gap-2 pt-2">
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
@@ -712,15 +1062,63 @@ const AssignPlanToClientsModal: React.FC<{
             onClick={async () => {
               setSaving(true);
               try {
-                await onAssign(selectedIds);
+                await onAssign(selectedIds, isScheduled ? scheduledDate : '');
               } finally {
                 setSaving(false);
               }
             }}
           >
             {saving
-              ? 'A copiar...'
-              : `Adicionar a ${selectedIds.length || ''} aluno(s)`}
+              ? 'A guardar...'
+              : `${isDraft ? 'Atribuir' : 'Adicionar'} a ${selectedIds.length || ''} aluno(s)`}
+          </GoldButton>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const SchedulePlanModal: React.FC<{
+  plan: WorkoutPlanRecord;
+  todayIso: string;
+  onClose: () => void;
+  onSave: (availableFromDate: string) => Promise<void>;
+}> = ({ plan, todayIso, onClose, onSave }) => {
+  const existingDate = (plan.availableFromDate || '').trim();
+  const initialScheduled =
+    /^\d{4}-\d{2}-\d{2}$/.test(existingDate) && existingDate > todayIso;
+  const [isScheduled, setIsScheduled] = useState(initialScheduled);
+  const [scheduledDate, setScheduledDate] = useState(
+    initialScheduled ? existingDate : addDaysIsoDate(1)
+  );
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <Modal open title="Agendar Acesso do Aluno" subtitle={plan.title} onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-xs text-[#A1A1AA]">
+          Escolhe se este plano fica visível de imediato ou apenas a partir de uma data específica.
+        </p>
+        <AccessSchedulePicker
+          isScheduled={isScheduled}
+          onIsScheduledChange={setIsScheduled}
+          selectedDate={scheduledDate}
+          onSelectedDateChange={setScheduledDate}
+        />
+        <div className="flex justify-end gap-2 pt-2">
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <GoldButton
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await onSave(isScheduled ? scheduledDate : '');
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? 'A guardar...' : isScheduled ? 'Guardar data' : 'Libertar agora'}
           </GoldButton>
         </div>
       </div>

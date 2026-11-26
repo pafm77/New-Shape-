@@ -988,8 +988,9 @@ private fun StudentWorkoutScreen(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
-    val plans = remember(state.workoutPlans, student.id) {
-        state.workoutPlans.filter { it.clientId == student.id }
+    val todayIso = currentLocalIsoDate()
+    val plans = remember(state.workoutPlans, student.id, todayIso) {
+        state.workoutPlans.filter { it.clientId == student.id && it.isAvailableToStudent(todayIso) }
     }
     var executingPlanId by remember { mutableStateOf<String?>(null) }
     var completedExerciseIds by remember(executingPlanId) { mutableStateOf<Set<String>>(emptySet()) }

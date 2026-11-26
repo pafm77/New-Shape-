@@ -147,6 +147,7 @@
         "clientId": { "type": "string" },
         "title": { "type": "string" },
         "splitLabel": { "type": "string" },
+        "availableFromDate": { "type": "string" },
         "createdAtMillis": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
