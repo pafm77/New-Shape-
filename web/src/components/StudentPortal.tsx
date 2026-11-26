@@ -50,6 +50,7 @@ import {
   TrainingWeekRecord,
   WaitlistEntryRecord,
   WeekResponseRecord,
+  WorkoutFeedbackRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
@@ -105,11 +106,19 @@ import { StudentInstallBanner } from './StudentInstallBanner';
 import {
   BirthDateReminderBanner,
   PostWorkoutFeedbackModal,
+  StudentAchievementsCard,
   StudioAnnouncementsBanner,
   WeeklyGoalStreakCard,
   formatBirthDatePt,
   parseBirthDate,
 } from './StudentEngagementWidgets';
+import {
+  ActiveWorkoutHudCard,
+  ActiveWorkoutSummaryData,
+  ActiveWorkoutSummaryModal,
+  BrokenPrRecord,
+  parseRepAverage,
+} from './ActiveWorkoutSummaryModal';
 import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 
 interface StudentPortalProps {
@@ -131,6 +140,7 @@ interface StudentPortalProps {
   chatMessages: ChatMessageRecord[];
   studioAnnouncements?: StudioAnnouncementRecord[];
   announcementReads?: AnnouncementReadRecord[];
+  workoutFeedback?: WorkoutFeedbackRecord[];
   settings: StudioSettingsRecord;
   initialWeekSlug?: string;
   showInstallPrompt?: boolean;
@@ -162,6 +172,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   chatMessages,
   studioAnnouncements = [],
   announcementReads = [],
+  workoutFeedback = [],
   settings,
   initialWeekSlug,
   showInstallPrompt = false,
@@ -229,11 +240,65 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   // Active workout execution state (captures last-workout baseline loads per item)
   const [executingPlanId, setExecutingPlanId] = useState<string | null>(null);
+  const [workoutStartedAt, setWorkoutStartedAt] = useState<number>(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [baselineLoads, setBaselineLoads] = useState<Record<string, string>>({});
   const [completedItemIds, setCompletedItemIds] = useState<Set<string>>(new Set());
+  const [completedSetKeys, setCompletedSetKeys] = useState<Set<string>>(new Set());
+  const [sessionBrokenPrs, setSessionBrokenPrs] = useState<BrokenPrRecord[]>([]);
+  const [workoutSummary, setWorkoutSummary] = useState<ActiveWorkoutSummaryData | null>(null);
   const [restSecondsLeft, setRestSecondsLeft] = useState<number>(0);
   const restIntervalRef = useRef<number | null>(null);
   const [collapsedPlanIds, setCollapsedPlanIds] = useState<Set<string>>(() => new Set());
+
+  const parseLoadNum = (raw?: string | null): number | null => {
+    if (!raw) return null;
+    const m = raw.replace(',', '.').match(/\d+(\.\d+)?/);
+    if (!m) return null;
+    const v = Number(m[0]);
+    return Number.isFinite(v) && v > 0 ? v : null;
+  };
+
+  const previousPrByExercise = useMemo(() => {
+    const map = new Map<string, number>();
+    workoutLoadLogs
+      .filter((l) => l.clientId === client.id && l.numericKg > 0)
+      .forEach((l) => {
+        const k = l.exerciseName.trim().toLowerCase();
+        if (!k) return;
+        const cur = map.get(k);
+        if (cur === undefined || l.numericKg > cur) map.set(k, l.numericKg);
+      });
+    const clientPlanIds = new Set(
+      workoutPlans.filter((p) => p.clientId === client.id).map((p) => p.id)
+    );
+    workoutPlanItems
+      .filter((it) => clientPlanIds.has(it.planId))
+      .forEach((it) => {
+        const k = it.exerciseName.trim().toLowerCase();
+        if (!k) return;
+        [parseLoadNum(it.loadKg), parseLoadNum(it.lastLoadKg)].forEach((v) => {
+          if (v !== null) {
+            const cur = map.get(k);
+            if (cur === undefined || v > cur) map.set(k, v);
+          }
+        });
+      });
+    return map;
+  }, [workoutLoadLogs, workoutPlans, workoutPlanItems, client.id]);
+
+  useEffect(() => {
+    if (!executingPlanId || workoutStartedAt <= 0) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const tick = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - workoutStartedAt) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [executingPlanId, workoutStartedAt]);
 
   const togglePlanCollapsed = (planId: string) => {
     setCollapsedPlanIds((prev) => {
@@ -307,8 +372,105 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     });
     setBaselineLoads(snapshot);
     setCompletedItemIds(new Set());
+    setCompletedSetKeys(new Set());
+    setSessionBrokenPrs([]);
+    setWorkoutStartedAt(Date.now());
+    setElapsedSeconds(0);
     setExecutingPlanId(planId);
-    onBanner('Modo execução iniciado! A carga do último treino está visível em cada exercício.');
+    onBanner('Treino ativo iniciado! Marca cada série (S1, S2...) para controlar o descanso.');
+  };
+
+  const computePlanMetrics = (planItems: WorkoutPlanItemRecord[]) => {
+    let totalSets = 0;
+    let doneSets = 0;
+    let totalVolumeKg = 0;
+    planItems.forEach((it) => {
+      const setsCount = Math.max(1, Math.min(12, it.sets || 1));
+      totalSets += setsCount;
+      let itemDone = 0;
+      if (completedItemIds.has(it.id)) {
+        itemDone = setsCount;
+      } else {
+        for (let s = 1; s <= setsCount; s++) {
+          if (completedSetKeys.has(`${it.id}:${s}`)) itemDone += 1;
+        }
+      }
+      doneSets += itemDone;
+      if (itemDone > 0) {
+        const kg = parseLoadNum(it.loadKg) ?? parseLoadNum(it.lastLoadKg) ?? 0;
+        totalVolumeKg += kg * itemDone * parseRepAverage(it.reps);
+      }
+    });
+    const doneExercises = planItems.filter((it) => completedItemIds.has(it.id)).length;
+    return { totalSets, doneSets, doneExercises, totalVolumeKg };
+  };
+
+  const finishActiveWorkout = (plan: WorkoutPlanRecord) => {
+    const planItems = workoutPlanItems
+      .filter((i) => i.planId === plan.id)
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+    const m = computePlanMetrics(planItems);
+    setWorkoutSummary({
+      planId: plan.id,
+      planTitle: plan.title,
+      durationSeconds: elapsedSeconds,
+      completedSets: m.doneSets,
+      totalSets: m.totalSets,
+      completedExercises: m.doneExercises,
+      totalExercises: planItems.length,
+      totalVolumeKg: m.totalVolumeKg,
+      brokenPrs: sessionBrokenPrs,
+    });
+    setExecutingPlanId(null);
+    setWorkoutStartedAt(0);
+    setRestSecondsLeft(0);
+  };
+
+  const toggleSingleSet = (item: WorkoutPlanItemRecord, setNum: number, isSupersetNonLast: boolean) => {
+    const totalSets = Math.max(1, Math.min(12, item.sets || 1));
+    const key = `${item.id}:${setNum}`;
+    const wasDone = completedSetKeys.has(key);
+    const nextKeys = new Set(completedSetKeys);
+    if (wasDone) nextKeys.delete(key);
+    else nextKeys.add(key);
+    setCompletedSetKeys(nextKeys);
+
+    let allDone = true;
+    for (let s = 1; s <= totalSets; s++) {
+      if (!nextKeys.has(`${item.id}:${s}`)) {
+        allDone = false;
+        break;
+      }
+    }
+    setCompletedItemIds((prev) => {
+      const next = new Set(prev);
+      if (allDone) next.add(item.id);
+      else next.delete(item.id);
+      return next;
+    });
+    if (!wasDone && !isSupersetNonLast && item.restSeconds > 0) {
+      startRestTimer(item.restSeconds);
+    }
+  };
+
+  const toggleWholeExercise = (item: WorkoutPlanItemRecord) => {
+    const totalSets = Math.max(1, Math.min(12, item.sets || 1));
+    const wasDone = completedItemIds.has(item.id);
+    setCompletedItemIds((prev) => {
+      const next = new Set(prev);
+      if (wasDone) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+    setCompletedSetKeys((prev) => {
+      const next = new Set(prev);
+      for (let s = 1; s <= totalSets; s++) {
+        const k = `${item.id}:${s}`;
+        if (wasDone) next.delete(k);
+        else next.add(k);
+      }
+      return next;
+    });
   };
 
   const publishedWeeks = useMemo(
@@ -715,11 +877,42 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       </p>
                     </div>
                   </div>
-                  <SecondaryButton onClick={() => setRestSecondsLeft(0)}>
-                    Saltar descanso
-                  </SecondaryButton>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRestSecondsLeft((s) => s + 15)}
+                      className="rounded-lg border border-[#EAB308]/60 bg-[#242429] px-2.5 py-1.5 text-xs font-bold text-[#FACC15] hover:bg-[#2F2F36]"
+                    >
+                      +15s
+                    </button>
+                    <SecondaryButton onClick={() => setRestSecondsLeft(0)}>
+                      Saltar
+                    </SecondaryButton>
+                  </div>
                 </div>
               )}
+
+              {executingPlanId && (() => {
+                const activePlan = clientPlans.find((p) => p.id === executingPlanId);
+                if (!activePlan) return null;
+                const activeItems = workoutPlanItems
+                  .filter((i) => i.planId === activePlan.id)
+                  .sort((a, b) => a.orderIndex - b.orderIndex);
+                const metrics = computePlanMetrics(activeItems);
+                return (
+                  <ActiveWorkoutHudCard
+                    planTitle={activePlan.title}
+                    elapsedSeconds={elapsedSeconds}
+                    completedSets={metrics.doneSets}
+                    totalSets={metrics.totalSets}
+                    completedExercises={metrics.doneExercises}
+                    totalExercises={activeItems.length}
+                    totalVolumeKg={metrics.totalVolumeKg}
+                    brokenPrCount={sessionBrokenPrs.length}
+                    onFinish={() => finishActiveWorkout(activePlan)}
+                  />
+                );
+              })()}
 
               {clientPlans.length === 0 ? (
                 <EmptyState
@@ -812,14 +1005,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             )}
                           </button>
                           {isExecuting ? (
-                            <SecondaryButton
-                              onClick={() => {
-                                setExecutingPlanId(null);
-                                setRestSecondsLeft(0);
-                                setFeedbackTarget({ planId: plan.id, planTitle: plan.title });
-                                onBanner('Treino terminado! Bom trabalho 💪');
-                              }}
-                            >
+                            <SecondaryButton onClick={() => finishActiveWorkout(plan)}>
                               <Square className="h-3.5 w-3.5 text-[#EF4444]" />
                               Terminar treino
                             </SecondaryButton>
@@ -879,18 +1065,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 workoutLoadLogs={workoutLoadLogs}
                                 isExecuting={isExecuting}
                                 isDone={completedItemIds.has(item.id)}
+                                completedSetKeys={completedSetKeys}
                                 baselineLoadOverride={baselineOverride}
                                 labelPrefix={labelPrefix}
                                 isSupersetNonLast={isSupersetNonLast}
                                 isSupersetLast={isSupersetLast}
-                                onToggleDone={() => {
-                                  setCompletedItemIds((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(item.id)) next.delete(item.id);
-                                    else next.add(item.id);
-                                    return next;
-                                  });
-                                }}
+                                onToggleSet={(setNum) =>
+                                  toggleSingleSet(item, setNum, isSupersetNonLast)
+                                }
+                                onToggleDone={() => toggleWholeExercise(item)}
                                 onStartRest={() => startRestTimer(item.restSeconds)}
                                 onOpenHistory={() =>
                                   setHistoryTarget({
@@ -899,6 +1082,35 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   })
                                 }
                                 onSaveLoad={async (newLoad) => {
+                                  if (isExecuting) {
+                                    const newKg = parseLoadNum(newLoad);
+                                    if (newKg !== null && newKg > 0) {
+                                      const k = item.exerciseName.trim().toLowerCase();
+                                      const prevPr = previousPrByExercise.get(k) ?? null;
+                                      if (prevPr === null || newKg > prevPr + 0.05) {
+                                        setSessionBrokenPrs((prevList) => {
+                                          const existing = prevList.find(
+                                            (p) =>
+                                              p.exerciseName.toLowerCase() ===
+                                              item.exerciseName.toLowerCase()
+                                          );
+                                          const nextRecord: BrokenPrRecord = {
+                                            exerciseName: item.exerciseName,
+                                            previousKg: existing ? existing.previousKg : prevPr,
+                                            newKg: Math.max(existing?.newKg ?? 0, newKg),
+                                          };
+                                          return [
+                                            ...prevList.filter(
+                                              (p) =>
+                                                p.exerciseName.toLowerCase() !==
+                                                item.exerciseName.toLowerCase()
+                                            ),
+                                            nextRecord,
+                                          ];
+                                        });
+                                      }
+                                    }
+                                  }
                                   const prevForStorage = (
                                     baselineLoads[item.id] ||
                                     item.loadKg ||
@@ -1123,6 +1335,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 clientId={client.id}
                 bookings={bookings}
                 sessions={sessions}
+              />
+
+              <StudentAchievementsCard
+                client={client}
+                bookings={bookings}
+                sessions={sessions}
+                workoutLoadLogs={workoutLoadLogs}
+                assessments={assessments}
+                feedbackItems={workoutFeedback}
               />
 
               <AssessmentDashboard
@@ -1753,6 +1974,23 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         </Modal>
       )}
 
+      {/* Active Workout Final Summary Modal */}
+      <ActiveWorkoutSummaryModal
+        summary={workoutSummary}
+        studentName={client.name}
+        onSendFeedback={() => {
+          if (!workoutSummary) return;
+          const target = {
+            planId: workoutSummary.planId,
+            planTitle: workoutSummary.planTitle,
+          };
+          setWorkoutSummary(null);
+          setFeedbackTarget(target);
+        }}
+        onClose={() => setWorkoutSummary(null)}
+        onBanner={onBanner}
+      />
+
       {/* Post-Workout Feedback Modal */}
       <PostWorkoutFeedbackModal
         open={Boolean(feedbackTarget)}
@@ -1826,10 +2064,12 @@ const StudentExerciseLoadCard: React.FC<{
   workoutLoadLogs: WorkoutLoadLogRecord[];
   isExecuting: boolean;
   isDone: boolean;
+  completedSetKeys: Set<string>;
   baselineLoadOverride?: string;
   labelPrefix?: string;
   isSupersetNonLast?: boolean;
   isSupersetLast?: boolean;
+  onToggleSet: (setNum: number) => void;
   onToggleDone: () => void;
   onStartRest: () => void;
   onOpenHistory: () => void;
@@ -1843,10 +2083,12 @@ const StudentExerciseLoadCard: React.FC<{
   workoutLoadLogs,
   isExecuting,
   isDone,
+  completedSetKeys,
   baselineLoadOverride,
   labelPrefix,
   isSupersetNonLast = false,
   isSupersetLast = false,
+  onToggleSet,
   onToggleDone,
   onStartRest,
   onOpenHistory,
@@ -1961,6 +2203,32 @@ const StudentExerciseLoadCard: React.FC<{
           </span>
         ) : null}
       </div>
+
+      {/* Interactive Per-Set Checklist during Active Workout */}
+      {isExecuting && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold text-[#A1A1AA]">Séries:</span>
+          {Array.from({ length: Math.max(1, Math.min(12, item.sets || 1)) }, (_, idx) => {
+            const setNum = idx + 1;
+            const setDone = completedSetKeys.has(`${item.id}:${setNum}`);
+            return (
+              <button
+                key={setNum}
+                type="button"
+                onClick={() => onToggleSet(setNum)}
+                className={`inline-flex min-h-[34px] items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition ${
+                  setDone
+                    ? 'border-[#22C55E] bg-[#143521] text-[#22C55E]'
+                    : 'border-[#323238] bg-[#18181B] text-[#E4E4E7] hover:border-[#EAB308]'
+                }`}
+              >
+                {setDone && <Check className="h-3 w-3" />}
+                S{setNum}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 border-t border-[#323238]/70 pt-2">
         <label className="text-[11px] font-semibold text-[#A1A1AA]">

@@ -38,6 +38,7 @@ import {
   PAYMENT_METHODS,
   PaymentMethod,
   buildConsecutiveMonths,
+  buildPaymentMonthOptions,
   buildRecentMonthOptions,
   formatFixedSlot,
   formatFixedSlotsSummary,
@@ -1724,8 +1725,12 @@ export const RegisterPaymentModal: React.FC<{
 }> = ({ clientName, defaultAmount, defaultDurationMonths = 1, onClose, onConfirm }) => {
   const initialDuration: 1 | 6 | 12 =
     defaultDurationMonths === 6 || defaultDurationMonths === 12 ? defaultDurationMonths : 1;
-  const monthOptions = useMemo(() => buildRecentMonthOptions(), []);
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  const monthOptions = useMemo(() => buildPaymentMonthOptions(2, 3), []);
+  const defaultCurrentIdx = useMemo(() => {
+    const idx = monthOptions.findIndex((m) => m.isCurrent);
+    return idx >= 0 ? idx : 0;
+  }, [monthOptions]);
+  const [selectedIdx, setSelectedIdx] = useState(defaultCurrentIdx);
   const [durationMonths, setDurationMonths] = useState<1 | 6 | 12>(initialDuration);
   const [amount, setAmount] = useState(String(defaultAmount * initialDuration));
   const [method, setMethod] = useState<PaymentMethod>('MbWay');
@@ -1734,14 +1739,15 @@ export const RegisterPaymentModal: React.FC<{
   const [includeJoia, setIncludeJoia] = useState(false);
   const [joiaAmount, setJoiaAmount] = useState(String(DEFAULT_JOIA_EUR));
 
+  const selectedMonthOpt = monthOptions[selectedIdx] ?? monthOptions[defaultCurrentIdx];
   const numericAmount = Math.max(0, Number(amount) || 0);
   const numericSeguro = includeSeguro ? Math.max(0, Number(seguroAmount) || 0) : 0;
   const numericJoia = includeJoia ? Math.max(0, Number(joiaAmount) || 0) : 0;
   const grandTotal = numericAmount + numericSeguro + numericJoia;
   const perMonthValue = numericAmount / durationMonths;
   const coveredMonths = useMemo(
-    () => buildConsecutiveMonths(monthOptions[selectedIdx].monthYear, durationMonths),
-    [monthOptions, selectedIdx, durationMonths]
+    () => buildConsecutiveMonths(selectedMonthOpt.monthYear, durationMonths),
+    [selectedMonthOpt.monthYear, durationMonths]
   );
 
   const handleDurationChange = (nextDuration: 1 | 6 | 12) => {
@@ -1756,23 +1762,33 @@ export const RegisterPaymentModal: React.FC<{
     <Modal open title="Registar Mensalidade" subtitle={`Aluno: ${clientName}`} onClose={onClose}>
       <div className="space-y-3">
         <div>
-          <FieldLabel>{durationMonths > 1 ? 'Mês inicial da fidelização' : 'Mês'}</FieldLabel>
+          <FieldLabel>
+            {durationMonths > 1 ? 'Mês inicial da fidelização' : 'Mês (inclui mês seguinte)'}
+          </FieldLabel>
           <div className="flex flex-wrap gap-1.5">
-            {monthOptions.slice(0, 4).map((m, idx) => (
+            {monthOptions.map((m, idx) => (
               <button
                 key={m.monthYear}
                 type="button"
                 onClick={() => setSelectedIdx(idx)}
-                className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
                   selectedIdx === idx
                     ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
-                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA]'
+                    : m.isNextMonth
+                    ? 'border-[#EAB308]/50 bg-[#3D3314]/45 text-[#FACC15] hover:border-[#EAB308]'
+                    : 'border-[#323238] bg-[#242429] text-[#A1A1AA] hover:text-white'
                 }`}
               >
                 {m.monthLabel}
+                {m.isNextMonth ? ' · Próx.' : m.isCurrent ? ' · Atual' : ''}
               </button>
             ))}
           </div>
+          {selectedMonthOpt.isFuture && (
+            <div className="mt-2 rounded-xl border border-[#EAB308]/45 bg-[#3D3314]/45 px-3 py-2 text-[11px] font-medium text-[#FACC15]">
+              Mensalidade antecipada ({selectedMonthOpt.monthLabel}): fica registada no mês seguinte sem misturar na faturação realizada deste mês.
+            </div>
+          )}
         </div>
 
         <div>

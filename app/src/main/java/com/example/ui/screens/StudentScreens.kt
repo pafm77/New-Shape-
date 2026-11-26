@@ -989,22 +989,195 @@ private fun StudentWorkoutScreen(
     state: StudioUiState,
     viewModel: NewShapeViewModel
 ) {
+    val context = LocalContext.current
     val todayIso = currentLocalIsoDate()
     val plans = remember(state.workoutPlans, student.id, todayIso) {
         state.workoutPlans.filter { it.clientId == student.id && it.isAvailableToStudent(todayIso) }
     }
     var executingPlanId by remember { mutableStateOf<String?>(null) }
+    var workoutStartedAtMillis by remember { mutableLongStateOf(0L) }
+    var elapsedSeconds by remember { mutableIntStateOf(0) }
     var completedExerciseIds by remember(executingPlanId) { mutableStateOf<Set<String>>(emptySet()) }
+    var completedSetKeys by remember(executingPlanId) { mutableStateOf<Set<String>>(emptySet()) }
+    var sessionBrokenPrs by remember(executingPlanId) { mutableStateOf<List<BrokenPrRecord>>(emptyList()) }
+    var workoutSummaryData by remember { mutableStateOf<ActiveWorkoutSummaryData?>(null) }
     var restSecondsLeft by remember { mutableIntStateOf(0) }
     var restExerciseName by remember { mutableStateOf("") }
     var historyTargetItem by remember { mutableStateOf<WorkoutPlanItemRecord?>(null) }
     var feedbackTargetPlan by remember { mutableStateOf<WorkoutPlanRecord?>(null) }
     var collapsedPlanIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
+    val previousPrByExercise = remember(state.workoutLoadLogs, state.workoutPlans, state.workoutPlanItems, student.id) {
+        val map = mutableMapOf<String, Double>()
+        state.workoutLoadLogs
+            .filter { it.clientId == student.id && it.numericKg > 0.0 }
+            .forEach { log ->
+                val key = log.exerciseName.trim().lowercase()
+                if (key.isNotEmpty()) {
+                    val cur = map[key]
+                    if (cur == null || log.numericKg > cur) map[key] = log.numericKg
+                }
+            }
+        val clientPlanIds = state.workoutPlans.filter { it.clientId == student.id }.map { it.id }.toSet()
+        state.workoutPlanItems
+            .filter { it.planId in clientPlanIds }
+            .forEach { item ->
+                val key = item.exerciseName.trim().lowercase()
+                if (key.isNotEmpty()) {
+                    listOfNotNull(parseNumericLoadKg(item.loadKg), parseNumericLoadKg(item.lastLoadKg)).forEach { v ->
+                        val cur = map[key]
+                        if (cur == null || v > cur) map[key] = v
+                    }
+                }
+            }
+        map.toMap()
+    }
+
+    LaunchedEffect(executingPlanId, workoutStartedAtMillis) {
+        if (executingPlanId != null && workoutStartedAtMillis > 0L) {
+            while (true) {
+                elapsedSeconds = ((System.currentTimeMillis() - workoutStartedAtMillis) / 1000L).toInt().coerceAtLeast(0)
+                delay(1000L)
+            }
+        } else {
+            elapsedSeconds = 0
+        }
+    }
+
     LaunchedEffect(restSecondsLeft) {
         if (restSecondsLeft > 0) {
             delay(1000L)
             restSecondsLeft -= 1
+        }
+    }
+
+    val activePlan = remember(plans, executingPlanId) {
+        plans.firstOrNull { it.id == executingPlanId }
+    }
+    val activePlanItems = remember(state.workoutPlanItems, activePlan) {
+        if (activePlan == null) emptyList()
+        else state.workoutPlanItems.filter { it.planId == activePlan.id }.sortedBy { it.orderIndex }
+    }
+
+    val activeTotalSets = remember(activePlanItems) {
+        activePlanItems.sumOf { it.sets.coerceIn(1, 12) }
+    }
+    val activeCompletedSets = remember(activePlanItems, completedSetKeys, completedExerciseIds) {
+        activePlanItems.sumOf { item ->
+            val count = item.sets.coerceIn(1, 12)
+            if (item.id in completedExerciseIds) count
+            else (1..count).count { s -> "${item.id}:$s" in completedSetKeys }
+        }
+    }
+    val activeCompletedExercises = remember(activePlanItems, completedExerciseIds) {
+        activePlanItems.count { it.id in completedExerciseIds }
+    }
+    val activeTotalVolumeKg = remember(activePlanItems, completedSetKeys, completedExerciseIds) {
+        activePlanItems.sumOf { item ->
+            val setCount = item.sets.coerceIn(1, 12)
+            val doneSets = if (item.id in completedExerciseIds) setCount
+            else (1..setCount).count { s -> "${item.id}:$s" in completedSetKeys }
+            if (doneSets <= 0) 0.0
+            else {
+                val kg = parseNumericLoadKg(item.loadKg) ?: parseNumericLoadKg(item.lastLoadKg) ?: 0.0
+                kg * doneSets * parseRepAverage(item.reps)
+            }
+        }
+    }
+
+    fun finishActiveWorkout(plan: WorkoutPlanRecord) {
+        val planItems = state.workoutPlanItems.filter { it.planId == plan.id }.sortedBy { it.orderIndex }
+        val totalSets = planItems.sumOf { it.sets.coerceIn(1, 12) }
+        val doneSets = planItems.sumOf { item ->
+            val count = item.sets.coerceIn(1, 12)
+            if (item.id in completedExerciseIds) count
+            else (1..count).count { s -> "${item.id}:$s" in completedSetKeys }
+        }
+        val doneExercises = planItems.count { it.id in completedExerciseIds }
+        val totalVol = planItems.sumOf { item ->
+            val count = item.sets.coerceIn(1, 12)
+            val setsDone = if (item.id in completedExerciseIds) count
+            else (1..count).count { s -> "${item.id}:$s" in completedSetKeys }
+            if (setsDone <= 0) 0.0
+            else {
+                val kg = parseNumericLoadKg(item.loadKg) ?: parseNumericLoadKg(item.lastLoadKg) ?: 0.0
+                kg * setsDone * parseRepAverage(item.reps)
+            }
+        }
+        workoutSummaryData = ActiveWorkoutSummaryData(
+            planId = plan.id,
+            planTitle = plan.title,
+            durationSeconds = elapsedSeconds,
+            completedSets = doneSets,
+            totalSets = totalSets,
+            completedExercises = doneExercises,
+            totalExercises = planItems.size,
+            totalVolumeKg = totalVol,
+            brokenPrs = sessionBrokenPrs
+        )
+        executingPlanId = null
+        workoutStartedAtMillis = 0L
+        restSecondsLeft = 0
+    }
+
+    fun handleSaveExerciseLoad(exItem: WorkoutPlanItemRecord, newLoad: String, isExecuting: Boolean) {
+        if (isExecuting) {
+            val newKg = parseNumericLoadKg(newLoad)
+            if (newKg != null && newKg > 0.0) {
+                val key = exItem.exerciseName.trim().lowercase()
+                val prevPr = previousPrByExercise[key]
+                if (prevPr == null || newKg > prevPr + 0.05) {
+                    val already = sessionBrokenPrs.firstOrNull { it.exerciseName.equals(exItem.exerciseName, ignoreCase = true) }
+                    val updated = BrokenPrRecord(
+                        exerciseName = exItem.exerciseName,
+                        previousKg = already?.previousKg ?: prevPr,
+                        newKg = maxOf(already?.newKg ?: 0.0, newKg)
+                    )
+                    sessionBrokenPrs = sessionBrokenPrs.filterNot {
+                        it.exerciseName.equals(exItem.exerciseName, ignoreCase = true)
+                    } + updated
+                }
+            }
+        }
+        viewModel.updateWorkoutPlanItemLoad(
+            itemId = exItem.id,
+            loadKg = newLoad,
+            previousLoadKg = exItem.loadKg
+        )
+    }
+
+    fun toggleSingleSet(
+        exItem: WorkoutPlanItemRecord,
+        setNum: Int,
+        isSupersetNonLast: Boolean,
+        restLabel: String
+    ) {
+        val totalSets = exItem.sets.coerceIn(1, 12)
+        val key = "${exItem.id}:$setNum"
+        val wasDone = key in completedSetKeys
+        val nextKeys = if (wasDone) completedSetKeys - key else completedSetKeys + key
+        completedSetKeys = nextKeys
+        val allSetsDone = (1..totalSets).all { s -> "${exItem.id}:$s" in nextKeys }
+        completedExerciseIds = if (allSetsDone) {
+            completedExerciseIds + exItem.id
+        } else {
+            completedExerciseIds - exItem.id
+        }
+        if (!wasDone && !isSupersetNonLast && exItem.restSeconds > 0) {
+            restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
+            restExerciseName = restLabel
+        }
+    }
+
+    fun toggleWholeExercise(exItem: WorkoutPlanItemRecord) {
+        val totalSets = exItem.sets.coerceIn(1, 12)
+        val keysForItem = (1..totalSets).map { "${exItem.id}:$it" }.toSet()
+        if (exItem.id in completedExerciseIds) {
+            completedExerciseIds = completedExerciseIds - exItem.id
+            completedSetKeys = completedSetKeys - keysForItem
+        } else {
+            completedExerciseIds = completedExerciseIds + exItem.id
+            completedSetKeys = completedSetKeys + keysForItem
         }
     }
 
@@ -1063,6 +1236,22 @@ private fun StudentWorkoutScreen(
                         }
                     }
                 }
+            }
+        }
+
+        if (activePlan != null) {
+            item(key = "active_workout_hud_${activePlan.id}") {
+                ActiveWorkoutHudCard(
+                    planTitle = activePlan.title,
+                    elapsedSeconds = elapsedSeconds,
+                    completedSets = activeCompletedSets,
+                    totalSets = activeTotalSets,
+                    completedExercises = activeCompletedExercises,
+                    totalExercises = activePlanItems.size,
+                    totalVolumeKg = activeTotalVolumeKg,
+                    brokenPrCount = sessionBrokenPrs.size,
+                    onFinish = { finishActiveWorkout(activePlan) }
+                )
             }
         }
 
@@ -1187,7 +1376,11 @@ private fun StudentWorkoutScreen(
                                     onClick = {
                                         collapsedPlanIds = collapsedPlanIds - plan.id
                                         executingPlanId = plan.id
+                                        workoutStartedAtMillis = System.currentTimeMillis()
+                                        elapsedSeconds = 0
                                         completedExerciseIds = emptySet()
+                                        completedSetKeys = emptySet()
+                                        sessionBrokenPrs = emptyList()
                                     },
                                     testTag = "student_start_workout_${plan.id}"
                                 )
@@ -1205,17 +1398,13 @@ private fun StudentWorkoutScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Modo Execução ativo · Carga do último treino visível em cada exercício",
+                                text = "Modo Treino Ativo · Marca cada série (S1, S2...) para disparar o descanso automático",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = ConfirmedGreen,
                                 modifier = Modifier.weight(1f)
                             )
                             TextButton(
-                                onClick = {
-                                    executingPlanId = null
-                                    restSecondsLeft = 0
-                                    feedbackTargetPlan = plan
-                                },
+                                onClick = { finishActiveWorkout(plan) },
                                 modifier = Modifier.testTag("student_finish_workout_${plan.id}")
                             ) {
                                 Text("Terminar", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
@@ -1264,27 +1453,26 @@ private fun StudentWorkoutScreen(
                                                 workoutLoadLogs = state.workoutLoadLogs,
                                                 isExecuting = isExecuting,
                                                 isCompleted = exItem.id in completedExerciseIds,
+                                                completedSetKeys = completedSetKeys,
                                                 labelPrefix = block.itemLabel(inIdx),
                                                 isSupersetNonLast = isNonLast,
                                                 isSupersetLast = isLast,
-                                                onToggleComplete = {
-                                                    completedExerciseIds = if (exItem.id in completedExerciseIds) {
-                                                        completedExerciseIds - exItem.id
-                                                    } else {
-                                                        completedExerciseIds + exItem.id
-                                                    }
+                                                onToggleSet = { setNum ->
+                                                    toggleSingleSet(
+                                                        exItem = exItem,
+                                                        setNum = setNum,
+                                                        isSupersetNonLast = isNonLast,
+                                                        restLabel = "Bloco ${block.blockNumber} (${exItem.exerciseName})"
+                                                    )
                                                 },
+                                                onToggleComplete = { toggleWholeExercise(exItem) },
                                                 onStartRest = {
                                                     restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
                                                     restExerciseName = "Bloco ${block.blockNumber} (${exItem.exerciseName})"
                                                 },
                                                 onOpenHistory = { historyTargetItem = exItem },
                                                 onSaveLoad = { newLoad ->
-                                                    viewModel.updateWorkoutPlanItemLoad(
-                                                        itemId = exItem.id,
-                                                        loadKg = newLoad,
-                                                        previousLoadKg = exItem.loadKg
-                                                    )
+                                                    handleSaveExerciseLoad(exItem, newLoad, isExecuting)
                                                 }
                                             )
                                             if (isNonLast) {
@@ -1328,25 +1516,24 @@ private fun StudentWorkoutScreen(
                                     workoutLoadLogs = state.workoutLoadLogs,
                                     isExecuting = isExecuting,
                                     isCompleted = exItem.id in completedExerciseIds,
+                                    completedSetKeys = completedSetKeys,
                                     labelPrefix = block.itemLabel(0),
-                                    onToggleComplete = {
-                                        completedExerciseIds = if (exItem.id in completedExerciseIds) {
-                                            completedExerciseIds - exItem.id
-                                        } else {
-                                            completedExerciseIds + exItem.id
-                                        }
+                                    onToggleSet = { setNum ->
+                                        toggleSingleSet(
+                                            exItem = exItem,
+                                            setNum = setNum,
+                                            isSupersetNonLast = false,
+                                            restLabel = exItem.exerciseName
+                                        )
                                     },
+                                    onToggleComplete = { toggleWholeExercise(exItem) },
                                     onStartRest = {
                                         restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
                                         restExerciseName = exItem.exerciseName
                                     },
                                     onOpenHistory = { historyTargetItem = exItem },
                                     onSaveLoad = { newLoad ->
-                                        viewModel.updateWorkoutPlanItemLoad(
-                                            itemId = exItem.id,
-                                            loadKg = newLoad,
-                                            previousLoadKg = exItem.loadKg
-                                        )
+                                        handleSaveExerciseLoad(exItem, newLoad, isExecuting)
                                     }
                                 )
                                 flatIdx += 1
@@ -1372,6 +1559,26 @@ private fun StudentWorkoutScreen(
             workoutLoadLogs = state.workoutLoadLogs,
             currentLoadKg = exItem.loadKg,
             onDismiss = { historyTargetItem = null }
+        )
+    }
+
+    workoutSummaryData?.let { summary ->
+        ActiveWorkoutSummaryDialog(
+            summary = summary,
+            onShare = {
+                sharePlainText(
+                    context = context,
+                    subject = "New Shape · Resumo do Treino",
+                    text = buildWorkoutSummaryShareText(student.name, summary)
+                )
+            },
+            onSendFeedback = {
+                val targetPlan = plans.firstOrNull { it.id == summary.planId }
+                    ?: WorkoutPlanRecord(id = summary.planId, title = summary.planTitle)
+                workoutSummaryData = null
+                feedbackTargetPlan = targetPlan
+            },
+            onDismiss = { workoutSummaryData = null }
         )
     }
 
@@ -1404,9 +1611,11 @@ private fun StudentExerciseLoadRow(
     workoutLoadLogs: List<WorkoutLoadLogRecord>,
     isExecuting: Boolean,
     isCompleted: Boolean,
+    completedSetKeys: Set<String> = emptySet(),
     labelPrefix: String? = null,
     isSupersetNonLast: Boolean = false,
     isSupersetLast: Boolean = false,
+    onToggleSet: (Int) -> Unit = {},
     onToggleComplete: () -> Unit,
     onStartRest: () -> Unit,
     onOpenHistory: () -> Unit,
@@ -1481,6 +1690,58 @@ private fun StudentExerciseLoadRow(
         )
 
         if (isExecuting) {
+            val totalSetsCount = item.sets.coerceIn(1, 12)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Séries:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondaryDark,
+                    fontWeight = FontWeight.SemiBold
+                )
+                for (setNum in 1..totalSetsCount) {
+                    val setDone = "${item.id}:$setNum" in completedSetKeys
+                    Surface(
+                        color = if (setDone) ConfirmedGreenContainer else ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (setDone) ConfirmedGreen else HairlineBorder
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onToggleSet(setNum) }
+                            .testTag("student_set_${item.id}_$setNum")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (setDone) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = "Série $setNum feita",
+                                    tint = ConfirmedGreen,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            Text(
+                                text = "S$setNum",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (setDone) ConfirmedGreen else TextPrimaryDark
+                            )
+                        }
+                    }
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1680,6 +1941,16 @@ private fun StudentAssessmentScreen(
                 clientId = student.id,
                 bookings = state.bookings,
                 sessions = state.sessions
+            )
+        }
+        item {
+            StudentAchievementsCard(
+                client = student,
+                bookings = state.bookings,
+                sessions = state.sessions,
+                workoutLoadLogs = state.workoutLoadLogs,
+                assessments = state.physicalAssessments,
+                feedbackItems = state.workoutFeedback
             )
         }
         assessmentDashboardItems(

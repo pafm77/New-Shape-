@@ -40,6 +40,7 @@ import {
   formatShortDate,
   formatTimeAgo,
   getEffectiveClientFidelizacaoMonths,
+  getNextMonthOption,
   getPaymentCategory,
   isExtraFeePayment,
   normalizePaymentMethod,
@@ -480,14 +481,15 @@ const FinanceSubTab: React.FC<{
   const [splitTargetPayment, setSplitTargetPayment] = useState<PaymentRecord | null>(null);
   const [methodFilter, setMethodFilter] = useState<'ALL' | PaymentMethod>('ALL');
   const [trainingFilter, setTrainingFilter] = useState<'ALL' | TrainingType>('ALL');
-  const [periodScope, setPeriodScope] = useState<'realized' | 'current_month' | 'all_with_future'>(
-    'realized'
-  );
+  const [periodScope, setPeriodScope] = useState<
+    'realized' | 'current_month' | 'next_month' | 'all_with_future'
+  >('realized');
 
   const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
   const allPaidPayments = useMemo(() => payments.filter((p) => p.paid), [payments]);
 
   const recentMonths = useMemo(() => buildRecentMonthOptions(), []);
+  const nextMonth = useMemo(() => getNextMonthOption(), []);
   const currentMonthYear = recentMonths[0]?.monthYear || '';
   const currentMonthLabel = recentMonths[0]?.monthLabel || '';
 
@@ -499,6 +501,11 @@ const FinanceSubTab: React.FC<{
     [allPaidPayments, currentMonthYear]
   );
 
+  const nextMonthPaymentsCount = useMemo(
+    () => allPaidPayments.filter((p) => p.monthYear === nextMonth.monthYear).length,
+    [allPaidPayments, nextMonth.monthYear]
+  );
+
   const futurePrepaidTotal = useMemo(
     () => futurePrepaidPayments.reduce((s, p) => s + p.amountEur, 0),
     [futurePrepaidPayments]
@@ -508,11 +515,14 @@ const FinanceSubTab: React.FC<{
     if (periodScope === 'current_month') {
       return allPaidPayments.filter((p) => p.monthYear === currentMonthYear);
     }
+    if (periodScope === 'next_month') {
+      return allPaidPayments.filter((p) => p.monthYear === nextMonth.monthYear);
+    }
     if (periodScope === 'realized' && currentMonthYear) {
       return allPaidPayments.filter((p) => p.monthYear <= currentMonthYear);
     }
     return allPaidPayments;
-  }, [allPaidPayments, periodScope, currentMonthYear]);
+  }, [allPaidPayments, periodScope, currentMonthYear, nextMonth.monthYear]);
 
   const getPaymentType = (p: PaymentRecord): TrainingType =>
     clientMap.get(p.clientId)?.trainingType === 'PERSONALIZADO' ? 'PERSONALIZADO' : 'GRUPO';
@@ -670,6 +680,13 @@ const FinanceSubTab: React.FC<{
                 { id: 'realized' as const, label: 'Até este mês (Realizado)' },
                 { id: 'current_month' as const, label: `Só ${currentMonthLabel}` },
                 {
+                  id: 'next_month' as const,
+                  label:
+                    nextMonthPaymentsCount > 0
+                      ? `Só ${nextMonth.monthLabel} (${nextMonthPaymentsCount})`
+                      : `Só ${nextMonth.monthLabel}`,
+                },
+                {
                   id: 'all_with_future' as const,
                   label:
                     futurePrepaidPayments.length > 0
@@ -731,9 +748,9 @@ const FinanceSubTab: React.FC<{
         {futurePrepaidPayments.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#EAB308]/35 bg-[#3D3314]/45 px-3.5 py-2 text-xs text-[#FACC15]">
             <span>
-              <strong>Fidelizações pré-pagas (meses futuros):</strong>{' '}
+              <strong>Mensalidades antecipadas / futuros:</strong>{' '}
               {futurePrepaidPayments.length} mensalidade(s) · €{futurePrepaidTotal.toFixed(2)} —
-              contabilizadas automaticamente 1 por mês (sem inflacionar o mês do pagamento).
+              contabilizadas automaticamente no respetivo mês (sem inflacionar a faturação atual).
             </span>
           </div>
         )}

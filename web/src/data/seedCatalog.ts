@@ -209,6 +209,44 @@ export function buildRecentMonthOptions(): { monthYear: string; monthLabel: stri
   return out;
 }
 
+export interface PaymentMonthOption {
+  monthYear: string;
+  monthLabel: string;
+  offset: number;
+  isNextMonth: boolean;
+  isFuture: boolean;
+  isCurrent: boolean;
+}
+
+export function getNextMonthOption(): { monthYear: string; monthLabel: string } {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  return {
+    monthYear: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+    monthLabel: `${MONTHS_PT[d.getMonth()]} ${d.getFullYear()}`,
+  };
+}
+
+export function buildPaymentMonthOptions(
+  futureMonths = 2,
+  pastMonths = 3
+): PaymentMonthOption[] {
+  const out: PaymentMonthOption[] = [];
+  const now = new Date();
+  for (let offset = futureMonths; offset >= -pastMonths; offset--) {
+    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    out.push({
+      monthYear: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      monthLabel: `${MONTHS_PT[d.getMonth()]} ${d.getFullYear()}`,
+      offset,
+      isNextMonth: offset === 1,
+      isFuture: offset > 0,
+      isCurrent: offset === 0,
+    });
+  }
+  return out;
+}
+
 export function buildConsecutiveMonths(
   startMonthYear: string,
   count: number

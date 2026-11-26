@@ -1,7 +1,9 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -12,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
@@ -361,7 +365,15 @@ fun WeeklyGoalStreakCard(
         }
     }
 
-    val (currentCount, streakWeeks, bestStreak) = remember(client.id, bookings, sessions, goal) {
+    data class StreakWeekSlot(val label: String, val count: Int, val met: Boolean, val isCurrent: Boolean)
+    data class WeeklyStreakResult(
+        val currentCount: Int,
+        val streakWeeks: Int,
+        val bestStreak: Int,
+        val recentSlots: List<StreakWeekSlot>
+    )
+
+    val streakData = remember(client.id, bookings, sessions, goal) {
         val sessionMap = sessions.associateBy { it.id }
         val countByWeek = mutableMapOf<Long, Int>()
         val currentWeekStart = getMondayMidnightMillis(System.currentTimeMillis())
@@ -402,9 +414,20 @@ fun WeeklyGoalStreakCard(
             if (run > best) best = run
             prev = wk
         }
-        Triple(current, streak, maxOf(best, streak))
+
+        val slots = (5 downTo 0).map { offset ->
+            val wk = currentWeekStart - offset * weekMs
+            val c = countByWeek[wk] ?: 0
+            val cal = Calendar.getInstance().apply { timeInMillis = wk }
+            val lbl = if (offset == 0) "Atual" else "${cal.get(Calendar.DAY_OF_MONTH)}/${cal.get(Calendar.MONTH) + 1}"
+            StreakWeekSlot(label = lbl, count = c, met = c >= goal, isCurrent = offset == 0)
+        }
+        WeeklyStreakResult(current, streak, maxOf(best, streak), slots)
     }
 
+    val currentCount = streakData.currentCount
+    val streakWeeks = streakData.streakWeeks
+    val bestStreak = streakData.bestStreak
     val progress = (currentCount.toFloat() / goal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
     val goalMet = currentCount >= goal
 
@@ -455,10 +478,61 @@ fun WeeklyGoalStreakCard(
             progress = { progress },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(8.dp),
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp)),
             color = if (goalMet) ConfirmedGreen else NewShapeGold,
             trackColor = ElevatedCharcoal
         )
+
+        Spacer(Modifier.height(10.dp))
+        // 6-Week Visual Streak Strip
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            streakData.recentSlots.forEach { slot ->
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = when {
+                        slot.met -> ConfirmedGreenContainer.copy(alpha = 0.7f)
+                        slot.isCurrent -> NewShapeGoldMuted.copy(alpha = 0.45f)
+                        else -> ElevatedCharcoal
+                    },
+                    border = BorderStroke(
+                        1.dp,
+                        when {
+                            slot.met -> ConfirmedGreen.copy(alpha = 0.65f)
+                            slot.isCurrent -> NewShapeGold.copy(alpha = 0.65f)
+                            else -> HairlineBorder
+                        }
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (slot.met) "✓" else "${slot.count}/$goal",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = when {
+                                slot.met -> ConfirmedGreen
+                                slot.isCurrent -> NewShapeGoldBright
+                                else -> TextSecondaryDark
+                            }
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = slot.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (slot.isCurrent) TextPrimaryDark else TextSecondaryDark,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
 
         Spacer(Modifier.height(8.dp))
         Row(
@@ -485,6 +559,248 @@ fun WeeklyGoalStreakCard(
                     fontWeight = FontWeight.Bold,
                     color = NewShapeGoldBright
                 )
+            }
+        }
+    }
+}
+
+private data class StudentBadgeItem(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val unlocked: Boolean,
+    val progressText: String
+)
+
+// --- 3B. Student Portal: Streaks & Achievements (Conquistas) Card ---
+@Composable
+fun StudentAchievementsCard(
+    client: ClientRecord,
+    bookings: List<BookingRecord>,
+    sessions: List<TrainingSessionRecord>,
+    workoutLoadLogs: List<WorkoutLoadLogRecord>,
+    assessments: List<PhysicalAssessmentRecord>,
+    feedbackItems: List<WorkoutFeedbackRecord>
+) {
+    val goal = remember(client.weeklyGoalSessions, client.weeklySessionLimit) {
+        when {
+            client.weeklyGoalSessions > 0 -> client.weeklyGoalSessions
+            client.weeklySessionLimit > 0 -> client.weeklySessionLimit
+            else -> 2
+        }
+    }
+
+    val badges = remember(client.id, bookings, sessions, workoutLoadLogs, assessments, feedbackItems, goal) {
+        val now = System.currentTimeMillis()
+        val sessionMap = sessions.associateBy { it.id }
+        var totalWorkouts = 0
+        val countByWeek = mutableMapOf<Long, Int>()
+
+        bookings.forEach { b ->
+            if (b.clientId != client.id) return@forEach
+            if (b.status != BookingStatus.CONFIRMED.name) return@forEach
+            if (b.attendanceStatus == "ABSENT") return@forEach
+            val s = sessionMap[b.sessionId] ?: return@forEach
+            if (s.startMillis <= 0L) return@forEach
+            if (s.startMillis <= now) totalWorkouts++
+            val wk = getMondayMidnightMillis(s.startMillis)
+            countByWeek[wk] = (countByWeek[wk] ?: 0) + 1
+        }
+
+        val weekMs = 7L * 86_400_000L
+        val metWeeks = countByWeek.filterValues { it >= goal }.keys.sorted()
+        var bestStreak = 0
+        var run = 0
+        var prev = -1L
+        metWeeks.forEach { wk ->
+            if (prev >= 0L && abs((wk - prev) - weekMs) < 4L * 3_600_000L) run++ else run = 1
+            if (run > bestStreak) bestStreak = run
+            prev = wk
+        }
+
+        val clientLogs = workoutLoadLogs.filter { it.clientId == client.id && it.numericKg > 0.0 }
+        val prProgressionCount = clientLogs
+            .groupBy { it.exerciseName.trim().lowercase() }
+            .values
+            .count { list ->
+                val sorted = list.sortedBy { it.loggedAtMillis }
+                sorted.size >= 2 && sorted.maxOf { it.numericKg } > sorted.first().numericKg + 0.05
+            }
+        val loggedExercisesCount = clientLogs.map { it.exerciseName.trim().lowercase() }.distinct().size
+        val prMetric = maxOf(prProgressionCount, if (loggedExercisesCount >= 3) 1 else 0)
+        val assessCount = assessments.count { it.clientId == client.id }
+        val fbCount = feedbackItems.count { it.clientId == client.id }
+        val trackingUnlocked = assessCount >= 2 || fbCount >= 3
+
+        listOf(
+            StudentBadgeItem(
+                id = "first_workout",
+                title = "Primeiro Passo",
+                subtitle = "1º treino concluído",
+                icon = Icons.Default.DirectionsRun,
+                unlocked = totalWorkouts >= 1,
+                progressText = "${totalWorkouts.coerceAtMost(1)}/1"
+            ),
+            StudentBadgeItem(
+                id = "ten_workouts",
+                title = "Em Ritmo",
+                subtitle = "10 treinos feitos",
+                icon = Icons.Default.LocalFireDepartment,
+                unlocked = totalWorkouts >= 10,
+                progressText = "${totalWorkouts.coerceAtMost(10)}/10"
+            ),
+            StudentBadgeItem(
+                id = "twentyfive_workouts",
+                title = "Dedicação Total",
+                subtitle = "25 treinos feitos",
+                icon = Icons.Default.FitnessCenter,
+                unlocked = totalWorkouts >= 25,
+                progressText = "${totalWorkouts.coerceAtMost(25)}/25"
+            ),
+            StudentBadgeItem(
+                id = "fifty_workouts",
+                title = "Lenda New Shape",
+                subtitle = "50 treinos feitos",
+                icon = Icons.Default.EmojiEvents,
+                unlocked = totalWorkouts >= 50,
+                progressText = "${totalWorkouts.coerceAtMost(50)}/50"
+            ),
+            StudentBadgeItem(
+                id = "streak_2w",
+                title = "Ritmo Certo",
+                subtitle = "2 semanas seguidas",
+                icon = Icons.Default.Bolt,
+                unlocked = bestStreak >= 2,
+                progressText = "${bestStreak.coerceAtMost(2)}/2 sem."
+            ),
+            StudentBadgeItem(
+                id = "streak_4w",
+                title = "Mês Perfeito",
+                subtitle = "4 semanas seguidas",
+                icon = Icons.Default.WorkspacePremium,
+                unlocked = bestStreak >= 4,
+                progressText = "${bestStreak.coerceAtMost(4)}/4 sem."
+            ),
+            StudentBadgeItem(
+                id = "pr_breaker",
+                title = "Quebra-Recordes",
+                subtitle = "Subiu carga / PR",
+                icon = Icons.Default.TrendingUp,
+                unlocked = prMetric >= 1,
+                progressText = if (prProgressionCount > 0) "$prProgressionCount PR(s)" else "${loggedExercisesCount.coerceAtMost(3)}/3 ex."
+            ),
+            StudentBadgeItem(
+                id = "tracker",
+                title = "Foco & Evolução",
+                subtitle = "2 avaliações ou 3 feedbacks",
+                icon = Icons.Default.Star,
+                unlocked = trackingUnlocked,
+                progressText = if (trackingUnlocked) "Ativo ✓" else "${assessCount}/2 aval."
+            )
+        )
+    }
+
+    val unlockedCount = badges.count { it.unlocked }
+    val pct = unlockedCount.toFloat() / badges.size.coerceAtLeast(1).toFloat()
+
+    BrandCard(highlightBorder = unlockedCount >= 4) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.EmojiEvents, contentDescription = "Conquistas", tint = NewShapeGoldBright, modifier = Modifier.size(20.dp))
+                Column {
+                    Text("Conquistas & Medalhas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = TextPrimaryDark)
+                    Text("Desbloqueia medalhas com a tua consistência e recordes", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                }
+            }
+            StatusPill(
+                text = "$unlockedCount/${badges.size}",
+                textColor = TextOnGold,
+                containerColor = NewShapeGold
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        LinearProgressIndicator(
+            progress = { pct },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            color = NewShapeGold,
+            trackColor = ElevatedCharcoal
+        )
+
+        Spacer(Modifier.height(12.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            badges.chunked(2).forEach { pair ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    pair.forEach { badge ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (badge.unlocked) NewShapeGoldMuted.copy(alpha = 0.5f) else ElevatedCharcoal,
+                            border = BorderStroke(
+                                1.dp,
+                                if (badge.unlocked) NewShapeGold.copy(alpha = 0.7f) else HairlineBorder
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("student_badge_${badge.id}")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(if (badge.unlocked) NewShapeGold else CharcoalSurface),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = badge.icon,
+                                        contentDescription = badge.title,
+                                        tint = if (badge.unlocked) TextOnGold else TextSecondaryDark.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = badge.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (badge.unlocked) NewShapeGoldBright else TextSecondaryDark,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = badge.subtitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondaryDark,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = if (badge.unlocked) "Desbloqueada ✓" else badge.progressText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (badge.unlocked) ConfirmedGreen else TextSecondaryDark.copy(alpha = 0.8f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (pair.size == 1) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
             }
         }
     }

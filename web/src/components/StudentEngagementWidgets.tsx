@@ -1,26 +1,35 @@
 import React, { useMemo, useState } from 'react';
 import {
   Activity,
+  Award,
   Cake,
   CalendarDays,
   CheckCircle2,
+  Dumbbell,
   Flame,
+  Footprints,
   Megaphone,
   MessageCircle,
   RefreshCw,
   Send,
   Sparkles,
+  Star,
   Target,
   Trash2,
+  TrendingUp,
+  Trophy,
+  Zap,
 } from 'lucide-react';
 import {
   AnnouncementReadRecord,
   BookingRecord,
   ClientRecord,
+  PhysicalAssessmentRecord,
   StudioAnnouncementRecord,
   TrainingSessionRecord,
   WorkoutFeedbackFeeling,
   WorkoutFeedbackRecord,
+  WorkoutLoadLogRecord,
 } from '../types/studio';
 import { buildWhatsAppUrl, formatShortDate } from '../data/seedCatalog';
 import { BrandCard, FieldLabel, GoldButton, Input, Modal, SecondaryButton, StatusPill, Textarea } from './UiPrimitives';
@@ -303,7 +312,7 @@ export const WeeklyGoalStreakCard: React.FC<{
     return 2;
   }, [client.weeklyGoalSessions, client.weeklySessionLimit]);
 
-  const { currentWeekCount, streakWeeks, bestStreak } = useMemo(() => {
+  const { currentWeekCount, streakWeeks, bestStreak, recentWeeks } = useMemo(() => {
     const sessionMap = new Map(sessions.map((s) => [s.id, s]));
     const countByWeekStart = new Map<number, number>();
     const currentWeekStart = getMondayMidnight(new Date());
@@ -352,10 +361,29 @@ export const WeeklyGoalStreakCard: React.FC<{
       prev = wk;
     });
 
+    // Last 6 weeks visual tracker
+    const slots = [5, 4, 3, 2, 1, 0].map((offset) => {
+      const wkStart = currentWeekStart - offset * WEEK_MS;
+      const d = new Date(wkStart);
+      const count = countByWeekStart.get(wkStart) ?? 0;
+      const label =
+        offset === 0
+          ? 'Atual'
+          : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return {
+        wkStart,
+        label,
+        count,
+        met: count >= goal,
+        isCurrent: offset === 0,
+      };
+    });
+
     return {
       currentWeekCount: currentCount,
       streakWeeks: streak,
       bestStreak: Math.max(best, streak),
+      recentWeeks: slots,
     };
   }, [client.id, bookings, sessions, goal]);
 
@@ -406,6 +434,41 @@ export const WeeklyGoalStreakCard: React.FC<{
         />
       </div>
 
+      {/* 6-week streak visual strip */}
+      <div className="grid grid-cols-6 gap-1.5">
+        {recentWeeks.map((slot) => (
+          <div
+            key={slot.wkStart}
+            className={`rounded-xl border px-1 py-1.5 text-center transition ${
+              slot.met
+                ? 'border-[#22C55E]/60 bg-[#143521]/60'
+                : slot.isCurrent
+                  ? 'border-[#EAB308]/60 bg-[#3D3314]/45'
+                  : 'border-[#323238] bg-[#242429]'
+            }`}
+          >
+            <p
+              className={`text-[11px] font-extrabold ${
+                slot.met
+                  ? 'text-[#22C55E]'
+                  : slot.isCurrent
+                    ? 'text-[#FACC15]'
+                    : 'text-[#A1A1AA]'
+              }`}
+            >
+              {slot.met ? '✓' : `${slot.count}/${goal}`}
+            </p>
+            <p
+              className={`mt-0.5 truncate text-[10px] ${
+                slot.isCurrent ? 'font-bold text-[#F4F4F5]' : 'text-[#A1A1AA]'
+              }`}
+            >
+              {slot.label}
+            </p>
+          </div>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#A1A1AA]">
         <span>
           {streakWeeks > 0
@@ -417,6 +480,230 @@ export const WeeklyGoalStreakCard: React.FC<{
         {bestStreak > 1 && (
           <span className="font-semibold text-[#FACC15]">Recorde: {bestStreak} sem.</span>
         )}
+      </div>
+    </BrandCard>
+  );
+};
+
+// --- 3B. Student Portal: Streaks & Achievements (Conquistas & Medalhas) Card ---
+interface StudentBadgeItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  unlocked: boolean;
+  progressText: string;
+}
+
+export const StudentAchievementsCard: React.FC<{
+  client: ClientRecord;
+  bookings: BookingRecord[];
+  sessions: TrainingSessionRecord[];
+  workoutLoadLogs: WorkoutLoadLogRecord[];
+  assessments: PhysicalAssessmentRecord[];
+  feedbackItems?: WorkoutFeedbackRecord[];
+}> = ({ client, bookings, sessions, workoutLoadLogs, assessments, feedbackItems = [] }) => {
+  const goal = useMemo(() => {
+    if (client.weeklyGoalSessions && client.weeklyGoalSessions > 0) return client.weeklyGoalSessions;
+    if (client.weeklySessionLimit && client.weeklySessionLimit > 0) return client.weeklySessionLimit;
+    return 2;
+  }, [client.weeklyGoalSessions, client.weeklySessionLimit]);
+
+  const badges = useMemo<StudentBadgeItem[]>(() => {
+    const now = Date.now();
+    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+    let totalWorkouts = 0;
+    const countByWeek = new Map<number, number>();
+
+    bookings.forEach((b) => {
+      if (b.clientId !== client.id) return;
+      if (b.status !== 'CONFIRMED') return;
+      if (b.attendanceStatus === 'ABSENT') return;
+      const s = sessionMap.get(b.sessionId);
+      if (!s || !s.startMillis) return;
+      if (s.startMillis <= now) totalWorkouts += 1;
+      const wk = getMondayMidnight(new Date(s.startMillis));
+      countByWeek.set(wk, (countByWeek.get(wk) ?? 0) + 1);
+    });
+
+    const WEEK_MS = 7 * 86_400_000;
+    const metWeeks = Array.from(countByWeek.entries())
+      .filter(([, c]) => c >= goal)
+      .map(([wk]) => wk)
+      .sort((a, b) => a - b);
+    let bestStreak = 0;
+    let run = 0;
+    let prev = -1;
+    metWeeks.forEach((wk) => {
+      if (prev >= 0 && Math.abs(wk - prev - WEEK_MS) < 4 * 3_600_000) run += 1;
+      else run = 1;
+      if (run > bestStreak) bestStreak = run;
+      prev = wk;
+    });
+
+    const clientLogs = workoutLoadLogs.filter((l) => l.clientId === client.id && l.numericKg > 0);
+    const logsByEx = new Map<string, WorkoutLoadLogRecord[]>();
+    clientLogs.forEach((l) => {
+      const k = l.exerciseName.trim().toLowerCase();
+      if (!k) return;
+      const arr = logsByEx.get(k) ?? [];
+      arr.push(l);
+      logsByEx.set(k, arr);
+    });
+    let prProgressionCount = 0;
+    logsByEx.forEach((list) => {
+      const sorted = [...list].sort((a, b) => a.loggedAtMillis - b.loggedAtMillis);
+      if (sorted.length >= 2) {
+        const maxKg = Math.max(...sorted.map((x) => x.numericKg));
+        if (maxKg > sorted[0].numericKg + 0.05) prProgressionCount += 1;
+      }
+    });
+    const loggedExercisesCount = logsByEx.size;
+    const prMetric = Math.max(prProgressionCount, loggedExercisesCount >= 3 ? 1 : 0);
+    const assessCount = assessments.filter((a) => a.clientId === client.id).length;
+    const fbCount = feedbackItems.filter((f) => f.clientId === client.id).length;
+    const trackingUnlocked = assessCount >= 2 || fbCount >= 3;
+
+    return [
+      {
+        id: 'first_workout',
+        title: 'Primeiro Passo',
+        subtitle: '1º treino concluído',
+        icon: <Footprints className="h-4 w-4" />,
+        unlocked: totalWorkouts >= 1,
+        progressText: `${Math.min(totalWorkouts, 1)}/1`,
+      },
+      {
+        id: 'ten_workouts',
+        title: 'Em Ritmo',
+        subtitle: '10 treinos feitos',
+        icon: <Flame className="h-4 w-4" />,
+        unlocked: totalWorkouts >= 10,
+        progressText: `${Math.min(totalWorkouts, 10)}/10`,
+      },
+      {
+        id: 'twentyfive_workouts',
+        title: 'Dedicação Total',
+        subtitle: '25 treinos feitos',
+        icon: <Dumbbell className="h-4 w-4" />,
+        unlocked: totalWorkouts >= 25,
+        progressText: `${Math.min(totalWorkouts, 25)}/25`,
+      },
+      {
+        id: 'fifty_workouts',
+        title: 'Lenda New Shape',
+        subtitle: '50 treinos feitos',
+        icon: <Trophy className="h-4 w-4" />,
+        unlocked: totalWorkouts >= 50,
+        progressText: `${Math.min(totalWorkouts, 50)}/50`,
+      },
+      {
+        id: 'streak_2w',
+        title: 'Ritmo Certo',
+        subtitle: '2 semanas seguidas',
+        icon: <Zap className="h-4 w-4" />,
+        unlocked: bestStreak >= 2,
+        progressText: `${Math.min(bestStreak, 2)}/2 sem.`,
+      },
+      {
+        id: 'streak_4w',
+        title: 'Mês Perfeito',
+        subtitle: '4 semanas seguidas',
+        icon: <Award className="h-4 w-4" />,
+        unlocked: bestStreak >= 4,
+        progressText: `${Math.min(bestStreak, 4)}/4 sem.`,
+      },
+      {
+        id: 'pr_breaker',
+        title: 'Quebra-Recordes',
+        subtitle: 'Subiu carga / PR',
+        icon: <TrendingUp className="h-4 w-4" />,
+        unlocked: prMetric >= 1,
+        progressText:
+          prProgressionCount > 0
+            ? `${prProgressionCount} PR(s)`
+            : `${Math.min(loggedExercisesCount, 3)}/3 ex.`,
+      },
+      {
+        id: 'tracker',
+        title: 'Foco & Evolução',
+        subtitle: '2 avaliações ou 3 feedbacks',
+        icon: <Star className="h-4 w-4" />,
+        unlocked: trackingUnlocked,
+        progressText: trackingUnlocked ? 'Ativo ✓' : `${assessCount}/2 aval.`,
+      },
+    ];
+  }, [client.id, bookings, sessions, workoutLoadLogs, assessments, feedbackItems, goal]);
+
+  const unlockedCount = badges.filter((b) => b.unlocked).length;
+  const pct = Math.round((unlockedCount / Math.max(1, badges.length)) * 100);
+
+  return (
+    <BrandCard highlight={unlockedCount >= 4} className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#3D3314] text-[#FACC15]">
+            <Trophy className="h-4.5 w-4.5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-extrabold text-[#F4F4F5]">Conquistas & Medalhas</h3>
+            <p className="text-[11px] text-[#A1A1AA]">
+              Desbloqueia medalhas com a tua consistência e recordes
+            </p>
+          </div>
+        </div>
+        <StatusPill tone="gold">
+          {unlockedCount}/{badges.length}
+        </StatusPill>
+      </div>
+
+      <div className="h-2 w-full overflow-hidden rounded-full bg-[#242429]">
+        <div
+          className="h-full rounded-full bg-[#EAB308] transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {badges.map((badge) => (
+          <div
+            key={badge.id}
+            className={`flex items-center gap-2.5 rounded-xl border p-2.5 transition ${
+              badge.unlocked
+                ? 'border-[#EAB308]/70 bg-[#3D3314]/40'
+                : 'border-[#323238] bg-[#242429]/75 opacity-80'
+            }`}
+          >
+            <div
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                badge.unlocked
+                  ? 'bg-[#EAB308] text-[#121214]'
+                  : 'bg-[#18181B] text-[#71717A]'
+              }`}
+            >
+              {badge.icon}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p
+                  className={`truncate text-xs font-extrabold ${
+                    badge.unlocked ? 'text-[#FACC15]' : 'text-[#D4D4D8]'
+                  }`}
+                >
+                  {badge.title}
+                </p>
+                <span
+                  className={`shrink-0 text-[10px] font-bold ${
+                    badge.unlocked ? 'text-[#22C55E]' : 'text-[#A1A1AA]'
+                  }`}
+                >
+                  {badge.unlocked ? '✓' : badge.progressText}
+                </span>
+              </div>
+              <p className="truncate text-[11px] text-[#A1A1AA]">{badge.subtitle}</p>
+            </div>
+          </div>
+        ))}
       </div>
     </BrandCard>
   );

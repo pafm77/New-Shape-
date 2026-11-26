@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Activity, Award, Dumbbell, Flame, TrendingUp } from 'lucide-react';
+import { Activity, Award, Dumbbell, Flame, TrendingUp, Trophy } from 'lucide-react';
 import {
   BookingRecord,
   TrainingSessionRecord,
@@ -14,6 +14,8 @@ interface StrengthSeries {
   exerciseName: string;
   points: { dateMillis: number; loadKg: number; label: string }[];
   prKg: number;
+  prDateMillis: number;
+  prDateLabel: string;
   latestKg: number;
   deltaKg: number;
 }
@@ -44,12 +46,32 @@ export const StudentConsistencyCard: React.FC<{
     let absentCount = 0;
     let totalAllTime = 0;
 
+    // Last 6 months buckets
+    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const nowDate = new Date();
+    const monthlyBuckets: { key: string; label: string; count: number; isCurrent: boolean }[] = [];
+    for (let offset = 5; offset >= 0; offset--) {
+      const d = new Date(nowDate.getFullYear(), nowDate.getMonth() - offset, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      monthlyBuckets.push({
+        key,
+        label: monthNames[d.getMonth()],
+        count: 0,
+        isCurrent: offset === 0,
+      });
+    }
+    const bucketMap = new Map(monthlyBuckets.map((b) => [b.key, b]));
+
     bookings.forEach((b) => {
       if (b.clientId !== clientId || b.status !== 'CONFIRMED') return;
       const s = sessionMap.get(b.sessionId);
       if (!s || s.startMillis > now) return;
       if (b.attendanceStatus !== 'ABSENT') {
         totalAllTime += 1;
+        const sd = new Date(s.startMillis);
+        const mk = `${sd.getFullYear()}-${String(sd.getMonth() + 1).padStart(2, '0')}`;
+        const bucket = bucketMap.get(mk);
+        if (bucket) bucket.count += 1;
       }
       if (s.startMillis >= thirtyDaysAgo) {
         if (b.attendanceStatus === 'PRESENT') presentCount += 1;
@@ -63,7 +85,8 @@ export const StudentConsistencyCard: React.FC<{
 
     const marked = presentCount + absentCount;
     const ratePct = marked > 0 ? Math.round((presentCount / marked) * 100) : monthCount > 0 ? 100 : null;
-    return { monthCount, weekCount, ratePct, totalAllTime };
+    const maxBucketCount = Math.max(1, ...monthlyBuckets.map((b) => b.count));
+    return { monthCount, weekCount, ratePct, totalAllTime, monthlyBuckets, maxBucketCount };
   }, [clientId, bookings, sessions]);
 
   return (
@@ -92,6 +115,52 @@ export const StudentConsistencyCard: React.FC<{
         <div className="rounded-xl bg-[#242429] p-2.5">
           <p className="text-[11px] text-[#A1A1AA]">Total treinos</p>
           <p className="mt-0.5 text-lg font-extrabold text-[#F4F4F5]">{stats.totalAllTime}</p>
+        </div>
+      </div>
+
+      {/* 6-month frequency bar chart */}
+      <div className="mt-3 rounded-xl border border-[#323238]/60 bg-[#161619] p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-[#A1A1AA]">
+            Frequência mensal (últimos 6 meses)
+          </span>
+          <span className="text-[10px] font-bold text-[#FACC15]">treinos/mês</span>
+        </div>
+        <div className="grid grid-cols-6 items-end gap-2 h-24 pt-4">
+          {stats.monthlyBuckets.map((b) => {
+            const heightPct =
+              b.count > 0 ? Math.max(16, Math.round((b.count / stats.maxBucketCount) * 100)) : 8;
+            return (
+              <div key={b.key} className="flex h-full flex-col items-center justify-end gap-1">
+                <span
+                  className={`text-[10px] font-bold ${
+                    b.count > 0 ? (b.isCurrent ? 'text-[#FACC15]' : 'text-[#F4F4F5]') : 'text-[#52525B]'
+                  }`}
+                >
+                  {b.count}
+                </span>
+                <div className="flex w-full flex-1 items-end justify-center">
+                  <div
+                    className={`w-full max-w-[28px] rounded-t-md transition-all duration-300 ${
+                      b.count === 0
+                        ? 'bg-[#242429]'
+                        : b.isCurrent
+                          ? 'bg-[#EAB308]'
+                          : 'bg-[#22C55E]/80'
+                    }`}
+                    style={{ height: `${heightPct}%` }}
+                  />
+                </div>
+                <span
+                  className={`text-[10px] ${
+                    b.isCurrent ? 'font-bold text-[#F4F4F5]' : 'text-[#A1A1AA]'
+                  }`}
+                >
+                  {b.label}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </BrandCard>
@@ -170,13 +239,18 @@ export const StrengthEvolutionChartCard: React.FC<{
     byExercise.forEach(({ displayName, pts }) => {
       const sorted = [...pts].sort((a, b) => a.dateMillis - b.dateMillis);
       if (sorted.length === 0) return;
-      const prKg = Math.max(...sorted.map((p) => p.loadKg));
+      let prPoint = sorted[0];
+      sorted.forEach((p) => {
+        if (p.loadKg >= prPoint.loadKg) prPoint = p;
+      });
       const firstKg = sorted[0].loadKg;
       const latestKg = sorted[sorted.length - 1].loadKg;
       result.push({
         exerciseName: displayName,
         points: sorted,
-        prKg,
+        prKg: prPoint.loadKg,
+        prDateMillis: prPoint.dateMillis,
+        prDateLabel: prPoint.label,
         latestKg,
         deltaKg: latestKg - firstKg,
       });
@@ -189,8 +263,14 @@ export const StrengthEvolutionChartCard: React.FC<{
   }, [clientId, workoutLoadLogs, workoutPlans, workoutPlanItems]);
 
   const [selectedName, setSelectedName] = useState<string>('');
+  const [showAllPrs, setShowAllPrs] = useState(false);
   const activeSeries =
     seriesList.find((s) => s.exerciseName === selectedName) || seriesList[0] || null;
+  const rankedPrs = useMemo(
+    () => [...seriesList].sort((a, b) => b.prKg - a.prKg),
+    [seriesList]
+  );
+  const fourteenDaysAgo = Date.now() - 14 * 86_400_000;
 
   if (!activeSeries) {
     return (
@@ -256,6 +336,66 @@ export const StrengthEvolutionChartCard: React.FC<{
           <Award className="mr-1 inline h-3 w-3" />
           PR: {formatKg(activeSeries.prKg)}
         </StatusPill>
+      </div>
+
+      {/* Mural de Recordes Pessoais (Hall of PRs) */}
+      <div className="mt-3 rounded-xl border border-[#323238] bg-[#161619] p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <Trophy className="h-3.5 w-3.5 text-[#FACC15]" />
+            <span className="text-xs font-extrabold text-[#F4F4F5]">
+              Mural de Recordes Pessoais (PR)
+            </span>
+          </div>
+          {rankedPrs.length > 4 && (
+            <button
+              type="button"
+              onClick={() => setShowAllPrs((v) => !v)}
+              className="text-[11px] font-bold text-[#FACC15] hover:underline"
+            >
+              {showAllPrs ? 'Mostrar menos' : `Ver todos (${rankedPrs.length})`}
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          {(showAllPrs ? rankedPrs : rankedPrs.slice(0, 4)).map((pr, idx) => {
+            const isSelected = pr.exerciseName === activeSeries.exerciseName;
+            const isRecent = pr.prDateMillis >= fourteenDaysAgo && pr.points.length >= 2;
+            return (
+              <button
+                key={pr.exerciseName}
+                type="button"
+                onClick={() => setSelectedName(pr.exerciseName)}
+                className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left transition ${
+                  isSelected
+                    ? 'border-[#EAB308] bg-[#3D3314]/45'
+                    : 'border-[#323238] bg-[#242429]/80 hover:border-[#52525B]'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-extrabold text-[#FACC15]">#{idx + 1}</span>
+                    <span className="truncate text-xs font-bold text-[#F4F4F5]">
+                      {pr.exerciseName}
+                    </span>
+                    {isRecent && (
+                      <span className="shrink-0 rounded-full bg-[#3D3314] px-1.5 py-0.5 text-[9px] font-extrabold text-[#FACC15]">
+                        🔥 Novo
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[10px] text-[#A1A1AA]">
+                    {pr.prDateLabel}
+                    {pr.deltaKg > 0.05 ? ` · +${formatKg(pr.deltaKg)} evolução` : ''}
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-extrabold text-[#FACC15]">
+                  {formatKg(pr.prKg)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Exercise Selector Chips */}

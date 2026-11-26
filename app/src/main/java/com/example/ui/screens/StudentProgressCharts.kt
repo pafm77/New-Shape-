@@ -2,11 +2,14 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.TrendingUp
@@ -14,6 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import java.util.Calendar
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -103,6 +108,31 @@ fun StudentConsistencyCard(
         QuadStats(weekCount, monthCount, totalAll, ratePct)
     }
 
+    val monthNamesShort = remember { arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez") }
+    val monthlyBars = remember(clientId, bookings, sessions) {
+        val now = System.currentTimeMillis()
+        val sessionMap = sessions.associateBy { it.id }
+        val countsByYM = mutableMapOf<String, Int>()
+        val cal = Calendar.getInstance()
+        bookings.forEach { b ->
+            if (b.clientId != clientId || b.status != BookingStatus.CONFIRMED.name) return@forEach
+            if (b.attendanceStatus == "ABSENT") return@forEach
+            val s = sessionMap[b.sessionId] ?: return@forEach
+            if (s.startMillis <= 0L || s.startMillis > now) return@forEach
+            cal.timeInMillis = s.startMillis
+            val key = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.MONTH)}"
+            countsByYM[key] = (countsByYM[key] ?: 0) + 1
+        }
+        (5 downTo 0).map { offset ->
+            val mCal = Calendar.getInstance().apply {
+                set(Calendar.DAY_OF_MONTH, 1)
+                add(Calendar.MONTH, -offset)
+            }
+            val key = "${mCal.get(Calendar.YEAR)}-${mCal.get(Calendar.MONTH)}"
+            Triple(monthNamesShort[mCal.get(Calendar.MONTH)], countsByYM[key] ?: 0, offset == 0)
+        }
+    }
+
     BrandCard {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -139,6 +169,58 @@ fun StudentConsistencyCard(
             ConsistencyMiniTile("Últimos 7d", stats.weekCount.toString(), NewShapeGoldBright, Modifier.weight(1f))
             ConsistencyMiniTile("Últimos 30d", stats.monthCount.toString(), ConfirmedGreen, Modifier.weight(1f))
             ConsistencyMiniTile("Total", stats.totalAll.toString(), TextPrimaryDark, Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Frequência mensal (últimos 6 meses)",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondaryDark
+        )
+        Spacer(Modifier.height(8.dp))
+        val maxBar = (monthlyBars.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(82.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            monthlyBars.forEach { (monthLbl, count, isCurrent) ->
+                val barFraction = if (count > 0) (count.toFloat() / maxBar.toFloat()).coerceIn(0.18f, 1f) else 0.08f
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isCurrent) NewShapeGoldBright else if (count > 0) TextPrimaryDark else TextSecondaryDark
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height((44.dp * barFraction).coerceAtLeast(4.dp))
+                            .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                            .background(
+                                when {
+                                    count == 0 -> ElevatedCharcoal
+                                    isCurrent -> NewShapeGold
+                                    else -> ConfirmedGreen.copy(alpha = 0.75f)
+                                }
+                            )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = monthLbl,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isCurrent) NewShapeGoldBright else TextSecondaryDark
+                    )
+                }
+            }
         }
     }
 }
@@ -236,7 +318,10 @@ fun StrengthEvolutionChartCard(
     }
 
     var selectedExercise by remember(seriesList) { mutableStateOf(seriesList.firstOrNull()?.exerciseName.orEmpty()) }
+    var showAllPrs by remember { mutableStateOf(false) }
     val activeSeries = seriesList.find { it.exerciseName == selectedExercise } ?: seriesList.firstOrNull()
+    val nowMs = System.currentTimeMillis()
+    val recentPrThresholdMs = nowMs - 14L * 86_400_000L
 
     if (activeSeries == null) {
         BrandCard {
@@ -245,11 +330,11 @@ fun StrengthEvolutionChartCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(Icons.Default.FitnessCenter, contentDescription = "Cargas", tint = NewShapeGold, modifier = Modifier.size(18.dp))
-                Text("Evolução de Cargas (Força)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                Text("Recordes Pessoais (PR) & Evolução", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "Regista cargas nos exercícios do teu plano de treino para veres o gráfico de progressão e os teus recordes (PR).",
+                "Regista cargas nos exercícios do teu plano de treino para veres o mural de recordes (PR) e o gráfico de progressão.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondaryDark
             )
@@ -257,36 +342,150 @@ fun StrengthEvolutionChartCard(
         return
     }
 
+    val prSortedList = remember(seriesList) {
+        seriesList.sortedWith(compareByDescending<StrengthSeries> { it.prKg }.thenByDescending { it.deltaKg })
+    }
+    val visiblePrs = if (showAllPrs) prSortedList else prSortedList.take(5)
     val pts = activeSeries.points
     val values = pts.map { it.loadKg }
     val minVal = values.minOrNull() ?: 0.0
     val maxVal = values.maxOrNull() ?: 1.0
 
-    BrandCard(highlightBorder = true) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Mural de Recordes Pessoais (Hall of PRs)
+        BrandCard(highlightBorder = true) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.TrendingUp, contentDescription = "Evolução de cargas", tint = NewShapeGoldBright, modifier = Modifier.size(18.dp))
-                Column {
-                    Text("Evolução de Cargas (Força)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
-                    Text("${seriesList.size} exercício(s) com registo", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.EmojiEvents, contentDescription = "Mural de Recordes", tint = NewShapeGoldBright, modifier = Modifier.size(20.dp))
+                    Column {
+                        Text("Mural de Recordes Pessoais (PR)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = TextPrimaryDark)
+                        Text("Toca num exercício para ver a curva de evolução", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                    }
+                }
+                StatusPill(
+                    text = "${prSortedList.size} PR(s)",
+                    textColor = TextOnGold,
+                    containerColor = NewShapeGold
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                visiblePrs.forEachIndexed { idx, series ->
+                    val prPoint = series.points.maxByOrNull { it.loadKg }
+                    val isRecent = (prPoint?.dateMillis ?: 0L) >= recentPrThresholdMs && series.points.size >= 2
+                    val isSelected = series.exerciseName == activeSeries.exerciseName
+                    Surface(
+                        color = if (isSelected) NewShapeGoldMuted.copy(alpha = 0.55f) else ElevatedCharcoal,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSelected) NewShapeGold else HairlineBorder
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { selectedExercise = series.exerciseName }
+                            .testTag("pr_hall_row_$idx")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "#${idx + 1}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = NewShapeGoldBright
+                                    )
+                                    Text(
+                                        text = series.exerciseName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimaryDark,
+                                        maxLines = 1
+                                    )
+                                    if (isRecent) {
+                                        StatusPill("🔥 Novo", ConfirmedGreen, ConfirmedGreenContainer)
+                                    }
+                                }
+                                Text(
+                                    text = buildString {
+                                        append(prPoint?.label ?: "Atual")
+                                        if (series.deltaKg > 0.05) {
+                                            append(" · +${formatKgLabel(series.deltaKg)} desde início")
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (series.deltaKg > 0.05) ConfirmedGreen else TextSecondaryDark
+                                )
+                            }
+                            StatusPill(
+                                text = formatKgLabel(series.prKg),
+                                textColor = if (isSelected) TextOnGold else NewShapeGoldBright,
+                                containerColor = if (isSelected) NewShapeGold else CharcoalSurface
+                            )
+                        }
+                    }
                 }
             }
-            StatusPill(
-                text = "PR: ${formatKgLabel(activeSeries.prKg)}",
-                textColor = TextOnGold,
-                containerColor = NewShapeGold
-            )
+
+            if (prSortedList.size > 5) {
+                Spacer(Modifier.height(6.dp))
+                TextButton(
+                    onClick = { showAllPrs = !showAllPrs },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(
+                        text = if (showAllPrs) "Mostrar menos" else "Ver todos (${prSortedList.size})",
+                        color = NewShapeGoldBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
 
-        Spacer(Modifier.height(10.dp))
+        BrandCard(highlightBorder = true) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.TrendingUp, contentDescription = "Evolução de cargas", tint = NewShapeGoldBright, modifier = Modifier.size(18.dp))
+                    Column {
+                        Text("Evolução de Cargas (Força)", style = MaterialTheme.typography.titleMedium, color = TextPrimaryDark)
+                        Text("${seriesList.size} exercício(s) com registo", style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
+                    }
+                }
+                StatusPill(
+                    text = "PR: ${formatKgLabel(activeSeries.prKg)}",
+                    textColor = TextOnGold,
+                    containerColor = NewShapeGold
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
 
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(seriesList, key = { it.exerciseName }) { s ->
@@ -431,6 +630,7 @@ fun StrengthEvolutionChartCard(
                 )
                 Text(pts.last().label, style = MaterialTheme.typography.labelSmall, color = TextSecondaryDark)
             }
+        }
         }
     }
 }

@@ -1197,6 +1197,7 @@ export function App() {
           chatMessages={chatMessages}
           studioAnnouncements={studioAnnouncements}
           announcementReads={announcementReads}
+          workoutFeedback={workoutFeedback}
           settings={effectiveSettings}
           initialWeekSlug={pathInfo.weekSlug}
           showInstallPrompt={isExternalStudentPortal}

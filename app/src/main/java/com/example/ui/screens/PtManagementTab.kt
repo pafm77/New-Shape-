@@ -169,16 +169,21 @@ private fun FinancesSection(
     var trainingFilter by remember { mutableStateOf("ALL") }
     var periodScope by remember { mutableStateOf("REALIZED") }
 
+    val nextMonthOption = remember { getNextMonthOption() }
     val allPaidPayments = remember(state.payments) { state.payments.filter { it.paid } }
     val futurePrepaidPayments = remember(allPaidPayments, state.currentMonthYear) {
         allPaidPayments.filter { it.monthYear > state.currentMonthYear }
     }
+    val nextMonthPaymentsCount = remember(allPaidPayments, nextMonthOption) {
+        allPaidPayments.count { it.monthYear == nextMonthOption.first }
+    }
     val futurePrepaidTotal = remember(futurePrepaidPayments) {
         futurePrepaidPayments.sumOf { it.amountEur }
     }
-    val scopedAllPaidPayments = remember(allPaidPayments, periodScope, state.currentMonthYear) {
+    val scopedAllPaidPayments = remember(allPaidPayments, periodScope, state.currentMonthYear, nextMonthOption) {
         when (periodScope) {
             "CURRENT_MONTH" -> allPaidPayments.filter { it.monthYear == state.currentMonthYear }
+            "NEXT_MONTH" -> allPaidPayments.filter { it.monthYear == nextMonthOption.first }
             "REALIZED" -> allPaidPayments.filter { it.monthYear <= state.currentMonthYear }
             else -> allPaidPayments
         }
@@ -312,6 +317,11 @@ private fun FinancesSection(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 ) {
+                    val nextMonthLabelChip = if (nextMonthPaymentsCount > 0) {
+                        "Só ${nextMonthOption.second} ($nextMonthPaymentsCount)"
+                    } else {
+                        "Só ${nextMonthOption.second}"
+                    }
                     val futureLabel = if (futurePrepaidPayments.isNotEmpty()) {
                         "Incluir futuros (+${futurePrepaidPayments.size})"
                     } else {
@@ -320,6 +330,7 @@ private fun FinancesSection(
                     listOf(
                         "REALIZED" to "Até este mês",
                         "CURRENT_MONTH" to "Só ${state.currentMonthLabel}",
+                        "NEXT_MONTH" to nextMonthLabelChip,
                         "ALL_FUTURE" to futureLabel
                     ).forEach { (key, label) ->
                         FilterChip(
@@ -343,7 +354,7 @@ private fun FinancesSection(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Fidelizações pré-pagas (meses futuros): ${futurePrepaidPayments.size} mensalidade(s) · €${String.format("%.2f", futurePrepaidTotal)} — contabilizadas automaticamente 1 por mês.",
+                            text = "Mensalidades antecipadas / futuros: ${futurePrepaidPayments.size} mensalidade(s) · €${String.format("%.2f", futurePrepaidTotal)} — contabilizadas automaticamente no respetivo mês.",
                             style = MaterialTheme.typography.bodySmall,
                             color = NewShapeGoldBright,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)

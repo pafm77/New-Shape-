@@ -2047,8 +2047,13 @@ fun RegisterPaymentDialog(
 
     var selectedMethod by remember { mutableStateOf("MbWay") }
     val paymentMethods = SeedCatalog.PAYMENT_METHODS
-    val monthOptions = remember(defaultMonthYear) { buildRecentMonthOptions() }
-    var selectedMonth by remember { mutableStateOf(monthOptions.firstOrNull() ?: (defaultMonthYear to defaultMonthLabel)) }
+    val monthOptions = remember(defaultMonthYear) { buildPaymentMonthOptions(futureMonths = 2, pastMonths = 3) }
+    var selectedMonth by remember(defaultMonthYear) {
+        val def = monthOptions.find { it.monthYear == defaultMonthYear }
+            ?: monthOptions.find { it.offset == 0 }
+            ?: monthOptions.first()
+        mutableStateOf(def)
+    }
 
     val numericAmount = amountText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
     val numericSeguro = if (includeSeguro) (seguroText.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0) else 0.0
@@ -2056,7 +2061,7 @@ fun RegisterPaymentDialog(
     val grandTotal = numericAmount + numericSeguro + numericJoia
     val perMonthAmount = numericAmount / durationMonths
     val coveredMonths = remember(selectedMonth, durationMonths) {
-        SeedCatalog.buildConsecutiveMonths(selectedMonth.first, durationMonths)
+        SeedCatalog.buildConsecutiveMonths(selectedMonth.monthYear, durationMonths)
     }
 
     AlertDialog(
@@ -2070,20 +2075,46 @@ fun RegisterPaymentDialog(
             ) {
                 Text("Aluno: $clientName", style = MaterialTheme.typography.titleSmall, color = NewShapeGoldBright)
                 Text(
-                    text = if (durationMonths > 1) "Mês inicial da fidelização" else "Mês",
+                    text = if (durationMonths > 1) "Mês inicial da fidelização" else "Mês (inclui mês seguinte)",
                     style = MaterialTheme.typography.labelMedium,
                     color = TextSecondaryDark
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    monthOptions.take(3).forEach { opt ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    monthOptions.forEach { opt ->
+                        val chipLabel = when {
+                            opt.offset == 1 -> "${opt.monthLabel} · Próx."
+                            opt.offset == 0 -> "${opt.monthLabel} · Atual"
+                            else -> opt.monthLabel
+                        }
                         FilterChip(
-                            selected = selectedMonth.first == opt.first,
+                            selected = selectedMonth.monthYear == opt.monthYear,
                             onClick = { selectedMonth = opt },
-                            label = { Text(opt.second) },
+                            label = { Text(chipLabel, maxLines = 1) },
+                            modifier = Modifier.testTag("payment_month_${opt.monthYear}"),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = NewShapeGold,
                                 selectedLabelColor = TextOnGold
                             )
+                        )
+                    }
+                }
+                if (selectedMonth.offset > 0) {
+                    Surface(
+                        color = NewShapeGoldMuted.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.55f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Mensalidade antecipada (${selectedMonth.monthLabel}): fica guardada no mês seguinte sem misturar na faturação realizada deste mês.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NewShapeGoldBright,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                         )
                     }
                 }
@@ -2290,8 +2321,8 @@ fun RegisterPaymentDialog(
                 enabled = grandTotal > 0.0,
                 onClick = {
                     onConfirm(
-                        selectedMonth.first,
-                        selectedMonth.second,
+                        selectedMonth.monthYear,
+                        selectedMonth.monthLabel,
                         numericAmount,
                         selectedMethod,
                         durationMonths,
@@ -2751,10 +2782,43 @@ fun FidelizacaoDialog(
     }
 }
 
+data class PaymentMonthOption(
+    val monthYear: String,
+    val monthLabel: String,
+    val offset: Int
+)
+
+fun buildPaymentMonthOptions(futureMonths: Int = 2, pastMonths: Int = 3): List<PaymentMonthOption> {
+    val months = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+    return (futureMonths downTo -pastMonths).map { offset ->
+        val c = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            add(Calendar.MONTH, offset)
+        }
+        val key = String.format("%04d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1)
+        val lbl = "${months[c.get(Calendar.MONTH)]} ${c.get(Calendar.YEAR)}"
+        PaymentMonthOption(monthYear = key, monthLabel = lbl, offset = offset)
+    }
+}
+
+fun getNextMonthOption(): Pair<String, String> {
+    val months = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+    val c = Calendar.getInstance().apply {
+        set(Calendar.DAY_OF_MONTH, 1)
+        add(Calendar.MONTH, 1)
+    }
+    val key = String.format("%04d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1)
+    val lbl = "${months[c.get(Calendar.MONTH)]} ${c.get(Calendar.YEAR)}"
+    return key to lbl
+}
+
 fun buildRecentMonthOptions(): List<Pair<String, String>> {
     val months = arrayOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
     return (0 downTo -3).map { offset ->
-        val c = Calendar.getInstance().apply { add(Calendar.MONTH, offset) }
+        val c = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            add(Calendar.MONTH, offset)
+        }
         val key = String.format("%04d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1)
         val lbl = "${months[c.get(Calendar.MONTH)]} ${c.get(Calendar.YEAR)}"
         key to lbl
