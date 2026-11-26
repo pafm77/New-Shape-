@@ -102,6 +102,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
   // Per-day metadata for the 7 weekly tabs
   const dayStats = useMemo(() => {
     const now = new Date();
+    const nowMs = now.getTime();
     const mondayMs = activeWeek?.startDateMillis || 0;
     return WEEKDAY_SHORT.map(({ day, short, full }) => {
       const date = mondayMs ? new Date(mondayMs + (day - 1) * 86400000) : null;
@@ -112,13 +113,15 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
         date.getDate() === now.getDate();
 
       const daySessions = weekSessions.filter((s) => s.dayOfWeek === day);
-      const daySessionIds = new Set(daySessions.map((s) => s.id));
+      const daySessionMap = new Map(daySessions.map((s) => [s.id, s]));
       const dayBookings = weekBookings.filter(
-        (b) => daySessionIds.has(b.sessionId) && b.status !== 'CANCELLED'
+        (b) => daySessionMap.has(b.sessionId) && b.status !== 'CANCELLED'
       );
-      const pendingCount = dayBookings.filter(
-        (b) => b.status === 'PENDING' || b.status === 'ALTERED'
-      ).length;
+      const pendingCount = dayBookings.filter((b) => {
+        const s = daySessionMap.get(b.sessionId);
+        const isPast = Boolean(s && s.startMillis > 0 && s.startMillis <= nowMs);
+        return !isPast && (b.status === 'PENDING' || b.status === 'ALTERED');
+      }).length;
       const confirmedCount = dayBookings.filter((b) => b.status === 'CONFIRMED').length;
 
       return {
@@ -197,11 +200,15 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
     [sentByWeek, weekKey]
   );
 
-  const totalWeekPending = useMemo(
-    () =>
-      weekBookings.filter((b) => b.status === 'PENDING' || b.status === 'ALTERED').length,
-    [weekBookings]
-  );
+  const totalWeekPending = useMemo(() => {
+    const nowMs = Date.now();
+    const sessionMap = new Map(weekSessions.map((s) => [s.id, s]));
+    return weekBookings.filter((b) => {
+      const s = sessionMap.get(b.sessionId);
+      const isPast = Boolean(s && s.startMillis > 0 && s.startMillis <= nowMs);
+      return !isPast && (b.status === 'PENDING' || b.status === 'ALTERED');
+    }).length;
+  }, [weekBookings, weekSessions]);
 
   // Build ready-to-notify list grouped by student (all CONFIRMED sessions of that student in activeWeek)
   const confirmedClientGroups = useMemo(() => {
@@ -505,6 +512,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
         <div className="space-y-2.5">
           {daySessions.map((session) => {
             const isOpen = selectedSessionId === session.id;
+            const isPastSession = session.startMillis > 0 && session.startMillis <= Date.now();
             const sessionBookings = weekBookings
               .filter((b) => b.sessionId === session.id && b.status !== 'CANCELLED')
               .sort((a, b) => {
@@ -513,9 +521,11 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                 if (aPending !== bPending) return aPending ? -1 : 1;
                 return a.requestedAtMillis - b.requestedAtMillis;
               });
-            const pendingBookings = sessionBookings.filter(
-              (b) => b.status === 'PENDING' || b.status === 'ALTERED'
-            );
+            const pendingBookings = isPastSession
+              ? []
+              : sessionBookings.filter(
+                  (b) => b.status === 'PENDING' || b.status === 'ALTERED'
+                );
             const confirmedBookings = sessionBookings.filter((b) => b.status === 'CONFIRMED');
             const sessionWaitlist = waitlistEntries
               .filter((w) => w.sessionId === session.id)
@@ -682,6 +692,8 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                                     </StatusPill>
                                     {isConfirmed ? (
                                       <StatusPill tone="green">Aceite ✓</StatusPill>
+                                    ) : isPastSession ? (
+                                      <StatusPill tone="neutral">Expirado</StatusPill>
                                     ) : isAltered ? (
                                       <StatusPill tone="amber">Alterado</StatusPill>
                                     ) : (
@@ -700,7 +712,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  {!isConfirmed ? (
+                                  {!isConfirmed && !isPastSession ? (
                                     <>
                                       <button
                                         type="button"

@@ -234,6 +234,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
   }, [bookings, client.id, sessionMap, weekMap]);
 
   const myPendingItems = useMemo(() => {
+    const now = Date.now();
     return bookings
       .filter(
         (b) =>
@@ -242,7 +243,9 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
       )
       .map((booking) => {
         const session = sessionMap.get(booking.sessionId);
-        return session ? { booking, session, week: weekMap.get(booking.weekKey) } : null;
+        if (!session) return null;
+        if (session.startMillis > 0 && session.startMillis <= now) return null;
+        return { booking, session, week: weekMap.get(booking.weekKey) };
       })
       .filter(
         (
@@ -813,10 +816,13 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         );
                         const cutoffMinutes = getEffectiveCutoffMinutes(settings);
                         const cutoffMs = cutoffMinutes * 60_000;
+                        const isPastSession =
+                          s.startMillis > 0 && Date.now() >= s.startMillis;
                         const isCutoffLocked =
-                          cutoffMs > 0 &&
-                          s.startMillis > 0 &&
-                          Date.now() > s.startMillis - cutoffMs;
+                          isPastSession ||
+                          (cutoffMs > 0 &&
+                            s.startMillis > 0 &&
+                            Date.now() > s.startMillis - cutoffMs);
                         const editLocked = !settings.clientsCanEdit || isCutoffLocked;
                         const fullAndNotMine = isFull && !alreadyBooked;
                         const hasAnyActiveBookingOnDay = daySessions.some(
@@ -837,9 +843,13 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         const pillTone = existingForSession
                           ? existingForSession.status === 'CONFIRMED'
                             ? 'green'
+                            : isPastSession
+                            ? 'neutral'
                             : 'amber'
                           : myWaitlistEntry
                           ? 'amber'
+                          : isPastSession
+                          ? 'neutral'
                           : isFull
                           ? 'red'
                           : isMine
@@ -849,9 +859,13 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         const pillLabel = existingForSession
                           ? existingForSession.status === 'CONFIRMED'
                             ? 'Confirmado'
+                            : isPastSession
+                            ? 'Expirado'
                             : 'Por confirmar'
                           : myWaitlistEntry
                           ? `Espera #${myWaitlistIdx + 1}`
+                          : isPastSession
+                          ? 'Já passou'
                           : isFull
                           ? 'Esgotado'
                           : isMine
@@ -1212,6 +1226,9 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                           visibleSessionDayById
                         );
 
+                        const isPartialCancelOnly =
+                          !isFullCancel && removedIds.length > 0 && addedIds.length === 0;
+
                         if (isFullCancel || hasScheduleChange) {
                           const fmtSessions = (ids: string[]) =>
                             ids
@@ -1223,14 +1240,17 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                           const removedTxt = fmtSessions(removedIds);
                           const nextTxt = fmtSessions(Array.from(draftSessionIds));
 
-                          const notifType = isFullCancel ? 'CANCELLED' : 'ALTERED';
+                          const notifType =
+                            isFullCancel || isPartialCancelOnly ? 'CANCELLED' : 'ALTERED';
                           const summary = isFullCancel
                             ? `${client.name} cancelou o(s) treino(s) da semana ${activeWeek.label}${
                                 removedTxt ? ` (${removedTxt})` : ''
                               }.`
-                            : `${client.name} alterou o horário na semana ${activeWeek.label}.${
-                                removedTxt ? ` Retirou: ${removedTxt}.` : ''
-                              }${nextTxt ? ` Novo horário: ${nextTxt}.` : ''}`;
+                            : isPartialCancelOnly
+                              ? `${client.name} desmarcou o treino de ${removedTxt} (semana ${activeWeek.label}). Os restantes treinos mantêm-se confirmados.`
+                              : `${client.name} alterou o horário na semana ${activeWeek.label}.${
+                                  removedTxt ? ` Retirou: ${removedTxt}.` : ''
+                                }${nextTxt ? ` Novo horário: ${nextTxt}.` : ''}`;
 
                           await repo
                             .createPtNotification(uid, {
@@ -1246,16 +1266,20 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                             ? `Olá! Sou ${client.name} (New Shape). Tive de cancelar o meu treino da semana ${activeWeek.label}${
                                 removedTxt ? ` (${removedTxt})` : ''
                               }. Já atualizei na app!`
-                            : `Olá! Sou ${client.name} (New Shape). Modifiquei o meu horário de treino da semana ${activeWeek.label}.${
-                                removedTxt ? `\n• Retirado: ${removedTxt}` : ''
-                              }${nextTxt ? `\n• Novo horário: ${nextTxt}` : ''}\nJá atualizei na app!`;
+                            : isPartialCancelOnly
+                              ? `Olá! Sou ${client.name} (New Shape). Tive de desmarcar o meu treino de ${removedTxt} (semana ${activeWeek.label}). Os restantes treinos mantêm-se marcados na app!`
+                              : `Olá! Sou ${client.name} (New Shape). Modifiquei o meu horário de treino da semana ${activeWeek.label}.${
+                                  removedTxt ? `\n• Retirado: ${removedTxt}` : ''
+                                }${nextTxt ? `\n• Novo horário: ${nextTxt}` : ''}\nJá atualizei na app!`;
 
                           onWhatsAppAlert({
-                            title: isFullCancel
-                              ? 'Treino cancelado — Avisa o PT no WhatsApp'
-                              : 'Horário modificado — Avisa o PT no WhatsApp',
-                            subtitle:
-                              'O teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
+                            title:
+                              isFullCancel || isPartialCancelOnly
+                                ? 'Treino desmarcado — Avisa o PT no WhatsApp'
+                                : 'Horário modificado — Avisa o PT no WhatsApp',
+                            subtitle: isPartialCancelOnly
+                              ? 'O teu lugar foi libertado e os restantes treinos confirmados mantêm-se ativos. Envia também a mensagem pelo WhatsApp para avisar o PT.'
+                              : 'O teu Personal Trainer já recebeu uma notificação na app. Envia também a mensagem pelo WhatsApp para confirmar.',
                             message: waMsg,
                           });
                         }
@@ -1263,6 +1287,8 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         onBanner(
                           isFullCancel
                             ? 'Treino cancelado e PT notificado!'
+                            : isPartialCancelOnly
+                              ? 'Treino desmarcado! Os restantes treinos mantêm-se confirmados.'
                             : hasScheduleChange
                             ? 'Alteração de horário enviada e PT notificado!'
                             : 'Marcação enviada ao Personal Trainer!'

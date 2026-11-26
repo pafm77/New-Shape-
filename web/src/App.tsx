@@ -704,6 +704,12 @@ export function App() {
     }
   }, [isStudioOwner, studioUid, activeWeekKey, activeMondayMs, weeks]);
 
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const pendingQueue: PendingConfirmationCard[] = useMemo(() => {
     const clientMap = new Map(clients.map((c) => [c.id, c]));
     const weekMap = new Map(weeks.map((w) => [w.weekKey, w]));
@@ -730,25 +736,29 @@ export function App() {
       const items: BookingWithSession[] = list
         .map((b) => {
           const s = sessionMap.get(b.sessionId);
-          return s ? { booking: b, session: s } : null;
+          if (!s) return null;
+          if (s.startMillis > 0 && s.startMillis <= nowTick) return null;
+          return { booking: b, session: s };
         })
         .filter((x): x is BookingWithSession => x !== null)
         .sort((a, b) => a.session.startMillis - b.session.startMillis);
       if (items.length === 0) return;
 
-      const minReq = Math.min(...list.map((b) => b.requestedAtMillis));
+      const activeBookings = items.map((i) => i.booking);
+      const minReq = Math.min(...activeBookings.map((b) => b.requestedAtMillis));
+      const isCancelledAll = activeBookings.every((b) => b.status === 'CANCELLED');
       cards.push({
         client,
         week,
         items,
         requestedAtMillis: minReq,
-        isCancelledAll: list.every((b) => b.status === 'CANCELLED'),
-        isAltered: list.some((b) => b.status === 'ALTERED'),
+        isCancelledAll,
+        isAltered: !isCancelledAll && activeBookings.some((b) => b.status === 'ALTERED'),
       });
     });
 
     return cards.sort((a, b) => a.requestedAtMillis - b.requestedAtMillis);
-  }, [bookings, clients, weeks, sessions]);
+  }, [bookings, clients, weeks, sessions, nowTick]);
 
   const handleEmailSignIn = async (email: string, password: string) => {
     setAuthBusy(true);

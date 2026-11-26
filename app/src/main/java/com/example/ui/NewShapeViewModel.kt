@@ -103,6 +103,7 @@ data class StudioUiState(
 
     val pendingQueue: List<PendingConfirmationCard>
         get() {
+            val nowMs = System.currentTimeMillis()
             val pendingStatuses = setOf(
                 BookingStatus.PENDING.name,
                 BookingStatus.ALTERED.name,
@@ -120,16 +121,18 @@ data class StudioUiState(
                     val week = weekMap[key.second] ?: return@mapNotNull null
                     val items = list.mapNotNull { b ->
                         val s = sessionMap[b.sessionId] ?: return@mapNotNull null
+                        if (s.startMillis > 0L && s.startMillis <= nowMs) return@mapNotNull null
                         BookingWithSession(b, s)
                     }.sortedBy { it.session.startMillis }
                     if (items.isEmpty()) return@mapNotNull null
-                    val isCancelledAll = list.all { it.status == BookingStatus.CANCELLED.name }
-                    val isAltered = !isCancelledAll && list.any { it.status == BookingStatus.ALTERED.name }
+                    val activeBookings = items.map { it.booking }
+                    val isCancelledAll = activeBookings.all { it.status == BookingStatus.CANCELLED.name }
+                    val isAltered = !isCancelledAll && activeBookings.any { it.status == BookingStatus.ALTERED.name }
                     PendingConfirmationCard(
                         client = client,
                         week = week,
                         items = items,
-                        requestedAtMillis = list.minOf { it.requestedAtMillis },
+                        requestedAtMillis = activeBookings.minOf { it.requestedAtMillis },
                         isCancelledAll = isCancelledAll,
                         isAltered = isAltered
                     )
@@ -941,20 +944,35 @@ class NewShapeViewModel(
                         } else if (isModify) {
                             val removedIds = existingIds - selectedSessionIds
                             val addedIds = selectedSessionIds - existingIds
-                            val newText = formatList(selectedSessionIds)
-                            val parts = mutableListOf<String>()
-                            if (removedIds.isNotEmpty()) parts.add("saiu de ${formatList(removedIds)}")
-                            if (addedIds.isNotEmpty()) parts.add("marcou ${formatList(addedIds)}")
-                            val summary = "Alterou o horário da semana $weekLabel (${parts.joinToString(" · ")})."
-                            repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
-                            val waMsg = "Olá! Sou $clientName. Alterei o meu horário de treino na New Shape (semana $weekLabel). Novo horário: $newText. Podes confirmar?"
-                            _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
-                                type = "ALTERED",
-                                title = "Horário alterado — avisa o teu PT",
-                                detail = "O teu PT já foi notificado na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o novo horário.",
-                                whatsappMessage = waMsg
-                            )
-                            _statusBanner.value = "Alteração guardada. Avisa o PT pelo WhatsApp."
+                            val isPartialCancelOnly = removedIds.isNotEmpty() && addedIds.isEmpty()
+                            if (isPartialCancelOnly) {
+                                val removedText = formatList(removedIds)
+                                val summary = "$clientName desmarcou o treino de $removedText (semana $weekLabel). Os restantes treinos mantêm-se confirmados."
+                                repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
+                                val waMsg = "Olá! Sou $clientName (New Shape). Tive de desmarcar o meu treino de $removedText (semana $weekLabel). Os restantes treinos mantêm-se marcados na app!"
+                                _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                                    type = "CANCELLED",
+                                    title = "Treino desmarcado — avisa o teu PT",
+                                    detail = "O teu lugar foi libertado e os restantes treinos confirmados mantêm-se ativos. Envia também mensagem pelo WhatsApp para avisar o PT.",
+                                    whatsappMessage = waMsg
+                                )
+                                _statusBanner.value = "Treino desmarcado! Os restantes treinos mantêm-se confirmados."
+                            } else {
+                                val newText = formatList(selectedSessionIds)
+                                val parts = mutableListOf<String>()
+                                if (removedIds.isNotEmpty()) parts.add("saiu de ${formatList(removedIds)}")
+                                if (addedIds.isNotEmpty()) parts.add("marcou ${formatList(addedIds)}")
+                                val summary = "Alterou o horário da semana $weekLabel (${parts.joinToString(" · ")})."
+                                repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
+                                val waMsg = "Olá! Sou $clientName. Alterei o meu horário de treino na New Shape (semana $weekLabel). Novo horário: $newText. Podes confirmar?"
+                                _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
+                                    type = "ALTERED",
+                                    title = "Horário alterado — avisa o teu PT",
+                                    detail = "O teu PT já foi notificado na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o novo horário.",
+                                    whatsappMessage = waMsg
+                                )
+                                _statusBanner.value = "Alteração guardada. Avisa o PT pelo WhatsApp."
+                            }
                         } else {
                             _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp."
                         }

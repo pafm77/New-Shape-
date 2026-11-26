@@ -92,6 +92,7 @@ fun PtMarcacoesSection(
     }
 
     val dayStats = remember(activeWeek?.startDateMillis, weekSessions, weekBookings) {
+        val nowMs = System.currentTimeMillis()
         val nowCal = Calendar.getInstance()
         val nowYear = nowCal.get(Calendar.YEAR)
         val nowDayOfYear = nowCal.get(Calendar.DAY_OF_YEAR)
@@ -110,12 +111,14 @@ fun PtMarcacoesSection(
                 cal.get(Calendar.DAY_OF_YEAR) == nowDayOfYear
 
             val dSessions = weekSessions.filter { it.dayOfWeek == dayNum }
-            val dSessionIds = dSessions.map { it.id }.toSet()
+            val dSessionMap = dSessions.associateBy { it.id }
             val dBookings = weekBookings.filter {
-                it.sessionId in dSessionIds && it.status != BookingStatus.CANCELLED.name
+                it.sessionId in dSessionMap && it.status != BookingStatus.CANCELLED.name
             }
-            val pending = dBookings.count {
-                it.status == BookingStatus.PENDING.name || it.status == BookingStatus.ALTERED.name
+            val pending = dBookings.count { b ->
+                val s = dSessionMap[b.sessionId]
+                val isPast = s != null && s.startMillis > 0L && s.startMillis <= nowMs
+                !isPast && (b.status == BookingStatus.PENDING.name || b.status == BookingStatus.ALTERED.name)
             }
             val confirmed = dBookings.count { it.status == BookingStatus.CONFIRMED.name }
 
@@ -190,9 +193,13 @@ fun PtMarcacoesSection(
         sentByWeek = sentByWeek + (weekKey to (currentSent + clientId))
     }
 
-    val totalWeekPending = remember(weekBookings) {
-        weekBookings.count {
-            it.status == BookingStatus.PENDING.name || it.status == BookingStatus.ALTERED.name
+    val totalWeekPending = remember(weekBookings, weekSessions) {
+        val nowMs = System.currentTimeMillis()
+        val sessionMap = weekSessions.associateBy { it.id }
+        weekBookings.count { b ->
+            val s = sessionMap[b.sessionId]
+            val isPast = s != null && s.startMillis > 0L && s.startMillis <= nowMs
+            !isPast && (b.status == BookingStatus.PENDING.name || b.status == BookingStatus.ALTERED.name)
         }
     }
 
@@ -469,6 +476,7 @@ fun PtMarcacoesSection(
         } else {
             items(currentDayInfo.sessions, key = { it.id }) { session ->
                 val isOpen = selectedSessionId == session.id
+                val isPastSession = session.startMillis > 0L && session.startMillis <= System.currentTimeMillis()
                 val slotBookings = weekBookings
                     .filter { it.sessionId == session.id && it.status != BookingStatus.CANCELLED.name }
                     .sortedWith(
@@ -476,7 +484,7 @@ fun PtMarcacoesSection(
                             it.status == BookingStatus.PENDING.name || it.status == BookingStatus.ALTERED.name
                         }.thenBy { it.requestedAtMillis }
                     )
-                val pendingList = slotBookings.filter {
+                val pendingList = if (isPastSession) emptyList() else slotBookings.filter {
                     it.status == BookingStatus.PENDING.name || it.status == BookingStatus.ALTERED.name
                 }
                 val confirmedList = slotBookings.filter { it.status == BookingStatus.CONFIRMED.name }
@@ -719,15 +727,36 @@ fun PtMarcacoesSection(
                                                         StatusPill(
                                                             text = when {
                                                                 isConfirmed -> "Aceite ✓"
+                                                                isPastSession -> "Expirado"
                                                                 isAltered -> "Alterado"
                                                                 else -> "Pendente"
                                                             },
-                                                            textColor = if (isConfirmed) ConfirmedGreen else PendingAmber,
-                                                            containerColor = if (isConfirmed) ConfirmedGreenContainer else PendingAmberContainer
+                                                            textColor = when {
+                                                                isConfirmed -> ConfirmedGreen
+                                                                isPastSession -> TextSecondaryDark
+                                                                else -> PendingAmber
+                                                            },
+                                                            containerColor = when {
+                                                                isConfirmed -> ConfirmedGreenContainer
+                                                                isPastSession -> CharcoalSurface
+                                                                else -> PendingAmberContainer
+                                                            }
                                                         )
                                                     }
 
-                                                    if (!isConfirmed) {
+                                                    if (!isConfirmed && isPastSession) {
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.End
+                                                        ) {
+                                                            TextButton(
+                                                                onClick = { viewModel.rejectBookingSilently(b, client.name) },
+                                                                modifier = Modifier.testTag("marcacoes_remove_expired_${b.id}")
+                                                            ) {
+                                                                Text("Remover", color = TextSecondaryDark, fontWeight = FontWeight.SemiBold)
+                                                            }
+                                                        }
+                                                    } else if (!isConfirmed) {
                                                         Row(
                                                             modifier = Modifier.fillMaxWidth(),
                                                             horizontalArrangement = Arrangement.spacedBy(8.dp)

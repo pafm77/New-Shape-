@@ -768,6 +768,7 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                   const isSwappingThis = swappingTarget?.booking.id === booking.id;
                   const endTime = computeEndTime(session.timeLabel, session.durationMinutes);
                   const isConfirmed = booking.status === 'CONFIRMED';
+                  const isPastSession = session.startMillis > 0 && session.startMillis <= Date.now();
                   const isPresent = booking.attendanceStatus === 'PRESENT';
                   const isAbsent = booking.attendanceStatus === 'ABSENT';
                   return (
@@ -782,6 +783,8 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                           ? 'border-[#EF4444]/55 bg-[#3B1518]/30'
                           : isConfirmed
                           ? 'border-[#22C55E]/40 bg-[#143524]/25'
+                          : isPastSession
+                          ? 'border-[#323238] bg-[#1B1B1E]'
                           : 'border-[#F59E0B]/40 bg-[#3F2A10]/30'
                       }`}
                     >
@@ -794,8 +797,8 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                             {session.ptPrivatePersonal && (
                               <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
                             )}
-                            <StatusPill tone={isConfirmed ? 'green' : 'amber'}>
-                              {isConfirmed ? 'Confirmado ✓' : 'Por confirmar'}
+                            <StatusPill tone={isConfirmed ? 'green' : isPastSession ? 'neutral' : 'amber'}>
+                              {isConfirmed ? 'Confirmado ✓' : isPastSession ? 'Expirado' : 'Por confirmar'}
                             </StatusPill>
                           </div>
                           <p className="mt-0.5 text-xs font-semibold text-[#FACC15]">
@@ -805,7 +808,7 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5">
-                          {!isConfirmed && (
+                          {!isConfirmed && !isPastSession && (
                             <button
                               type="button"
                               disabled={busyKey === booking.id}
@@ -1064,11 +1067,17 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                           )
                         ) : existingBooking ? (
                           <div className="flex items-center gap-1.5">
-                            <StatusPill
-                              tone={existingBooking.status === 'CONFIRMED' ? 'green' : 'amber'}
-                            >
-                              {existingBooking.status === 'CONFIRMED' ? 'Marcado ✓' : 'Por confirmar'}
-                            </StatusPill>
+                            {(() => {
+                              const isPastSlot = session.startMillis > 0 && session.startMillis <= Date.now();
+                              const isConf = existingBooking.status === 'CONFIRMED';
+                              return (
+                                <StatusPill
+                                  tone={isConf ? 'green' : isPastSlot ? 'neutral' : 'amber'}
+                                >
+                                  {isConf ? 'Marcado ✓' : isPastSlot ? 'Expirado' : 'Por confirmar'}
+                                </StatusPill>
+                              );
+                            })()}
                             <button
                               type="button"
                               onClick={() =>

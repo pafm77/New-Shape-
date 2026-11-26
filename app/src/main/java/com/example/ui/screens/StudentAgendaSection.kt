@@ -229,13 +229,17 @@ internal fun StudentAgendaSection(
             .mapNotNull { booking -> sessionMap[booking.sessionId]?.let { booking to it } }
             .sortedBy { it.second.startMillis }
     }
-    val myPendingAll = remember(state.bookings, sessionMap, student.id) {
+    val myPendingAll = remember(state.bookings, sessionMap, student.id, nowMs) {
         state.bookings
             .filter {
                 it.clientId == student.id &&
                     (it.status == BookingStatus.PENDING.name || it.status == BookingStatus.ALTERED.name)
             }
-            .mapNotNull { booking -> sessionMap[booking.sessionId]?.let { booking to it } }
+            .mapNotNull { booking ->
+                val s = sessionMap[booking.sessionId] ?: return@mapNotNull null
+                if (s.startMillis > 0L && s.startMillis <= nowMs) return@mapNotNull null
+                booking to s
+            }
             .sortedBy { it.second.startMillis }
     }
 
@@ -730,7 +734,8 @@ internal fun StudentAgendaSection(
                     }
                     val isFull = confirmedCount >= session.capacity
                     val isSelected = session.id in selectedSessionIds
-                    val isPastCutoff = cutoffMs > 0L && session.startMillis > 0 && (session.startMillis - nowMs) < cutoffMs
+                    val isPastSession = session.startMillis > 0L && session.startMillis <= nowMs
+                    val isPastCutoff = isPastSession || (cutoffMs > 0L && session.startMillis > 0 && (session.startMillis - nowMs) < cutoffMs)
                     val existingForSession = existingBookings.find { it.sessionId == session.id }
                     val otherBookedOnDay = daySessions.firstOrNull { other ->
                         other.id != session.id &&
@@ -870,7 +875,13 @@ internal fun StudentAgendaSection(
                                             color = PendingAmber
                                         )
                                     }
-                                    if (isPastCutoff) {
+                                    if (isPastSession) {
+                                        Text(
+                                            text = "Horário já passou",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TextSecondaryDark
+                                        )
+                                    } else if (isPastCutoff) {
                                         Text(
                                             text = "Fechado (menos de ${state.settings.formatCutoffLabel()})",
                                             style = MaterialTheme.typography.labelSmall,
@@ -886,9 +897,21 @@ internal fun StudentAgendaSection(
                                     if (existingForSession != null) {
                                         val conf = existingForSession.status == BookingStatus.CONFIRMED.name
                                         StatusPill(
-                                            text = if (conf) "Confirmado" else "Por confirmar",
-                                            textColor = if (conf) ConfirmedGreen else PendingAmber,
-                                            containerColor = if (conf) ConfirmedGreenContainer else PendingAmberContainer
+                                            text = when {
+                                                conf -> "Confirmado"
+                                                isPastSession -> "Expirado"
+                                                else -> "Por confirmar"
+                                            },
+                                            textColor = when {
+                                                conf -> ConfirmedGreen
+                                                isPastSession -> TextSecondaryDark
+                                                else -> PendingAmber
+                                            },
+                                            containerColor = when {
+                                                conf -> ConfirmedGreenContainer
+                                                isPastSession -> CharcoalSurface
+                                                else -> PendingAmberContainer
+                                            }
                                         )
                                     } else if (myWaitlistEntry != null) {
                                         StatusPill(
@@ -898,9 +921,9 @@ internal fun StudentAgendaSection(
                                         )
                                     } else {
                                         StatusPill(
-                                            text = if (isFull) "Esgotado" else if (isSelected) "Selecionado" else "Disponível",
-                                            textColor = if (isFull) DangerRed else if (isSelected) NewShapeGoldBright else ConfirmedGreen,
-                                            containerColor = if (isFull) DangerRedContainer else if (isSelected) NewShapeGoldMuted else ConfirmedGreenContainer
+                                            text = if (isPastSession) "Já passou" else if (isFull) "Esgotado" else if (isSelected) "Selecionado" else "Disponível",
+                                            textColor = if (isPastSession) TextSecondaryDark else if (isFull) DangerRed else if (isSelected) NewShapeGoldBright else ConfirmedGreen,
+                                            containerColor = if (isPastSession) CharcoalSurface else if (isFull) DangerRedContainer else if (isSelected) NewShapeGoldMuted else ConfirmedGreenContainer
                                         )
                                     }
                                     Icon(

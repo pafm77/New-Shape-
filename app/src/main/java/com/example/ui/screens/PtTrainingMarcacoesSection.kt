@@ -735,10 +735,23 @@ internal fun PtTrainingMarcacoesSection(
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                             }
+                                            val isPastSession = session.startMillis > 0L && session.startMillis <= System.currentTimeMillis()
                                             StatusPill(
-                                                text = if (isConfirmed) "Confirmado ✓" else "Por confirmar",
-                                                textColor = if (isConfirmed) ConfirmedGreen else PendingAmber,
-                                                containerColor = if (isConfirmed) ConfirmedGreenContainer else PendingAmberContainer
+                                                text = when {
+                                                    isConfirmed -> "Confirmado ✓"
+                                                    isPastSession -> "Expirado"
+                                                    else -> "Por confirmar"
+                                                },
+                                                textColor = when {
+                                                    isConfirmed -> ConfirmedGreen
+                                                    isPastSession -> TextSecondaryDark
+                                                    else -> PendingAmber
+                                                },
+                                                containerColor = when {
+                                                    isConfirmed -> ConfirmedGreenContainer
+                                                    isPastSession -> CharcoalSurface
+                                                    else -> PendingAmberContainer
+                                                }
                                             )
                                         }
 
@@ -803,7 +816,8 @@ internal fun PtTrainingMarcacoesSection(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            if (!isConfirmed) {
+                                            val isPastSession = session.startMillis > 0L && session.startMillis <= System.currentTimeMillis()
+                                            if (!isConfirmed && !isPastSession) {
                                                 FilledTonalButton(
                                                     onClick = {
                                                         viewModel.acceptBookingSilently(booking, selectedClient.name)

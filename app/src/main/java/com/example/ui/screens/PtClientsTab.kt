@@ -859,10 +859,23 @@ fun PtClientProfileScreen(
                                                     )
                                                 }
                                             }
+                                            val isPastSession = session.startMillis > 0L && session.startMillis <= System.currentTimeMillis()
                                             StatusPill(
-                                                text = if (isConfirmed) "Marcado ✓" else "Por confirmar",
-                                                textColor = if (isConfirmed) ConfirmedGreen else PendingAmber,
-                                                containerColor = if (isConfirmed) ConfirmedGreenContainer else PendingAmberContainer
+                                                text = when {
+                                                    isConfirmed -> "Marcado ✓"
+                                                    isPastSession -> "Expirado"
+                                                    else -> "Por confirmar"
+                                                },
+                                                textColor = when {
+                                                    isConfirmed -> ConfirmedGreen
+                                                    isPastSession -> TextSecondaryDark
+                                                    else -> PendingAmber
+                                                },
+                                                containerColor = when {
+                                                    isConfirmed -> ConfirmedGreenContainer
+                                                    isPastSession -> CharcoalSurface
+                                                    else -> PendingAmberContainer
+                                                }
                                             )
                                         }
                                     }

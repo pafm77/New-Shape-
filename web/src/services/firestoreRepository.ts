@@ -1398,13 +1398,13 @@ export async function applyFixedSchedulesForWeek(
     return { createdBookings: 0, createdSessions: 0, affectedClients: 0 };
   }
 
-  const sessionMap = new Map<string, { id: string }>();
+  const sessionMap = new Map<string, { id: string; startMillis: number }>();
   existingSessions
     .filter((s) => s.weekKey === targetWeek.weekKey)
     .forEach((s) => {
       const key = `${s.dayOfWeek}|${s.timeLabel}`;
       if (!sessionMap.has(key)) {
-        sessionMap.set(key, { id: s.id });
+        sessionMap.set(key, { id: s.id, startMillis: s.startMillis });
       }
     });
 
@@ -1428,8 +1428,9 @@ export async function applyFixedSchedulesForWeek(
       const parsed = parseFixedSlot(rawSlot);
       if (!parsed) continue;
       let sessionEntry = sessionMap.get(parsed.key);
-      if (!sessionEntry) {
-        const sessionRef = doc(subcol(uid, 'sessions'));
+      if (sessionEntry) {
+        if (sessionEntry.startMillis > 0 && sessionEntry.startMillis <= now) continue;
+      } else {
         const sessionData = createSessionModel(
           uid,
           targetWeek.weekKey,
@@ -1441,6 +1442,8 @@ export async function applyFixedSchedulesForWeek(
           client.trainingType === 'PERSONALIZADO' ? 1 : 6,
           'Horário Fixo'
         );
+        if (sessionData.startMillis > 0 && sessionData.startMillis <= now) continue;
+        const sessionRef = doc(subcol(uid, 'sessions'));
         writes.push([
           sessionRef,
           {
@@ -1449,7 +1452,7 @@ export async function applyFixedSchedulesForWeek(
             updatedAt: serverTimestamp(),
           },
         ]);
-        sessionEntry = { id: sessionRef.id };
+        sessionEntry = { id: sessionRef.id, startMillis: sessionData.startMillis };
         sessionMap.set(parsed.key, sessionEntry);
         createdSessions += 1;
       }
@@ -2032,10 +2035,6 @@ export async function submitStudentBookings(
     batch.delete(doc(subcol(uid, 'week_responses'), `${weekKey}_${clientId}`));
 
     const wasConfirmed = activeExisting.some((b) => b.status === 'CONFIRMED');
-    const existingSessionIds = new Set(activeExisting.map((b) => b.sessionId));
-    const hasSelectionChanged =
-      existingSessionIds.size !== selectedSessionIds.size ||
-      Array.from(selectedSessionIds).some((sid) => !existingSessionIds.has(sid));
     const now = Date.now();
 
     if (selectedSessionIds.size === 0 && activeExisting.length > 0) {
@@ -2066,14 +2065,9 @@ export async function submitStudentBookings(
         // Delete unselected bookings AND any duplicate docs for the same sessionId
         batch.delete(doc(subcol(uid, 'bookings'), b.id));
       } else {
+        // Keep already-booked sessions with their existing status (CONFIRMED stays CONFIRMED)
+        // so cancelling or editing another session never forces the PT to re-confirm them.
         keptSessionIds.add(b.sessionId);
-        if (wasConfirmed && hasSelectionChanged) {
-          batch.update(doc(subcol(uid, 'bookings'), b.id), {
-            status: 'ALTERED',
-            requestedAtMillis: now,
-            updatedAt: serverTimestamp(),
-          });
-        }
       }
     });
 

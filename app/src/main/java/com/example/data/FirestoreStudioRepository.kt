@@ -1063,13 +1063,13 @@ class FirestoreStudioRepository(
         if (targetClients.isEmpty()) {
             Result.success(0 to 0)
         } else {
-            val sessionIdBySlotKey = mutableMapOf<String, String>()
+            val sessionInfoBySlotKey = mutableMapOf<String, Pair<String, Long>>()
             existingSessions
                 .filter { it.weekKey == targetWeek.weekKey }
                 .forEach { s ->
                     val key = "${s.dayOfWeek}|${s.timeLabel}"
-                    if (!sessionIdBySlotKey.containsKey(key)) {
-                        sessionIdBySlotKey[key] = s.id
+                    if (!sessionInfoBySlotKey.containsKey(key)) {
+                        sessionInfoBySlotKey[key] = s.id to s.startMillis
                     }
                 }
 
@@ -1087,9 +1087,12 @@ class FirestoreStudioRepository(
                 val slots = SeedCatalog.normalizeFixedSlots(client.fixedSlots)
                 for (rawSlot in slots) {
                     val parsed = SeedCatalog.parseFixedSlot(rawSlot) ?: continue
-                    var sessionId = sessionIdBySlotKey[parsed.key]
-                    if (sessionId == null) {
-                        val sessionRef = userDoc(uid).collection("sessions").document()
+                    val existingEntry = sessionInfoBySlotKey[parsed.key]
+                    val sessionId: String
+                    if (existingEntry != null) {
+                        if (existingEntry.second > 0L && existingEntry.second <= now) continue
+                        sessionId = existingEntry.first
+                    } else {
                         val s = SeedCatalog.createSession(
                             userId = uid,
                             weekKey = targetWeek.weekKey,
@@ -1101,6 +1104,8 @@ class FirestoreStudioRepository(
                             capacity = if (client.trainingType == "PERSONALIZADO") 1 else 6,
                             note = "Horário Fixo"
                         )
+                        if (s.startMillis > 0L && s.startMillis <= now) continue
+                        val sessionRef = userDoc(uid).collection("sessions").document()
                         pendingOps.add(
                             sessionRef to mapOf(
                                 "userId" to uid,
@@ -1117,7 +1122,7 @@ class FirestoreStudioRepository(
                             )
                         )
                         sessionId = sessionRef.id
-                        sessionIdBySlotKey[parsed.key] = sessionId
+                        sessionInfoBySlotKey[parsed.key] = sessionId to s.startMillis
                         createdSessions++
                     }
 
@@ -1845,8 +1850,6 @@ class FirestoreStudioRepository(
                     }
                 }
             } else {
-                val currentIds = activeExisting.map { it.sessionId }.toSet()
-                val hasSelectionChanged = currentIds != selectedSessionIds
                 val newStatus = if (hadConfirmed) BookingStatus.ALTERED.name else BookingStatus.PENDING.name
                 val keptSessionIds = mutableSetOf<String>()
 
@@ -1854,16 +1857,9 @@ class FirestoreStudioRepository(
                     if (b.sessionId !in selectedSessionIds || !keptSessionIds.add(b.sessionId)) {
                         // Delete unselected bookings AND any duplicate docs for the same sessionId
                         batch.delete(userDoc(uid).collection("bookings").document(b.id))
-                    } else if (hadConfirmed && hasSelectionChanged) {
-                        batch.update(
-                            userDoc(uid).collection("bookings").document(b.id),
-                            mapOf(
-                                "status" to BookingStatus.ALTERED.name,
-                                "requestedAtMillis" to now,
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        )
                     }
+                    // Kept bookings keep their existing status (e.g. CONFIRMED remains CONFIRMED)
+                    // so cancelling or editing another session never forces the PT to re-confirm them.
                 }
 
                 selectedSessionIds.filter { it !in keptSessionIds }.forEach { sessionId ->
