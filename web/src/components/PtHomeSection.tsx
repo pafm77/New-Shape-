@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Dumbbell,
   Edit3,
   EyeOff,
   MessageSquare,
@@ -39,7 +40,9 @@ import {
   TrainingWeekRecord,
   WaitlistEntryRecord,
   WeekResponseRecord,
+  getWeekDayWorkoutType,
 } from '../types/studio';
+import { DayWorkoutTypesModal } from './DayWorkoutTypesModal';
 import {
   buildMessageFromTemplate,
   buildPtPortalLink,
@@ -874,6 +877,7 @@ const SemanasView: React.FC<{
   const [visibilityFilter, setVisibilityFilter] = useState<'ALL' | 'PUBLIC' | 'PRIVATE'>('ALL');
   const [showFixedManager, setShowFixedManager] = useState(false);
   const [fixedManagerInitialClientId, setFixedManagerInitialClientId] = useState<string>('');
+  const [showDayTypesModal, setShowDayTypesModal] = useState(false);
   const [applyingFixed, setApplyingFixed] = useState(false);
   const [duplicatingWeek, setDuplicatingWeek] = useState(false);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
@@ -945,7 +949,8 @@ const SemanasView: React.FC<{
     try {
       const prevMonday = new Date(activeWeek.startDateMillis);
       prevMonday.setDate(prevMonday.getDate() - 7);
-      const { weekKey: prevKey } = await repo.ensureWeekExists(uid, prevMonday.getTime());
+      const prevWeek = await repo.ensureWeekExists(uid, prevMonday.getTime());
+      const prevKey = prevWeek.weekKey;
       const prevSessions = sessions.filter((s) => s.weekKey === prevKey);
       if (prevSessions.length === 0) {
         onBanner('A semana anterior não tem treinos para duplicar.');
@@ -972,6 +977,17 @@ const SemanasView: React.FC<{
         mergedBookings,
         weekResponses
       );
+      let copiedDayTypes = false;
+      if (
+        prevWeek.showDayWorkoutTypes &&
+        prevWeek.dayWorkoutTypes &&
+        Object.keys(prevWeek.dayWorkoutTypes).length > 0 &&
+        !activeWeek.showDayWorkoutTypes &&
+        (!activeWeek.dayWorkoutTypes || Object.keys(activeWeek.dayWorkoutTypes).length === 0)
+      ) {
+        await repo.updateWeekDayWorkoutTypes(uid, activeWeek.weekKey, true, prevWeek.dayWorkoutTypes);
+        copiedDayTypes = true;
+      }
       const parts: string[] = [];
       if (added > 0) parts.push(`${added} treino(s) copiado(s)`);
       if (addedPrivateBookings > 0) {
@@ -979,6 +995,9 @@ const SemanasView: React.FC<{
       }
       if (fixedRes.createdBookings > 0) {
         parts.push(`${fixedRes.createdBookings} horário(s) fixo(s) em Por confirmar`);
+      }
+      if (copiedDayTypes) {
+        parts.push('tipos de treino por dia copiados');
       }
       onBanner(
         parts.length > 0
@@ -1112,6 +1131,70 @@ const SemanasView: React.FC<{
                 CSV
               </SecondaryButton>
             </div>
+
+            {(() => {
+              const configuredCount = Object.values(activeWeek.dayWorkoutTypes ?? {}).filter(
+                (v) => v.trim().length > 0
+              ).length;
+              const isDayTypesActive = Boolean(activeWeek.showDayWorkoutTypes) && configuredCount > 0;
+              const shortDays: Array<[number, string]> = [
+                [1, 'Seg'],
+                [2, 'Ter'],
+                [3, 'Qua'],
+                [4, 'Qui'],
+                [5, 'Sex'],
+                [6, 'Sáb'],
+                [7, 'Dom'],
+              ];
+              return (
+                <button
+                  type="button"
+                  onClick={() => setShowDayTypesModal(true)}
+                  className={`w-full rounded-xl border p-3 text-left transition ${
+                    isDayTypesActive
+                      ? 'border-[#EAB308]/60 bg-[#3D3314]/45 hover:border-[#EAB308]'
+                      : 'border-[#323238] bg-[#242429] hover:border-[#EAB308]/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Dumbbell
+                        className={`h-4 w-4 shrink-0 ${
+                          isDayTypesActive ? 'text-[#FACC15]' : 'text-[#A1A1AA]'
+                        }`}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-[#F4F4F5]">Tipo de treino por dia</p>
+                        <p className="text-[11px] text-[#A1A1AA]">
+                          {isDayTypesActive
+                            ? 'Visível para alunos · Toca para editar ou desativar'
+                            : 'Opcional · Escolhe se queres definir o foco de cada dia'}
+                        </p>
+                      </div>
+                    </div>
+                    <StatusPill tone={isDayTypesActive ? 'gold' : 'neutral'}>
+                      {isDayTypesActive ? `Ativo (${configuredCount})` : 'Opcional'}
+                    </StatusPill>
+                  </div>
+                  {isDayTypesActive && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {shortDays.map(([dayNum, shortLbl]) => {
+                        const lbl = getWeekDayWorkoutType(activeWeek, dayNum);
+                        if (!lbl) return null;
+                        return (
+                          <span
+                            key={dayNum}
+                            className="rounded-lg border border-[#EAB308]/35 bg-[#1B1B1E] px-2 py-0.5 text-[11px] font-bold text-[#FACC15]"
+                          >
+                            {shortLbl}: {lbl}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </button>
+              );
+            })()}
           </div>
         )}
       </BrandCard>
@@ -1327,6 +1410,10 @@ const SemanasView: React.FC<{
                         Espera: {sessionWaitlistCount}
                       </StatusPill>
                     )}
+                    {(() => {
+                      const dayType = getWeekDayWorkoutType(activeWeek, session.dayOfWeek);
+                      return dayType ? <StatusPill tone="gold">{dayType}</StatusPill> : null;
+                    })()}
                   </div>
                   <p className="text-xs text-[#A1A1AA]">
                     {session.durationMinutes} min{session.note ? ` · ${session.note}` : ''}
@@ -1413,6 +1500,26 @@ const SemanasView: React.FC<{
               appliedCount > 0
                 ? `Dias fixos de ${client.name} guardados! ${appliedCount} marcação(ões) enviada(s) para Por confirmar.`
                 : `Dias fixos de ${client.name} atualizados!`
+            );
+          }}
+        />
+      )}
+
+      {/* Optional Daily Workout Types Modal */}
+      {activeWeek && (
+        <DayWorkoutTypesModal
+          open={showDayTypesModal}
+          weekLabel={activeWeek.label}
+          initialEnabled={Boolean(activeWeek.showDayWorkoutTypes)}
+          initialTypes={activeWeek.dayWorkoutTypes ?? {}}
+          onClose={() => setShowDayTypesModal(false)}
+          onSave={async (enabled, typesMap) => {
+            await repo.updateWeekDayWorkoutTypes(uid, activeWeek.weekKey, enabled, typesMap);
+            const activeCount = Object.values(typesMap).filter((v) => v.trim().length > 0).length;
+            onBanner(
+              enabled && activeCount > 0
+                ? `Tipos de treino guardados (${activeCount} dia(s)) ✓`
+                : 'Tipos de treino por dia desativados para esta semana ✓'
             );
           }}
         />

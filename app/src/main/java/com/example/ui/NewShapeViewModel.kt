@@ -692,6 +692,7 @@ class NewShapeViewModel(
                 add(Calendar.DAY_OF_YEAR, -7)
             }
             val prevKey = SeedCatalog.formatWeekKey(cal)
+            val prevWeek = data.weeks.find { it.weekKey == prevKey }
             val prevSessions = data.sessions.filter { it.weekKey == prevKey }
             if (prevSessions.isEmpty()) {
                 _statusBanner.value = "A semana anterior não tem treinos para duplicar."
@@ -719,14 +720,74 @@ class NewShapeViewModel(
                         existingBookings = mergedBookings,
                         weekResponses = data.weekResponses
                     ).getOrNull()?.first ?: 0
+                    var copiedDayTypes = false
+                    if (prevWeek != null &&
+                        prevWeek.showDayWorkoutTypes &&
+                        prevWeek.dayWorkoutTypes.isNotEmpty() &&
+                        !targetWeek.showDayWorkoutTypes &&
+                        targetWeek.dayWorkoutTypes.isEmpty()
+                    ) {
+                        copiedDayTypes = repository.updateWeekDayWorkoutTypes(
+                            weekKey = targetWeek.weekKey,
+                            showDayWorkoutTypes = true,
+                            dayWorkoutTypes = prevWeek.dayWorkoutTypes
+                        ).isSuccess
+                    }
                     val parts = mutableListOf<String>()
                     if (count > 0) parts.add("$count treino(s) copiado(s)")
                     if (privateBookingsCount > 0) parts.add("$privateBookingsCount marcação(ões) privada(s) PT")
                     if (fixedCount > 0) parts.add("$fixedCount horário(s) fixo(s) em Por confirmar")
+                    if (copiedDayTypes) parts.add("tipos de treino por dia copiados")
                     _statusBanner.value = if (parts.isEmpty()) {
                         "Esta semana já tem todos os treinos e horários fixos da semana anterior."
                     } else {
                         "Semana duplicada: ${parts.joinToString(" · ")} ✓"
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun updateWeekDayWorkoutTypes(
+        week: TrainingWeekRecord,
+        showDayWorkoutTypes: Boolean,
+        dayWorkoutTypes: Map<String, String>
+    ) {
+        viewModelScope.launch {
+            repository.updateWeekDayWorkoutTypes(
+                weekKey = week.weekKey,
+                showDayWorkoutTypes = showDayWorkoutTypes,
+                dayWorkoutTypes = dayWorkoutTypes
+            )
+                .onSuccess {
+                    val activeCount = dayWorkoutTypes.values.count { it.isNotBlank() }
+                    _statusBanner.value = if (showDayWorkoutTypes && activeCount > 0) {
+                        "Tipos de treino guardados ($activeCount dia(s)) ✓"
+                    } else {
+                        "Tipos de treino por dia desativados para esta semana ✓"
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun updateWeekDayWorkoutTypesForDate(
+        mondayMillis: Long,
+        showDayWorkoutTypes: Boolean,
+        dayWorkoutTypes: Map<String, String>
+    ) {
+        viewModelScope.launch {
+            repository.updateWeekDayWorkoutTypesForDate(
+                mondayMillis = mondayMillis,
+                showDayWorkoutTypes = showDayWorkoutTypes,
+                dayWorkoutTypes = dayWorkoutTypes
+            )
+                .onSuccess {
+                    val activeCount = dayWorkoutTypes.values.count { it.isNotBlank() }
+                    _statusBanner.value = if (showDayWorkoutTypes && activeCount > 0) {
+                        "Tipos de treino guardados ($activeCount dia(s)) ✓"
+                    } else {
+                        "Tipos de treino por dia desativados para esta semana ✓"
                     }
                 }
                 .onFailure { _statusBanner.value = it.localizedMessage }

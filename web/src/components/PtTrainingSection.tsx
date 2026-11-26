@@ -760,6 +760,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
         <PtTrainingAgendaView
           uid={uid}
           clients={clients}
+          weeks={weeks}
           sessions={sessions}
           bookings={bookings}
           onOpenClientPlan={(cid) => {

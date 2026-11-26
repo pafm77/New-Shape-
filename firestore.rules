@@ -64,12 +64,26 @@ service cloud.firestore {
              (!('weeklyGoalSessions' in data) || (data.weeklyGoalSessions is int && data.weeklyGoalSessions >= 0 && data.weeklyGoalSessions <= 14));
     }
 
+    function isValidDayWorkoutTypes(m) {
+      return m is map &&
+             m.keys().hasOnly(['1', '2', '3', '4', '5', '6', '7']) &&
+             (!('1' in m) || (m['1'] is string && m['1'].size() <= 60)) &&
+             (!('2' in m) || (m['2'] is string && m['2'].size() <= 60)) &&
+             (!('3' in m) || (m['3'] is string && m['3'].size() <= 60)) &&
+             (!('4' in m) || (m['4'] is string && m['4'].size() <= 60)) &&
+             (!('5' in m) || (m['5'] is string && m['5'].size() <= 60)) &&
+             (!('6' in m) || (m['6'] is string && m['6'].size() <= 60)) &&
+             (!('7' in m) || (m['7'] is string && m['7'].size() <= 60));
+    }
+
     function isValidWeek(data) {
       return data.userId is string && data.userId.size() <= 128 &&
              data.weekKey is string && data.weekKey.size() >= 1 && data.weekKey.size() <= 30 &&
              data.label is string && data.label.size() >= 1 && data.label.size() <= 50 &&
              data.startDateMillis is int &&
-             data.published is bool;
+             data.published is bool &&
+             (!('showDayWorkoutTypes' in data) || data.showDayWorkoutTypes is bool) &&
+             (!('dayWorkoutTypes' in data) || isValidDayWorkoutTypes(data.dayWorkoutTypes));
     }
 
     function isValidSession(data) {
@@ -379,7 +393,7 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(weekId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'weekKey', 'label', 'startDateMillis', 'published', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'weekKey', 'label', 'startDateMillis', 'published', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'weekKey', 'label', 'startDateMillis', 'published', 'showDayWorkoutTypes', 'dayWorkoutTypes', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidWeek(incoming());
         allow update: if isOwner(userId) && isValidId(weekId) &&
@@ -387,7 +401,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['label', 'published', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['label', 'published', 'showDayWorkoutTypes', 'dayWorkoutTypes', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(weekId);
       }
 

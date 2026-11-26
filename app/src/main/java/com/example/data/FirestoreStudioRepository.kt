@@ -1259,7 +1259,27 @@ class FirestoreStudioRepository(
                     )
                 ).await()
             }
-            Result.success(TrainingWeekRecord(id = key, userId = uid, weekKey = key, label = label, startDateMillis = mondayMillis, published = snap.getBoolean("published") ?: false))
+            val rawDayTypes = (snap.get("dayWorkoutTypes") as? Map<*, *>)
+                ?.entries
+                ?.mapNotNull { (k, v) ->
+                    val ks = k?.toString()?.trim().orEmpty()
+                    val vs = v?.toString()?.trim().orEmpty().take(60)
+                    if (ks in setOf("1", "2", "3", "4", "5", "6", "7") && vs.isNotBlank()) ks to vs else null
+                }
+                ?.toMap()
+                ?: emptyMap()
+            Result.success(
+                TrainingWeekRecord(
+                    id = key,
+                    userId = uid,
+                    weekKey = key,
+                    label = label,
+                    startDateMillis = mondayMillis,
+                    published = snap.getBoolean("published") ?: false,
+                    showDayWorkoutTypes = snap.getBoolean("showDayWorkoutTypes") ?: false,
+                    dayWorkoutTypes = rawDayTypes
+                )
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -1280,6 +1300,54 @@ class FirestoreStudioRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateWeekDayWorkoutTypes(
+        weekKey: String,
+        showDayWorkoutTypes: Boolean,
+        dayWorkoutTypes: Map<String, String>
+    ): Result<Unit> {
+        var path = "users/unknown/weeks/$weekKey"
+        return try {
+            val uid = requireUserId()
+            val sanitized = dayWorkoutTypes.entries
+                .mapNotNull { (k, v) ->
+                    val key = k.trim()
+                    val clean = v.trim().take(60)
+                    if (key in setOf("1", "2", "3", "4", "5", "6", "7") && clean.isNotBlank()) key to clean else null
+                }
+                .toMap()
+            val docRef = userDoc(uid).collection("weeks").document(weekKey)
+            path = docRef.path
+            docRef.update(
+                mapOf(
+                    "showDayWorkoutTypes" to showDayWorkoutTypes,
+                    "dayWorkoutTypes" to sanitized,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateWeekDayWorkoutTypesForDate(
+        mondayMillis: Long,
+        showDayWorkoutTypes: Boolean,
+        dayWorkoutTypes: Map<String, String>
+    ): Result<Unit> {
+        return try {
+            val week = ensureWeekExists(mondayMillis).getOrThrow()
+            updateWeekDayWorkoutTypes(week.weekKey, showDayWorkoutTypes, dayWorkoutTypes)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }

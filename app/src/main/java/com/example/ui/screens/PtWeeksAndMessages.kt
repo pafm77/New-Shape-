@@ -54,6 +54,7 @@ fun SemanasSection(
     var visibilityFilter by remember { mutableStateOf("ALL") } // ALL, PUBLIC, PRIVATE
     var showFixedManagerDialog by remember { mutableStateOf(false) }
     var fixedManagerInitialClientId by remember { mutableStateOf<String?>(null) }
+    var showDayWorkoutTypesDialog by remember { mutableStateOf(false) }
     var selectedSessionDetail by remember { mutableStateOf<TrainingSessionRecord?>(null) }
     var sessionToEdit by remember { mutableStateOf<TrainingSessionRecord?>(null) }
     var sessionToDelete by remember { mutableStateOf<TrainingSessionRecord?>(null) }
@@ -157,6 +158,92 @@ fun SemanasSection(
                             },
                             modifier = Modifier.weight(0.85f)
                         )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    val configuredDayTypesCount = remember(activeWeek.dayWorkoutTypes) {
+                        activeWeek.dayWorkoutTypes.values.count { it.isNotBlank() }
+                    }
+                    val dayTypesActive = activeWeek.showDayWorkoutTypes && configuredDayTypesCount > 0
+                    Surface(
+                        color = if (dayTypesActive) NewShapeGoldMuted.copy(alpha = 0.45f) else ElevatedCharcoal,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (dayTypesActive) NewShapeGold.copy(alpha = 0.65f) else HairlineBorder
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { showDayWorkoutTypesDialog = true }
+                            .testTag("weeks_day_workout_types_btn")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FitnessCenter,
+                                        contentDescription = "Tipo de treino por dia",
+                                        tint = if (dayTypesActive) NewShapeGoldBright else TextSecondaryDark,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Tipo de treino por dia",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimaryDark
+                                        )
+                                        Text(
+                                            text = if (dayTypesActive) {
+                                                "Visível para alunos · Toca para editar ou desativar"
+                                            } else {
+                                                "Opcional · Escolhe se queres definir o foco de cada dia"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondaryDark
+                                        )
+                                    }
+                                }
+                                StatusPill(
+                                    text = if (dayTypesActive) "Ativo ($configuredDayTypesCount)" else "Opcional",
+                                    textColor = if (dayTypesActive) NewShapeGoldBright else TextSecondaryDark,
+                                    containerColor = if (dayTypesActive) NewShapeGoldMuted else CharcoalSurface
+                                )
+                            }
+                            if (dayTypesActive) {
+                                val shortDays = listOf(1 to "Seg", 2 to "Ter", 3 to "Qua", 4 to "Qui", 5 to "Sex", 6 to "Sáb", 7 to "Dom")
+                                Spacer(Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    shortDays.forEach { (dayNum, shortLbl) ->
+                                        val label = activeWeek.workoutTypeForDay(dayNum)
+                                        if (label.isNotBlank()) {
+                                            StatusPill(
+                                                text = "$shortLbl: $label",
+                                                textColor = NewShapeGoldBright,
+                                                containerColor = CharcoalSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -420,6 +507,15 @@ fun SemanasSection(
                                     StatusPill("Espera: $waitlistCount", PendingAmber, PendingAmberContainer)
                                 }
                             }
+                            val sessionDayType = activeWeek?.workoutTypeForDay(session.dayOfWeek).orEmpty()
+                            if (sessionDayType.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                StatusPill(
+                                    text = sessionDayType,
+                                    textColor = NewShapeGoldBright,
+                                    containerColor = NewShapeGoldMuted
+                                )
+                            }
                             Text(
                                 text = "${session.durationMinutes} min" +
                                     (if (session.note.isNotBlank()) " · ${session.note}" else "") +
@@ -490,6 +586,19 @@ fun SemanasSection(
             onDismiss = { showFixedManagerDialog = false },
             onSaveClient = { client, slots ->
                 viewModel.updateClientFixedSlots(client, slots, applyToActiveWeek = true)
+            }
+        )
+    }
+
+    if (showDayWorkoutTypesDialog && activeWeek != null) {
+        DayWorkoutTypesDialog(
+            weekLabel = activeWeek.label,
+            initialEnabled = activeWeek.showDayWorkoutTypes,
+            initialTypes = activeWeek.dayWorkoutTypes,
+            onDismiss = { showDayWorkoutTypesDialog = false },
+            onSave = { enabled, typesMap ->
+                viewModel.updateWeekDayWorkoutTypes(activeWeek, enabled, typesMap)
+                showDayWorkoutTypesDialog = false
             }
         )
     }
@@ -1902,4 +2011,237 @@ private fun FixedScheduleManagerDialog(
         }
     )
 }
+
+@Composable
+fun DayWorkoutTypesDialog(
+    weekLabel: String,
+    initialEnabled: Boolean,
+    initialTypes: Map<String, String>,
+    initialFocusDay: Int = 1,
+    onDismiss: () -> Unit,
+    onSave: (Boolean, Map<String, String>) -> Unit
+) {
+    val days = remember {
+        listOf(
+            1 to "Segunda-feira",
+            2 to "Terça-feira",
+            3 to "Quarta-feira",
+            4 to "Quinta-feira",
+            5 to "Sexta-feira",
+            6 to "Sábado",
+            7 to "Domingo"
+        )
+    }
+    var enabled by remember(initialEnabled, initialTypes) { mutableStateOf(initialEnabled) }
+    var draftTypes by remember(initialTypes) {
+        mutableStateOf(
+            days.associate { (d, _) -> d.toString() to (initialTypes[d.toString()] ?: "") }
+        )
+    }
+    var expandedSuggestionsDay by remember(initialFocusDay) { mutableIntStateOf(initialFocusDay.coerceIn(1, 7)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        title = {
+            Column {
+                Text("Tipo de treino por dia", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
+                Text(weekLabel, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    color = ElevatedCharcoal,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (enabled) NewShapeGold.copy(alpha = 0.65f) else HairlineBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Mostrar tipo de treino nos dias",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimaryDark,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (enabled) {
+                                    "Os dias preenchidos aparecem na tua agenda e aos alunos."
+                                } else {
+                                    "Desativado · Nada é mostrado aos alunos nesta semana."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondaryDark
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = { enabled = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = TextOnGold,
+                                checkedTrackColor = NewShapeGold
+                            ),
+                            modifier = Modifier.testTag("day_types_master_switch")
+                        )
+                    }
+                }
+
+                if (enabled) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Preenche apenas os dias que quiseres (opcional):",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondaryDark,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (draftTypes.values.any { it.isNotBlank() }) {
+                            TextButton(
+                                onClick = {
+                                    draftTypes = days.associate { (d, _) -> d.toString() to "" }
+                                },
+                                modifier = Modifier.testTag("day_types_clear_all_btn")
+                            ) {
+                                Text("Limpar tudo", color = DangerRed, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    days.forEach { (dayNum, dayName) ->
+                        val key = dayNum.toString()
+                        val value = draftTypes[key].orEmpty()
+                        val isSuggestionsOpen = expandedSuggestionsDay == dayNum
+                        Surface(
+                            color = ElevatedCharcoal,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(
+                                1.dp,
+                                if (value.isNotBlank()) NewShapeGold.copy(alpha = 0.45f) else HairlineBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = dayName,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (value.isNotBlank()) NewShapeGoldBright else TextPrimaryDark
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            expandedSuggestionsDay = if (isSuggestionsOpen) 0 else dayNum
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isSuggestionsOpen) "Ocultar sugestões" else "Sugestões",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = NewShapeGold
+                                        )
+                                    }
+                                }
+
+                                OutlinedTextField(
+                                    value = value,
+                                    onValueChange = { next ->
+                                        draftTypes = draftTypes + (key to next.take(60))
+                                    },
+                                    placeholder = {
+                                        Text("Ex: Pernas & Glúteos (deixa vazio se não quiseres)")
+                                    },
+                                    singleLine = true,
+                                    trailingIcon = if (value.isNotBlank()) {
+                                        {
+                                            IconButton(
+                                                onClick = { draftTypes = draftTypes + (key to "") }
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Limpar $dayName",
+                                                    tint = TextSecondaryDark,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    } else null,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("day_type_input_$dayNum"),
+                                    colors = darkFieldColors()
+                                )
+
+                                if (isSuggestionsOpen) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        DEFAULT_DAY_WORKOUT_TYPE_SUGGESTIONS.forEach { suggestion ->
+                                            val selected = value.equals(suggestion, ignoreCase = true)
+                                            FilterChip(
+                                                selected = selected,
+                                                onClick = {
+                                                    draftTypes = draftTypes + (key to if (selected) "" else suggestion)
+                                                },
+                                                label = { Text(suggestion, style = MaterialTheme.typography.labelSmall) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = NewShapeGold,
+                                                    selectedLabelColor = TextOnGold
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            GoldPrimaryButton(
+                text = "Guardar",
+                onClick = {
+                    val cleaned = draftTypes
+                        .mapValues { (_, v) -> v.trim().take(60) }
+                        .filterValues { it.isNotBlank() }
+                    onSave(enabled, cleaned)
+                },
+                testTag = "day_types_save_btn"
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = TextSecondaryDark)
+            }
+        }
+    )
+}
+
 

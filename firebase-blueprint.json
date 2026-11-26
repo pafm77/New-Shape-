@@ -33,6 +33,8 @@
         "label": { "type": "string" },
         "startDateMillis": { "type": "integer" },
         "published": { "type": "boolean" },
+        "showDayWorkoutTypes": { "type": "boolean" },
+        "dayWorkoutTypes": { "type": "object" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

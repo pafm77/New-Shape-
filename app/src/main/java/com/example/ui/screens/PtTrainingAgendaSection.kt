@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.SeedCatalog
 import com.example.data.model.BookingStatus
 import com.example.data.model.TrainingSessionRecord
+import com.example.data.model.workoutTypeForDay
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
 import com.example.ui.components.*
@@ -91,12 +92,23 @@ fun PtTrainingAgendaSection(
     val todayMillis = remember { startOfDayMillis() }
     var selectedDateMillis by remember { mutableLongStateOf(todayMillis) }
     var showPrivateDialog by remember { mutableStateOf(false) }
+    var showDayWorkoutTypesDialog by remember { mutableStateOf(false) }
     var counterMonthOffset by remember { mutableIntStateOf(0) }
     var showClientBreakdown by remember { mutableStateOf(false) }
 
     val todayCal = remember(todayMillis) { Calendar.getInstance().apply { timeInMillis = todayMillis } }
     val selectedCal = remember(selectedDateMillis) { Calendar.getInstance().apply { timeInMillis = selectedDateMillis } }
     val isSelectedToday = isSameDay(selectedCal, todayCal)
+    val selectedWeekMonday = remember(selectedDateMillis) { mondayOf(selectedCal) }
+    val selectedWeekKey = remember(selectedWeekMonday.timeInMillis) { SeedCatalog.formatWeekKey(selectedWeekMonday) }
+    val selectedWeek = remember(state.weeks, selectedWeekKey) { state.weeks.find { it.weekKey == selectedWeekKey } }
+    val selectedIsoDay = remember(selectedDateMillis) {
+        val dow = selectedCal.get(Calendar.DAY_OF_WEEK)
+        if (dow == Calendar.SUNDAY) 7 else dow - 1
+    }
+    val selectedDayWorkoutType = remember(selectedWeek, selectedIsoDay) {
+        selectedWeek?.workoutTypeForDay(selectedIsoDay).orEmpty()
+    }
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
     val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
 
@@ -228,6 +240,14 @@ fun PtTrainingAgendaSection(
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondaryDark
                         )
+                        if (selectedDayWorkoutType.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            StatusPill(
+                                text = "Treino do dia: $selectedDayWorkoutType",
+                                textColor = NewShapeGoldBright,
+                                containerColor = NewShapeGoldMuted
+                            )
+                        }
                     }
                     IconButton(
                         onClick = { shiftDay(1) },
@@ -343,8 +363,14 @@ fun PtTrainingAgendaSection(
                             Text("Hoje", color = NewShapeGoldBright, fontWeight = FontWeight.Bold)
                         }
                     }
+                    DarkSecondaryButton(
+                        text = if (selectedDayWorkoutType.isNotBlank()) "Editar tipo" else "Tipo de treino",
+                        icon = Icons.Default.FitnessCenter,
+                        onClick = { showDayWorkoutTypesDialog = true },
+                        modifier = Modifier.weight(0.95f).testTag("training_agenda_day_type_btn")
+                    )
                     GoldPrimaryButton(
-                        text = "+ Personalizado (Oculto)",
+                        text = "+ Pers. (Oculto)",
                         icon = Icons.Default.VisibilityOff,
                         onClick = { showPrivateDialog = true },
                         modifier = Modifier.weight(1f),
@@ -788,6 +814,24 @@ fun PtTrainingAgendaSection(
                     note = note
                 )
                 selectedDateMillis = startOfDayMillis(dateMs)
+            }
+        )
+    }
+
+    if (showDayWorkoutTypesDialog) {
+        DayWorkoutTypesDialog(
+            weekLabel = selectedWeek?.label ?: SeedCatalog.formatWeekRangeLabel(selectedWeekMonday),
+            initialEnabled = selectedWeek?.showDayWorkoutTypes ?: false,
+            initialTypes = selectedWeek?.dayWorkoutTypes ?: emptyMap(),
+            initialFocusDay = selectedIsoDay,
+            onDismiss = { showDayWorkoutTypesDialog = false },
+            onSave = { enabled, typesMap ->
+                viewModel.updateWeekDayWorkoutTypesForDate(
+                    mondayMillis = selectedWeekMonday.timeInMillis,
+                    showDayWorkoutTypes = enabled,
+                    dayWorkoutTypes = typesMap
+                )
+                showDayWorkoutTypesDialog = false
             }
         )
     }

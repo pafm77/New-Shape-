@@ -1237,6 +1237,72 @@ test("Workout plan item supersetGroup (bi-set/agrupamento) creation, update, and
   );
 });
 
+test("Training week optional showDayWorkoutTypes and dayWorkoutTypes validation & isolation", async () => {
+  const STUDENT_UID = "student_daytype_123";
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
+  const studentDb = testEnv.authenticatedContext(STUDENT_UID, { email: "stu@example.com" }).firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection(`users/${ALICE_UID}/studio_members`).doc(STUDENT_UID).set({
+      userId: ALICE_UID,
+      memberUid: STUDENT_UID,
+      inviteCode: "NS2026",
+      clientId: "c1",
+      createdAt: created,
+      updatedAt: created,
+    });
+  });
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/weeks`).doc("2026-W48").set({
+      userId: ALICE_UID,
+      weekKey: "2026-W48",
+      label: "23 Nov - 29 Nov",
+      startDateMillis: 1763856000000,
+      published: true,
+      showDayWorkoutTypes: true,
+      dayWorkoutTypes: { "1": "Membros Inferiores", "3": "Full Body" },
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/weeks`).doc("2026-W48").update({
+      showDayWorkoutTypes: false,
+      dayWorkoutTypes: { "1": "Pernas & Glúteos", "5": "HIIT / Metabólico" },
+      updatedAt: updated,
+    })
+  );
+
+  // Reject invalid day key '8'
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/weeks`).doc("2026-W48").update({
+      dayWorkoutTypes: { "8": "Dia Inválido" },
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Reject oversized label (>60 chars)
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/weeks`).doc("2026-W48").update({
+      dayWorkoutTypes: { "1": "x".repeat(65) },
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+
+  // Student cannot edit week dayWorkoutTypes
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/weeks`).doc("2026-W48").update({
+      showDayWorkoutTypes: true,
+      updatedAt: new Date(Date.now() - 300),
+    })
+  );
+});
+
+
 
 
 

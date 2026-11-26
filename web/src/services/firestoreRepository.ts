@@ -282,6 +282,8 @@ export function subscribeStudioData(
       label: String(d.label ?? ''),
       startDateMillis: Number(d.startDateMillis ?? 0),
       published: Boolean(d.published ?? false),
+      showDayWorkoutTypes: Boolean(d.showDayWorkoutTypes ?? false),
+      dayWorkoutTypes: parseDayWorkoutTypes(d.dayWorkoutTypes),
     }),
     (list) => list.sort((a, b) => a.startDateMillis - b.startDateMillis),
     handlers.weeks
@@ -1572,6 +1574,21 @@ export async function importClientsCsv(
 }
 
 // --- Weeks & Sessions ---
+const VALID_DAY_KEYS = new Set(['1', '2', '3', '4', '5', '6', '7']);
+
+function parseDayWorkoutTypes(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const result: Record<string, string> = {};
+  Object.entries(raw as Record<string, unknown>).forEach(([k, v]) => {
+    const key = String(k).trim();
+    const val = typeof v === 'string' ? v.trim().slice(0, 60) : '';
+    if (VALID_DAY_KEYS.has(key) && val) {
+      result[key] = val;
+    }
+  });
+  return result;
+}
+
 export async function ensureWeekExists(uid: string, mondayMillis: number): Promise<TrainingWeekRecord> {
   const d = new Date(mondayMillis);
   const key = formatWeekKey(d);
@@ -1588,7 +1605,16 @@ export async function ensureWeekExists(uid: string, mondayMillis: number): Promi
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    return { id: key, userId: uid, weekKey: key, label, startDateMillis: mondayMillis, published: false };
+    return {
+      id: key,
+      userId: uid,
+      weekKey: key,
+      label,
+      startDateMillis: mondayMillis,
+      published: false,
+      showDayWorkoutTypes: false,
+      dayWorkoutTypes: {},
+    };
   }
   return {
     id: key,
@@ -1597,12 +1623,28 @@ export async function ensureWeekExists(uid: string, mondayMillis: number): Promi
     label: String(snap.data()?.label ?? label),
     startDateMillis: Number(snap.data()?.startDateMillis ?? mondayMillis),
     published: Boolean(snap.data()?.published ?? false),
+    showDayWorkoutTypes: Boolean(snap.data()?.showDayWorkoutTypes ?? false),
+    dayWorkoutTypes: parseDayWorkoutTypes(snap.data()?.dayWorkoutTypes),
   };
 }
 
 export async function setWeekPublished(uid: string, weekKey: string, published: boolean): Promise<void> {
   await updateDoc(doc(subcol(uid, 'weeks'), weekKey), {
     published,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateWeekDayWorkoutTypes(
+  uid: string,
+  weekKey: string,
+  showDayWorkoutTypes: boolean,
+  dayWorkoutTypes: Record<string, string>
+): Promise<void> {
+  const sanitized = parseDayWorkoutTypes(dayWorkoutTypes);
+  await updateDoc(doc(subcol(uid, 'weeks'), weekKey), {
+    showDayWorkoutTypes: Boolean(showDayWorkoutTypes),
+    dayWorkoutTypes: sanitized,
     updatedAt: serverTimestamp(),
   });
 }

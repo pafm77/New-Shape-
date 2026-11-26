@@ -600,6 +600,18 @@ internal fun StudentAgendaSection(
                                                 color = TextSecondaryDark.copy(alpha = 0.45f)
                                             )
                                         }
+                                        val dayWorkoutType = currentWeek.workoutTypeForDay(dayNum)
+                                        if (dayWorkoutType.isNotBlank()) {
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(
+                                                text = dayWorkoutType,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelDay) TextOnGold else NewShapeGoldBright,
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -689,6 +701,7 @@ internal fun StudentAgendaSection(
                                 tint = if (selectedDay > 1) NewShapeGold else TextSecondaryDark
                             )
                         }
+                        val selectedDayWorkoutType = currentWeek.workoutTypeForDay(selectedDay)
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = dayTitle,
@@ -696,6 +709,14 @@ internal fun StudentAgendaSection(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = TextPrimaryDark
                             )
+                            if (selectedDayWorkoutType.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                StatusPill(
+                                    text = "Treino do dia: $selectedDayWorkoutType",
+                                    textColor = NewShapeGoldBright,
+                                    containerColor = NewShapeGoldMuted
+                                )
+                            }
                             Text(
                                 text = if (daySessions.isEmpty()) "Sem horários publicados neste dia"
                                 else "${daySessions.size} horário(s) disponível(is) · Máx. 1 treino/dia",

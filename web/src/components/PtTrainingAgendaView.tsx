@@ -18,22 +18,27 @@ import {
   BookingRecord,
   ClientRecord,
   TrainingSessionRecord,
+  TrainingWeekRecord,
+  getWeekDayWorkoutType,
 } from '../types/studio';
 import {
   DAYS_PT,
   formatDayDate,
   formatPhoneDisplay,
   formatWeekKey,
+  formatWeekRangeLabel,
   getMondayOfWeek,
   MONTHS_PT,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
-import { BrandCard, EmptyState, GoldButton, StatusPill } from './UiPrimitives';
+import { BrandCard, EmptyState, GoldButton, SecondaryButton, StatusPill } from './UiPrimitives';
 import { PrivatePersonalSessionModal } from './PrivatePersonalSessionModal';
+import { DayWorkoutTypesModal } from './DayWorkoutTypesModal';
 
 interface PtTrainingAgendaViewProps {
   uid: string;
   clients: ClientRecord[];
+  weeks?: TrainingWeekRecord[];
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
   onOpenClientPlan?: (clientId: string) => void;
@@ -68,6 +73,7 @@ function sessionMatchesDate(session: TrainingSessionRecord, targetDate: Date): b
 export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
   uid,
   clients,
+  weeks = [],
   sessions,
   bookings,
   onOpenClientPlan,
@@ -76,6 +82,7 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
   const [selectedDateMs, setSelectedDateMs] = useState<number>(() => startOfDay(new Date()).getTime());
   const [busyBookingId, setBusyBookingId] = useState<string | null>(null);
   const [showPrivateModal, setShowPrivateModal] = useState(false);
+  const [showDayTypesModal, setShowDayTypesModal] = useState(false);
   const [counterMonthOffset, setCounterMonthOffset] = useState(0);
   const [showClientBreakdown, setShowClientBreakdown] = useState(false);
 
@@ -84,6 +91,12 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
   const today = useMemo(() => startOfDay(new Date()), []);
   const selectedDate = useMemo(() => new Date(selectedDateMs), [selectedDateMs]);
   const isSelectedToday = isSameCalendarDay(selectedDate, today);
+  const selectedMonday = useMemo(() => getMondayOfWeek(selectedDate), [selectedDate]);
+  const selectedWeekKey = useMemo(() => formatWeekKey(selectedMonday), [selectedMonday]);
+  const selectedWeek = useMemo(
+    () => weeks.find((w) => w.weekKey === selectedWeekKey) || null,
+    [weeks, selectedWeekKey]
+  );
 
   const counterMonthDate = useMemo(() => {
     const base = new Date(today.getFullYear(), today.getMonth() + counterMonthOffset, 1);
@@ -220,6 +233,7 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
 
   const jsDay = selectedDate.getDay();
   const isoDay = jsDay === 0 ? 7 : jsDay;
+  const selectedDayWorkoutType = getWeekDayWorkoutType(selectedWeek, isoDay);
 
   return (
     <div className="space-y-4">
@@ -245,6 +259,11 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
             <p className="text-xs text-[#A1A1AA]">
               Agenda de treinos · Confirma quem veio em cada horário
             </p>
+            {selectedDayWorkoutType && (
+              <div className="mt-1.5 flex justify-center">
+                <StatusPill tone="gold">Treino do dia: {selectedDayWorkoutType}</StatusPill>
+              </div>
+            )}
           </div>
 
           <button
@@ -323,10 +342,16 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
               Podes marcar treinos privados só para o PT
             </span>
           )}
-          <GoldButton onClick={() => setShowPrivateModal(true)}>
-            <Plus className="h-4 w-4" />
-            Personalizado (Oculto)
-          </GoldButton>
+          <div className="flex flex-wrap items-center gap-2">
+            <SecondaryButton onClick={() => setShowDayTypesModal(true)}>
+              <Dumbbell className="h-4 w-4" />
+              {selectedDayWorkoutType ? 'Editar tipo do dia' : 'Tipo de treino'}
+            </SecondaryButton>
+            <GoldButton onClick={() => setShowPrivateModal(true)}>
+              <Plus className="h-4 w-4" />
+              Personalizado (Oculto)
+            </GoldButton>
+          </div>
         </div>
       </BrandCard>
 
@@ -647,6 +672,24 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
           setSelectedDateMs(startOfDay(new Date(payload.dateMs)).getTime());
           onBanner(
             `Treino personalizado (oculto) marcado para ${payload.clientName} ✓`
+          );
+        }}
+      />
+      <DayWorkoutTypesModal
+        open={showDayTypesModal}
+        weekLabel={selectedWeek?.label || formatWeekRangeLabel(selectedMonday)}
+        initialEnabled={Boolean(selectedWeek?.showDayWorkoutTypes)}
+        initialTypes={selectedWeek?.dayWorkoutTypes ?? {}}
+        initialFocusDay={isoDay}
+        onClose={() => setShowDayTypesModal(false)}
+        onSave={async (enabled, typesMap) => {
+          const ensured = await repo.ensureWeekExists(uid, selectedMonday.getTime());
+          await repo.updateWeekDayWorkoutTypes(uid, ensured.weekKey, enabled, typesMap);
+          const activeCount = Object.values(typesMap).filter((v) => v.trim().length > 0).length;
+          onBanner(
+            enabled && activeCount > 0
+              ? `Tipos de treino guardados (${activeCount} dia(s)) ✓`
+              : 'Tipos de treino por dia desativados para esta semana ✓'
           );
         }}
       />

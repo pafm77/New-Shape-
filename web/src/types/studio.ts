@@ -71,7 +71,30 @@ export interface TrainingWeekRecord {
   label: string;
   startDateMillis: number;
   published: boolean;
+  showDayWorkoutTypes?: boolean;
+  dayWorkoutTypes?: Record<string, string>;
 }
+
+export function getWeekDayWorkoutType(
+  week: TrainingWeekRecord | null | undefined,
+  dayOfWeek: number
+): string {
+  if (!week || !week.showDayWorkoutTypes) return '';
+  return (week.dayWorkoutTypes?.[String(dayOfWeek)] || '').trim();
+}
+
+export const DAY_WORKOUT_TYPE_SUGGESTIONS: string[] = [
+  'Full Body',
+  'Membros Inferiores',
+  'Membros Superiores',
+  'Pernas & Glúteos',
+  'Peito & Costas',
+  'HIIT / Metabólico',
+  'Core & Mobilidade',
+  'Força',
+  'Funcional',
+  'Cardio',
+];
 
 export interface TrainingSessionRecord {
   id: string;

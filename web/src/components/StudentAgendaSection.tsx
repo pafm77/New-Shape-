@@ -21,6 +21,7 @@ import {
   TrainingWeekRecord,
   WaitlistEntryRecord,
   WeekResponseRecord,
+  getWeekDayWorkoutType,
 } from '../types/studio';
 import {
   DAYS_PT,
@@ -640,11 +641,13 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         ).length;
                         const isSelectedDay = selectedDay === dayNum;
                         const hasSessions = sessionsOnDay.length > 0;
+                        const dayWorkoutType = getWeekDayWorkoutType(activeWeek, dayNum);
 
                         return (
                           <button
                             key={dayNum}
                             type="button"
+                            title={dayWorkoutType ? `Treino do dia: ${dayWorkoutType}` : undefined}
                             onClick={() => setSelectedDay(dayNum)}
                             className={`relative flex flex-col items-center justify-center rounded-xl border py-2 px-1 transition min-h-[68px] ${
                               isSelectedDay
@@ -695,6 +698,15 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                 <span className="text-[9px]">—</span>
                               )}
                             </div>
+                            {dayWorkoutType && (
+                              <span
+                                className={`mt-1 max-w-full truncate px-0.5 text-[9px] font-bold leading-tight ${
+                                  isSelectedDay ? 'text-[#121214]' : 'text-[#FACC15]'
+                                }`}
+                              >
+                                {dayWorkoutType}
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -766,7 +778,17 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                       <p className="text-sm sm:text-base font-extrabold text-[#F4F4F5]">
                         {selectedDayTitle}
                       </p>
-                      <p className="text-[11px] text-[#A1A1AA]">
+                      {(() => {
+                        const selectedDayWorkoutType = getWeekDayWorkoutType(activeWeek, selectedDay);
+                        return selectedDayWorkoutType ? (
+                          <div className="mt-1 flex justify-center">
+                            <StatusPill tone="gold">
+                              Treino do dia: {selectedDayWorkoutType}
+                            </StatusPill>
+                          </div>
+                        ) : null;
+                      })()}
+                      <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
                         {daySessions.length === 0
                           ? 'Sem horários publicados neste dia'
                           : `${daySessions.length} horário${daySessions.length > 1 ? 's' : ''} disponível${daySessions.length > 1 ? 's' : ''} · Máx. 1 treino/dia`}

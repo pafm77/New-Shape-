@@ -43,8 +43,28 @@ data class TrainingWeekRecord(
     val label: String = "",
     val startDateMillis: Long = 0L,
     val published: Boolean = false,
+    val showDayWorkoutTypes: Boolean = false,
+    val dayWorkoutTypes: Map<String, String> = emptyMap(),
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+fun TrainingWeekRecord.workoutTypeForDay(dayOfWeek: Int): String {
+    if (!showDayWorkoutTypes) return ""
+    return dayWorkoutTypes[dayOfWeek.toString()]?.trim().orEmpty()
+}
+
+val DEFAULT_DAY_WORKOUT_TYPE_SUGGESTIONS: List<String> = listOf(
+    "Full Body",
+    "Membros Inferiores",
+    "Membros Superiores",
+    "Pernas & Glúteos",
+    "Peito & Costas",
+    "HIIT / Metabólico",
+    "Core & Mobilidade",
+    "Força",
+    "Funcional",
+    "Cardio"
 )
 
 @Keep
