@@ -1358,11 +1358,51 @@ class NewShapeViewModel(
         reps: String,
         loadKg: String,
         restSeconds: Int,
-        notes: String
+        notes: String,
+        groupWithPrevious: Boolean = false
     ) {
-        val count = currentData?.workoutPlanItems?.count { it.planId == planId } ?: 0
+        val planItems = currentData?.workoutPlanItems
+            ?.filter { it.planId == planId }
+            ?.sortedBy { it.orderIndex }
+            .orEmpty()
+        val nextOrder = (planItems.maxOfOrNull { it.orderIndex } ?: -1) + 1
+        val prevItem = if (groupWithPrevious) planItems.lastOrNull() else null
         viewModelScope.launch {
-            repository.addExerciseToPlan(planId, exercise, sets, reps, loadKg, restSeconds, notes, count)
+            repository.addExerciseToPlan(
+                planId = planId,
+                exercise = exercise,
+                sets = sets,
+                reps = reps,
+                loadKg = loadKg,
+                restSeconds = restSeconds,
+                notes = notes,
+                orderIndex = nextOrder,
+                groupWithPreviousItem = prevItem
+            )
+                .onSuccess {
+                    if (prevItem != null) {
+                        _statusBanner.value = "Exercício agrupado sem descanso com \"${prevItem.exerciseName}\"!"
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun linkExerciseWithPrevious(prevItem: WorkoutPlanItemRecord, currentItem: WorkoutPlanItemRecord) {
+        viewModelScope.launch {
+            repository.linkExerciseWithPrevious(prevItem, currentItem)
+                .onSuccess {
+                    _statusBanner.value = "Exercícios agrupados (sem descanso entre eles)!"
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun ungroupSupersetBlock(blockItems: List<WorkoutPlanItemRecord>) {
+        if (blockItems.isEmpty()) return
+        viewModelScope.launch {
+            repository.ungroupSupersetBlock(blockItems)
+                .onSuccess { _statusBanner.value = "Grupo de exercícios separado." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -1387,8 +1427,9 @@ class NewShapeViewModel(
     }
 
     fun removeExerciseFromPlan(itemId: String) {
+        val allItems = currentData?.workoutPlanItems.orEmpty()
         viewModelScope.launch {
-            repository.removeExerciseFromPlan(itemId)
+            repository.removeExerciseFromPlan(itemId, allItems)
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }

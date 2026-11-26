@@ -172,6 +172,7 @@
         "restSeconds": { "type": "integer" },
         "notes": { "type": "string" },
         "orderIndex": { "type": "integer" },
+        "supersetGroup": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

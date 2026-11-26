@@ -2421,6 +2421,7 @@ class FirestoreStudioRepository(
                     "restSeconds" to item.restSeconds.coerceIn(0, 600),
                     "notes" to item.notes.trim().take(300),
                     "orderIndex" to idx.coerceIn(0, 200),
+                    "supersetGroup" to item.supersetGroup.trim().take(40),
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -2483,10 +2484,29 @@ class FirestoreStudioRepository(
         loadKg: String,
         restSeconds: Int,
         notes: String,
-        orderIndex: Int
+        orderIndex: Int,
+        groupWithPreviousItem: WorkoutPlanItemRecord? = null
     ): Result<Unit> = try {
         val uid = requireUserId()
-        userDoc(uid).collection("workout_plan_items").document().set(
+        val col = userDoc(uid).collection("workout_plan_items")
+        val groupKey = if (groupWithPreviousItem != null) {
+            groupWithPreviousItem.supersetGroup.trim().ifBlank { "sg_${System.currentTimeMillis()}" }.take(40)
+        } else {
+            ""
+        }
+        val batch = db.batch()
+        if (groupWithPreviousItem != null) {
+            batch.update(
+                col.document(groupWithPreviousItem.id),
+                mapOf(
+                    "supersetGroup" to groupKey,
+                    "restSeconds" to 0,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+        batch.set(
+            col.document(),
             mapOf(
                 "userId" to uid,
                 "planId" to planId,
@@ -2499,15 +2519,79 @@ class FirestoreStudioRepository(
                 "restSeconds" to restSeconds.coerceIn(0, 600),
                 "notes" to notes.trim().take(300),
                 "orderIndex" to orderIndex.coerceIn(0, 200),
+                "supersetGroup" to groupKey,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
-        ).await()
+        )
+        batch.commit().await()
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/workout_plan_items")
+        Result.failure(e)
+    }
+
+    suspend fun linkExerciseWithPrevious(
+        prevItem: WorkoutPlanItemRecord,
+        currentItem: WorkoutPlanItemRecord
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        val col = userDoc(uid).collection("workout_plan_items")
+        val groupKey = prevItem.supersetGroup.trim()
+            .ifBlank { currentItem.supersetGroup.trim() }
+            .ifBlank { "sg_${System.currentTimeMillis()}" }
+            .take(40)
+        val batch = db.batch()
+        batch.update(
+            col.document(prevItem.id),
+            mapOf(
+                "supersetGroup" to groupKey,
+                "restSeconds" to 0,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        val finalRest = if (currentItem.restSeconds <= 0) 90 else currentItem.restSeconds.coerceIn(0, 600)
+        batch.update(
+            col.document(currentItem.id),
+            mapOf(
+                "supersetGroup" to groupKey,
+                "restSeconds" to finalRest,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        )
+        batch.commit().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/workout_plan_items")
+        Result.failure(e)
+    }
+
+    suspend fun ungroupSupersetBlock(blockItems: List<WorkoutPlanItemRecord>): Result<Unit> = try {
+        val uid = requireUserId()
+        val col = userDoc(uid).collection("workout_plan_items")
+        val batch = db.batch()
+        val fallbackRest = blockItems.lastOrNull()?.restSeconds?.takeIf { it > 0 } ?: 60
+        blockItems.forEach { item ->
+            val restoredRest = if (item.restSeconds == 0) fallbackRest else item.restSeconds.coerceIn(0, 600)
+            batch.update(
+                col.document(item.id),
+                mapOf(
+                    "supersetGroup" to "",
+                    "restSeconds" to restoredRest,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+        batch.commit().await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/workout_plan_items")
         Result.failure(e)
     }
 
@@ -2566,9 +2650,34 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
-    suspend fun removeExerciseFromPlan(itemId: String): Result<Unit> = try {
+    suspend fun removeExerciseFromPlan(
+        itemId: String,
+        planItems: List<WorkoutPlanItemRecord> = emptyList()
+    ): Result<Unit> = try {
         val uid = requireUserId()
-        userDoc(uid).collection("workout_plan_items").document(itemId).delete().await()
+        val col = userDoc(uid).collection("workout_plan_items")
+        val target = planItems.find { it.id == itemId }
+        val group = target?.supersetGroup?.trim().orEmpty()
+        val remainingInGroup = if (group.isNotBlank() && target != null) {
+            planItems.filter { it.planId == target.planId && it.supersetGroup.trim() == group && it.id != itemId }
+        } else {
+            emptyList()
+        }
+        val batch = db.batch()
+        batch.delete(col.document(itemId))
+        if (remainingInGroup.size == 1) {
+            val lone = remainingInGroup.first()
+            val restoredRest = if (lone.restSeconds == 0) (target?.restSeconds?.takeIf { it > 0 } ?: 60) else lone.restSeconds.coerceIn(0, 600)
+            batch.update(
+                col.document(lone.id),
+                mapOf(
+                    "supersetGroup" to "",
+                    "restSeconds" to restoredRest,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+        batch.commit().await()
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e

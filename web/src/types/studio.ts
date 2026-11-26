@@ -163,6 +163,67 @@ export interface WorkoutPlanItemRecord {
   restSeconds: number;
   notes: string;
   orderIndex: number;
+  supersetGroup?: string;
+}
+
+export interface WorkoutExerciseBlock {
+  blockNumber: number;
+  supersetGroup: string;
+  items: WorkoutPlanItemRecord[];
+  isGrouped: boolean;
+  groupLabel: string;
+}
+
+export function groupWorkoutPlanItems(sortedItems: WorkoutPlanItemRecord[]): WorkoutExerciseBlock[] {
+  const blocks: WorkoutExerciseBlock[] = [];
+  let idx = 0;
+  let blockNumber = 1;
+  while (idx < sortedItems.length) {
+    const current = sortedItems[idx];
+    const group = (current.supersetGroup || '').trim();
+    if (group) {
+      const grouped: WorkoutPlanItemRecord[] = [current];
+      let nextIdx = idx + 1;
+      while (
+        nextIdx < sortedItems.length &&
+        (sortedItems[nextIdx].supersetGroup || '').trim() === group
+      ) {
+        grouped.push(sortedItems[nextIdx]);
+        nextIdx++;
+      }
+      if (grouped.length >= 2) {
+        const groupLabel =
+          grouped.length === 2
+            ? 'Bi-set · Sem descanso entre eles'
+            : grouped.length === 3
+            ? 'Tri-set · Sem descanso entre eles'
+            : `Circuito (${grouped.length}) · Sem descanso entre eles`;
+        blocks.push({
+          blockNumber: blockNumber++,
+          supersetGroup: group,
+          items: grouped,
+          isGrouped: true,
+          groupLabel,
+        });
+        idx = nextIdx;
+        continue;
+      }
+    }
+    blocks.push({
+      blockNumber: blockNumber++,
+      supersetGroup: '',
+      items: [current],
+      isGrouped: false,
+      groupLabel: '',
+    });
+    idx++;
+  }
+  return blocks;
+}
+
+export function formatBlockItemLabel(block: WorkoutExerciseBlock, indexInBlock: number): string {
+  if (!block.isGrouped) return `${block.blockNumber}`;
+  return `${block.blockNumber}${String.fromCharCode(65 + indexInBlock)}`;
 }
 
 export interface WorkoutLoadLogRecord {

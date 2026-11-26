@@ -153,7 +153,8 @@ service cloud.firestore {
              (!('lastLoggedAtMillis' in data) || (data.lastLoggedAtMillis is int && data.lastLoggedAtMillis >= 0)) &&
              data.restSeconds is int && data.restSeconds >= 0 && data.restSeconds <= 600 &&
              data.notes is string && data.notes.size() <= 300 &&
-             data.orderIndex is int && data.orderIndex >= 0 && data.orderIndex <= 200;
+             data.orderIndex is int && data.orderIndex >= 0 && data.orderIndex <= 200 &&
+             (!('supersetGroup' in data) || (data.supersetGroup is string && data.supersetGroup.size() <= 40));
     }
 
     function isValidFoodItem(data) {
@@ -528,7 +529,7 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(itemId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'restSeconds', 'notes', 'orderIndex', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'planId', 'exerciseId', 'exerciseName', 'muscleGroup', 'sets', 'reps', 'loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'restSeconds', 'notes', 'orderIndex', 'supersetGroup', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidWorkoutPlanItem(incoming());
         allow update: if canAccessStudio(userId) && isValidId(itemId) &&
@@ -537,7 +538,7 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          (
-                           (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['sets', 'reps', 'loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'restSeconds', 'notes', 'orderIndex', 'updatedAt'])) ||
+                           (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['sets', 'reps', 'loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'restSeconds', 'notes', 'orderIndex', 'supersetGroup', 'updatedAt'])) ||
                            (isStudioMember(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['loadKg', 'lastLoadKg', 'lastLoggedAtMillis', 'updatedAt']))
                          );
         allow delete: if isOwner(userId) && isValidId(itemId);

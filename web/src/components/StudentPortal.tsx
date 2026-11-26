@@ -25,6 +25,7 @@ import {
   Users,
   Utensils,
   X,
+  Zap,
 } from 'lucide-react';
 import {
   AnnouncementReadRecord,
@@ -33,6 +34,8 @@ import {
   ClientRecord,
   FidelizacaoRecord,
   FoodItemRecord,
+  formatBlockItemLabel,
+  groupWorkoutPlanItems,
   MealTypeKey,
   NutritionEntryRecord,
   PaymentRecord,
@@ -768,61 +771,123 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       </div>
 
                       <div className="mt-3 space-y-2.5 border-t border-[#323238] pt-3">
-                        {items.map((item, idx) => {
-                          const baselineOverride = isExecuting
-                            ? baselineLoads[item.id]
-                            : undefined;
-                          return (
-                            <StudentExerciseLoadCard
-                              key={item.id}
-                              index={idx}
-                              item={item}
-                              clientId={client.id}
-                              workoutPlans={workoutPlans}
-                              workoutPlanItems={workoutPlanItems}
-                              workoutLoadLogs={workoutLoadLogs}
-                              isExecuting={isExecuting}
-                              isDone={completedItemIds.has(item.id)}
-                              baselineLoadOverride={baselineOverride}
-                              onToggleDone={() => {
-                                setCompletedItemIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(item.id)) next.delete(item.id);
-                                  else next.add(item.id);
-                                  return next;
-                                });
-                              }}
-                              onStartRest={() => startRestTimer(item.restSeconds)}
-                              onOpenHistory={() =>
-                                setHistoryTarget({
-                                  exerciseId: item.exerciseId,
-                                  exerciseName: item.exerciseName,
-                                })
-                              }
-                              onSaveLoad={async (newLoad) => {
-                                const prevForStorage = (
-                                  baselineLoads[item.id] ||
-                                  item.loadKg ||
-                                  item.lastLoadKg ||
-                                  newLoad
-                                ).trim();
-                                await repo.updateWorkoutPlanItemLoad(
-                                  uid,
-                                  item.id,
-                                  newLoad,
-                                  prevForStorage,
-                                  {
-                                    clientId: client.id,
-                                    planId: plan.id,
+                        {(() => {
+                          const blocks = groupWorkoutPlanItems(items);
+                          let flatIdx = 0;
+                          const renderExerciseCard = (
+                            item: WorkoutPlanItemRecord,
+                            index: number,
+                            labelPrefix: string,
+                            isSupersetNonLast: boolean,
+                            isSupersetLast: boolean
+                          ) => {
+                            const baselineOverride = isExecuting
+                              ? baselineLoads[item.id]
+                              : undefined;
+                            return (
+                              <StudentExerciseLoadCard
+                                key={item.id}
+                                index={index}
+                                item={item}
+                                clientId={client.id}
+                                workoutPlans={workoutPlans}
+                                workoutPlanItems={workoutPlanItems}
+                                workoutLoadLogs={workoutLoadLogs}
+                                isExecuting={isExecuting}
+                                isDone={completedItemIds.has(item.id)}
+                                baselineLoadOverride={baselineOverride}
+                                labelPrefix={labelPrefix}
+                                isSupersetNonLast={isSupersetNonLast}
+                                isSupersetLast={isSupersetLast}
+                                onToggleDone={() => {
+                                  setCompletedItemIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(item.id)) next.delete(item.id);
+                                    else next.add(item.id);
+                                    return next;
+                                  });
+                                }}
+                                onStartRest={() => startRestTimer(item.restSeconds)}
+                                onOpenHistory={() =>
+                                  setHistoryTarget({
                                     exerciseId: item.exerciseId,
                                     exerciseName: item.exerciseName,
-                                  }
-                                );
-                                onBanner(`Carga de "${item.exerciseName}" atualizada!`);
-                              }}
-                            />
-                          );
-                        })}
+                                  })
+                                }
+                                onSaveLoad={async (newLoad) => {
+                                  const prevForStorage = (
+                                    baselineLoads[item.id] ||
+                                    item.loadKg ||
+                                    item.lastLoadKg ||
+                                    newLoad
+                                  ).trim();
+                                  await repo.updateWorkoutPlanItemLoad(
+                                    uid,
+                                    item.id,
+                                    newLoad,
+                                    prevForStorage,
+                                    {
+                                      clientId: client.id,
+                                      planId: plan.id,
+                                      exerciseId: item.exerciseId,
+                                      exerciseName: item.exerciseName,
+                                    }
+                                  );
+                                  onBanner(`Carga de "${item.exerciseName}" atualizada!`);
+                                }}
+                              />
+                            );
+                          };
+
+                          return blocks.map((block) => {
+                            if (block.isGrouped) {
+                              const startIdx = flatIdx;
+                              flatIdx += block.items.length;
+                              return (
+                                <div
+                                  key={`student_group_${block.supersetGroup}_${startIdx}`}
+                                  className="rounded-xl border border-[#EAB308]/60 border-l-4 border-l-[#EAB308] bg-[#1B1B1E] p-3 space-y-2.5"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <StatusPill tone="gold">{block.groupLabel}</StatusPill>
+                                  </div>
+                                  {block.items.map((item, inIdx) => {
+                                    const isNonLast = inIdx < block.items.length - 1;
+                                    const isLast = inIdx === block.items.length - 1;
+                                    return (
+                                      <div key={item.id} className="space-y-2">
+                                        {renderExerciseCard(
+                                          item,
+                                          startIdx + inIdx,
+                                          formatBlockItemLabel(block, inIdx),
+                                          isNonLast,
+                                          isLast
+                                        )}
+                                        {isNonLast && (
+                                          <div className="inline-flex items-center gap-1.5 rounded-md bg-[#EAB308]/15 px-2.5 py-1 text-[11px] font-semibold text-[#FACC15]">
+                                            <Zap className="h-3 w-3" />
+                                            Sem descanso · passa logo ao seguinte
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            }
+
+                            const item = block.items[0];
+                            const idx = flatIdx;
+                            flatIdx += 1;
+                            return renderExerciseCard(
+                              item,
+                              idx,
+                              formatBlockItemLabel(block, 0),
+                              false,
+                              false
+                            );
+                          });
+                        })()}
                       </div>
                     </BrandCard>
                   );
@@ -1676,6 +1741,9 @@ const StudentExerciseLoadCard: React.FC<{
   isExecuting: boolean;
   isDone: boolean;
   baselineLoadOverride?: string;
+  labelPrefix?: string;
+  isSupersetNonLast?: boolean;
+  isSupersetLast?: boolean;
   onToggleDone: () => void;
   onStartRest: () => void;
   onOpenHistory: () => void;
@@ -1690,6 +1758,9 @@ const StudentExerciseLoadCard: React.FC<{
   isExecuting,
   isDone,
   baselineLoadOverride,
+  labelPrefix,
+  isSupersetNonLast = false,
+  isSupersetLast = false,
   onToggleDone,
   onStartRest,
   onOpenHistory,
@@ -1756,11 +1827,16 @@ const StudentExerciseLoadCard: React.FC<{
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-bold text-[#F4F4F5]">
-            {index + 1}. {item.exerciseName}
+            {labelPrefix ?? index + 1}. {item.exerciseName}
           </p>
           <p className="mt-0.5 text-xs font-semibold text-[#EAB308]">
             {item.sets} séries × {item.reps}
-            {item.loadKg ? ` · Atual: ${item.loadKg}` : ''} · descanso {item.restSeconds}s
+            {item.loadKg ? ` · Atual: ${item.loadKg}` : ''} ·{' '}
+            {isSupersetNonLast
+              ? 'sem descanso → passa ao seguinte'
+              : isSupersetLast
+              ? `descanso após bloco: ${item.restSeconds}s`
+              : `descanso ${item.restSeconds}s`}
           </p>
           {item.notes && <p className="mt-1 text-xs text-[#A1A1AA]">{item.notes}</p>}
         </div>
@@ -1826,14 +1902,14 @@ const StudentExerciseLoadCard: React.FC<{
             +2.5 kg
           </button>
         )}
-        {isExecuting && item.restSeconds > 0 && (
+        {isExecuting && !isSupersetNonLast && item.restSeconds > 0 && (
           <button
             type="button"
             onClick={onStartRest}
             className="inline-flex items-center gap-1 rounded-lg border border-[#323238] bg-[#1B1B1E] px-2 py-1.5 text-[11px] font-bold text-[#A1A1AA] hover:border-[#EAB308] hover:text-white"
           >
             <Clock className="h-3 w-3 text-[#EAB308]" />
-            {item.restSeconds}s
+            {isSupersetLast ? `Bloco ${item.restSeconds}s` : `${item.restSeconds}s`}
           </button>
         )}
         <button

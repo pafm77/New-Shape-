@@ -1159,6 +1159,84 @@ test("Unassigned workout plan drafts (clientId '') and scheduled availableFromDa
   );
 });
 
+test("Workout plan item supersetGroup (bi-set/agrupamento) creation, update, and validation", async () => {
+  const STUDENT_UID = "student_test_789";
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
+  const studentDb = testEnv.authenticatedContext(STUDENT_UID, { email: "stu@example.com" }).firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection(`users/${ALICE_UID}/studio_members`).doc(STUDENT_UID).set({
+      userId: ALICE_UID,
+      memberUid: STUDENT_UID,
+      inviteCode: "NS2026",
+      clientId: "c1",
+      createdAt: created,
+      updatedAt: created,
+    });
+  });
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_ss_1").set({
+      userId: ALICE_UID,
+      planId: "wp1",
+      exerciseId: "ex1",
+      exerciseName: "Supino Reto",
+      muscleGroup: "Peito",
+      sets: 3,
+      reps: "10-12",
+      loadKg: "40 kg",
+      restSeconds: 0,
+      notes: "",
+      orderIndex: 0,
+      supersetGroup: "sg_1",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_ss_2").set({
+      userId: ALICE_UID,
+      planId: "wp1",
+      exerciseId: "ex2",
+      exerciseName: "Remada Curvada",
+      muscleGroup: "Costas",
+      sets: 3,
+      reps: "10-12",
+      loadKg: "35 kg",
+      restSeconds: 90,
+      notes: "",
+      orderIndex: 1,
+      supersetGroup: "sg_1",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_ss_1").update({
+      supersetGroup: "",
+      restSeconds: 60,
+      updatedAt: updated,
+    })
+  );
+
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_ss_1").update({
+      supersetGroup: "g".repeat(45),
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/workout_plan_items`).doc("wpi_ss_2").update({
+      supersetGroup: "",
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+});
+
 
 
 

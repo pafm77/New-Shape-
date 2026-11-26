@@ -432,6 +432,7 @@ export function subscribeStudioData(
       restSeconds: Number(d.restSeconds ?? 90),
       notes: String(d.notes ?? ''),
       orderIndex: Number(d.orderIndex ?? 0),
+      supersetGroup: typeof d.supersetGroup === 'string' ? d.supersetGroup : '',
     }),
     (list) => list.sort((a, b) => a.orderIndex - b.orderIndex),
     handlers.workoutPlanItems
@@ -2515,6 +2516,7 @@ export async function assignWorkoutPlanToClients(
           restSeconds: Math.max(0, Math.min(600, Math.round(item.restSeconds))),
           notes: item.notes.trim().slice(0, 300),
           orderIndex: idx,
+          supersetGroup: (item.supersetGroup || '').trim().slice(0, 40),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         },
@@ -2559,9 +2561,21 @@ export async function addExerciseToPlan(
   loadKg: string,
   restSeconds: number,
   notes: string,
-  orderIndex: number
+  orderIndex: number,
+  groupWithPreviousItem?: WorkoutPlanItemRecord | null
 ): Promise<void> {
-  await setDoc(doc(subcol(uid, 'workout_plan_items')), {
+  const groupKey = groupWithPreviousItem
+    ? ((groupWithPreviousItem.supersetGroup || '').trim() || `sg_${Date.now()}`).slice(0, 40)
+    : '';
+  const batch = writeBatch(db);
+  if (groupWithPreviousItem) {
+    batch.update(doc(subcol(uid, 'workout_plan_items'), groupWithPreviousItem.id), {
+      supersetGroup: groupKey,
+      restSeconds: 0,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  batch.set(doc(subcol(uid, 'workout_plan_items')), {
     userId: uid,
     planId,
     exerciseId: exercise.id,
@@ -2573,9 +2587,63 @@ export async function addExerciseToPlan(
     restSeconds: Math.max(0, Math.min(600, Math.round(restSeconds))),
     notes: notes.trim().slice(0, 300),
     orderIndex: Math.max(0, Math.min(200, Math.round(orderIndex))),
+    supersetGroup: groupKey,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  await batch.commit();
+}
+
+export async function linkExerciseWithPrevious(
+  uid: string,
+  prevItem: WorkoutPlanItemRecord,
+  currentItem: WorkoutPlanItemRecord
+): Promise<void> {
+  const groupKey = (
+    (prevItem.supersetGroup || '').trim() ||
+    (currentItem.supersetGroup || '').trim() ||
+    `sg_${Date.now()}`
+  ).slice(0, 40);
+  const batch = writeBatch(db);
+  batch.update(doc(subcol(uid, 'workout_plan_items'), prevItem.id), {
+    supersetGroup: groupKey,
+    restSeconds: 0,
+    updatedAt: serverTimestamp(),
+  });
+  const finalRest =
+    currentItem.restSeconds <= 0
+      ? 90
+      : Math.max(0, Math.min(600, Math.round(currentItem.restSeconds)));
+  batch.update(doc(subcol(uid, 'workout_plan_items'), currentItem.id), {
+    supersetGroup: groupKey,
+    restSeconds: finalRest,
+    updatedAt: serverTimestamp(),
+  });
+  await batch.commit();
+}
+
+export async function ungroupSupersetBlock(
+  uid: string,
+  blockItems: WorkoutPlanItemRecord[]
+): Promise<void> {
+  if (blockItems.length === 0) return;
+  const fallbackRest =
+    blockItems[blockItems.length - 1]?.restSeconds > 0
+      ? blockItems[blockItems.length - 1].restSeconds
+      : 60;
+  const batch = writeBatch(db);
+  blockItems.forEach((item) => {
+    const restoredRest =
+      item.restSeconds === 0
+        ? fallbackRest
+        : Math.max(0, Math.min(600, Math.round(item.restSeconds)));
+    batch.update(doc(subcol(uid, 'workout_plan_items'), item.id), {
+      supersetGroup: '',
+      restSeconds: restoredRest,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  await batch.commit();
 }
 
 export function parseLoadKgNumber(loadKg: string): number {
@@ -2624,8 +2692,36 @@ export async function updateWorkoutPlanItemLoad(
   }
 }
 
-export async function removeExerciseFromPlan(uid: string, itemId: string): Promise<void> {
-  await deleteDoc(doc(subcol(uid, 'workout_plan_items'), itemId));
+export async function removeExerciseFromPlan(
+  uid: string,
+  itemId: string,
+  planItems: WorkoutPlanItemRecord[] = []
+): Promise<void> {
+  const target = planItems.find((i) => i.id === itemId);
+  const group = (target?.supersetGroup || '').trim();
+  const remainingInGroup =
+    group && target
+      ? planItems.filter(
+          (i) => i.planId === target.planId && (i.supersetGroup || '').trim() === group && i.id !== itemId
+        )
+      : [];
+  const batch = writeBatch(db);
+  batch.delete(doc(subcol(uid, 'workout_plan_items'), itemId));
+  if (remainingInGroup.length === 1) {
+    const lone = remainingInGroup[0];
+    const restoredRest =
+      lone.restSeconds === 0
+        ? target && target.restSeconds > 0
+          ? target.restSeconds
+          : 60
+        : Math.max(0, Math.min(600, Math.round(lone.restSeconds)));
+    batch.update(doc(subcol(uid, 'workout_plan_items'), lone.id), {
+      supersetGroup: '',
+      restSeconds: restoredRest,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
 }
 
 // --- Waitlist (Lista de Espera) ---

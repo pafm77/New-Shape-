@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { Calendar, Dumbbell, ExternalLink, Eye, Plus, Search, Trash2, Users, X } from 'lucide-react';
+import { Calendar, Dumbbell, ExternalLink, Eye, Link2, Plus, Search, Trash2, Unlink, Users, X, Zap } from 'lucide-react';
 import {
   BookingRecord,
   ClientRecord,
   ExerciseRecord,
+  formatBlockItemLabel,
+  groupWorkoutPlanItems,
   MessageTemplateRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
@@ -323,46 +325,158 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
                     {items.length === 0 ? (
                       <p className="text-xs text-[#A1A1AA]">Ainda sem exercícios neste plano.</p>
                     ) : (
-                      <div className="divide-y divide-[#323238]/60">
-                        {items.map((item, idx) => (
-                          <div
-                            key={item.id}
-                            className="flex items-center justify-between gap-3 py-2.5"
-                          >
-                            <div className="min-w-0 flex-1 space-y-1.5">
-                              <p className="text-sm font-bold text-[#F4F4F5]">
-                                {idx + 1}. {item.exerciseName}
-                              </p>
-                              <p className="text-xs font-medium text-[#EAB308]">
-                                {item.sets} séries × {item.reps}
-                                {item.loadKg ? ` · ${item.loadKg}` : ''} · Descanso{' '}
-                                {item.restSeconds}s
-                              </p>
-                              {!isDraft && (
-                                <ExerciseLastLoadBadge
-                                  item={item}
-                                  clientId={plan.clientId}
-                                  workoutPlans={workoutPlans}
-                                  workoutPlanItems={workoutPlanItems}
-                                  workoutLoadLogs={workoutLoadLogs}
-                                  onOpenHistory={() =>
-                                    setHistoryItem({ item, clientId: plan.clientId })
-                                  }
-                                />
-                              )}
-                              {item.notes && (
-                                <p className="text-xs text-[#A1A1AA]">{item.notes}</p>
-                              )}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => repo.removeExerciseFromPlan(uid, item.id)}
-                              className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
+                      <div className="space-y-2.5">
+                        {(() => {
+                          const blocks = groupWorkoutPlanItems(items);
+                          let flatIdx = 0;
+                          return blocks.map((block, blockIdx) => {
+                            if (block.isGrouped) {
+                              const startIdx = flatIdx;
+                              flatIdx += block.items.length;
+                              return (
+                                <div
+                                  key={`group_${block.supersetGroup}_${startIdx}`}
+                                  className="rounded-xl border border-[#EAB308]/55 border-l-4 border-l-[#EAB308] bg-[#242429]/75 p-3 space-y-2"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <StatusPill tone="gold">{block.groupLabel}</StatusPill>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        await repo.ungroupSupersetBlock(uid, block.items);
+                                        onBanner('Grupo de exercícios separado.');
+                                      }}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-[#323238] bg-[#1B1B1E] px-2.5 py-1 text-[11px] font-semibold text-[#A1A1AA] hover:border-[#EAB308] hover:text-[#F4F4F5]"
+                                    >
+                                      <Unlink className="h-3.5 w-3.5" />
+                                      Desagrupar
+                                    </button>
+                                  </div>
+                                  {block.items.map((item, inIdx) => {
+                                    const isNonLast = inIdx < block.items.length - 1;
+                                    const isLast = inIdx === block.items.length - 1;
+                                    return (
+                                      <div key={item.id} className="space-y-1.5">
+                                        <div className="flex items-center justify-between gap-3 py-1">
+                                          <div className="min-w-0 flex-1 space-y-1.5">
+                                            <p className="text-sm font-bold text-[#F4F4F5]">
+                                              {formatBlockItemLabel(block, inIdx)}. {item.exerciseName}
+                                            </p>
+                                            <p className="text-xs font-medium text-[#EAB308]">
+                                              {item.sets} séries × {item.reps}
+                                              {item.loadKg ? ` · ${item.loadKg}` : ''} ·{' '}
+                                              {isNonLast
+                                                ? 'Sem descanso → passa ao seguinte'
+                                                : isLast
+                                                ? `Descanso após bloco: ${item.restSeconds}s`
+                                                : `Descanso ${item.restSeconds}s`}
+                                            </p>
+                                            {!isDraft && (
+                                              <ExerciseLastLoadBadge
+                                                item={item}
+                                                clientId={plan.clientId}
+                                                workoutPlans={workoutPlans}
+                                                workoutPlanItems={workoutPlanItems}
+                                                workoutLoadLogs={workoutLoadLogs}
+                                                onOpenHistory={() =>
+                                                  setHistoryItem({ item, clientId: plan.clientId })
+                                                }
+                                              />
+                                            )}
+                                            {item.notes && (
+                                              <p className="text-xs text-[#A1A1AA]">{item.notes}</p>
+                                            )}
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              repo.removeExerciseFromPlan(
+                                                uid,
+                                                item.id,
+                                                workoutPlanItems
+                                              )
+                                            }
+                                            className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+                                          >
+                                            <X className="h-4 w-4" />
+                                          </button>
+                                        </div>
+                                        {isNonLast && (
+                                          <div className="inline-flex items-center gap-1.5 rounded-md bg-[#EAB308]/15 px-2.5 py-1 text-[11px] font-semibold text-[#FACC15]">
+                                            <Zap className="h-3 w-3" />
+                                            Sem descanso · passa logo ao seguinte
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            }
+
+                            const item = block.items[0];
+                            const prevItem = flatIdx > 0 ? items[flatIdx - 1] : null;
+                            flatIdx += 1;
+                            return (
+                              <div
+                                key={item.id}
+                                className={
+                                  blockIdx > 0 ? 'border-t border-[#323238]/60 pt-2' : ''
+                                }
+                              >
+                                {prevItem && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await repo.linkExerciseWithPrevious(uid, prevItem, item);
+                                      onBanner('Exercícios agrupados sem descanso entre eles!');
+                                    }}
+                                    className="mb-1 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold text-[#FACC15] hover:bg-[#EAB308]/15"
+                                  >
+                                    <Link2 className="h-3.5 w-3.5" />
+                                    Agrupar com anterior (sem descanso)
+                                  </button>
+                                )}
+                                <div className="flex items-center justify-between gap-3 py-1">
+                                  <div className="min-w-0 flex-1 space-y-1.5">
+                                    <p className="text-sm font-bold text-[#F4F4F5]">
+                                      {formatBlockItemLabel(block, 0)}. {item.exerciseName}
+                                    </p>
+                                    <p className="text-xs font-medium text-[#EAB308]">
+                                      {item.sets} séries × {item.reps}
+                                      {item.loadKg ? ` · ${item.loadKg}` : ''} · Descanso{' '}
+                                      {item.restSeconds}s
+                                    </p>
+                                    {!isDraft && (
+                                      <ExerciseLastLoadBadge
+                                        item={item}
+                                        clientId={plan.clientId}
+                                        workoutPlans={workoutPlans}
+                                        workoutPlanItems={workoutPlanItems}
+                                        workoutLoadLogs={workoutLoadLogs}
+                                        onOpenHistory={() =>
+                                          setHistoryItem({ item, clientId: plan.clientId })
+                                        }
+                                      />
+                                    )}
+                                    {item.notes && (
+                                      <p className="text-xs text-[#A1A1AA]">{item.notes}</p>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      repo.removeExerciseFromPlan(uid, item.id, workoutPlanItems)
+                                    }
+                                    className="rounded-lg p-1.5 text-[#EF4444] hover:bg-[#3B1518]"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     )}
 
@@ -492,29 +606,42 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
             />
           )}
 
-          {targetPlan && (
-            <AddExerciseToPlanModal
-              planTitle={targetPlan.title}
-              exercises={exercises}
-              onClose={() => setTargetPlan(null)}
-              onAdd={async (exercise, sets, reps, load, rest, notes) => {
-                const count = workoutPlanItems.filter((i) => i.planId === targetPlan.id).length;
-                await repo.addExerciseToPlan(
-                  uid,
-                  targetPlan.id,
-                  exercise,
-                  sets,
-                  reps,
-                  load,
-                  rest,
-                  notes,
-                  count
-                );
-                setTargetPlan(null);
-                onBanner('Exercício adicionado ao plano.');
-              }}
-            />
-          )}
+          {targetPlan && (() => {
+            const sortedPlanItems = workoutPlanItems
+              .filter((i) => i.planId === targetPlan.id)
+              .sort((a, b) => a.orderIndex - b.orderIndex);
+            const previousExercise = sortedPlanItems[sortedPlanItems.length - 1] || null;
+            return (
+              <AddExerciseToPlanModal
+                planTitle={targetPlan.title}
+                exercises={exercises}
+                previousExercise={previousExercise}
+                onClose={() => setTargetPlan(null)}
+                onAdd={async (exercise, sets, reps, load, rest, notes, groupWithPrevious) => {
+                  const nextOrder =
+                    sortedPlanItems.reduce((m, i) => Math.max(m, i.orderIndex), -1) + 1;
+                  await repo.addExerciseToPlan(
+                    uid,
+                    targetPlan.id,
+                    exercise,
+                    sets,
+                    reps,
+                    load,
+                    rest,
+                    notes,
+                    nextOrder,
+                    groupWithPrevious ? previousExercise : null
+                  );
+                  setTargetPlan(null);
+                  onBanner(
+                    groupWithPrevious && previousExercise
+                      ? `Exercício agrupado sem descanso com "${previousExercise.exerciseName}"!`
+                      : 'Exercício adicionado ao plano.'
+                  );
+                }}
+              />
+            );
+          })()}
 
           {historyItem && (
             <ExerciseProgressModal
@@ -1129,6 +1256,7 @@ const SchedulePlanModal: React.FC<{
 const AddExerciseToPlanModal: React.FC<{
   planTitle: string;
   exercises: ExerciseRecord[];
+  previousExercise?: WorkoutPlanItemRecord | null;
   onClose: () => void;
   onAdd: (
     ex: ExerciseRecord,
@@ -1136,9 +1264,10 @@ const AddExerciseToPlanModal: React.FC<{
     reps: string,
     load: string,
     rest: number,
-    notes: string
+    notes: string,
+    groupWithPrevious: boolean
   ) => Promise<void>;
-}> = ({ planTitle, exercises, onClose, onAdd }) => {
+}> = ({ planTitle, exercises, previousExercise, onClose, onAdd }) => {
   const [search, setSearch] = useState('');
   const [groupFilter, setGroupFilter] = useState('Todos');
   const groups = useMemo(
@@ -1163,6 +1292,7 @@ const AddExerciseToPlanModal: React.FC<{
   const [load, setLoad] = useState('');
   const [rest, setRest] = useState('90');
   const [notes, setNotes] = useState('');
+  const [groupWithPrevious, setGroupWithPrevious] = useState(false);
 
   const selected = filtered.find((e) => e.id === selectedId) || filtered[0] || null;
 
@@ -1228,10 +1358,38 @@ const AddExerciseToPlanModal: React.FC<{
             <Input value={load} onChange={(e) => setLoad(e.target.value)} />
           </div>
           <div>
-            <FieldLabel>Descanso (s)</FieldLabel>
+            <FieldLabel>{groupWithPrevious ? 'Descanso após bloco (s)' : 'Descanso (s)'}</FieldLabel>
             <Input type="number" value={rest} onChange={(e) => setRest(e.target.value)} />
           </div>
         </div>
+        {previousExercise && (
+          <label
+            className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition ${
+              groupWithPrevious
+                ? 'border-[#EAB308] bg-[#EAB308]/10'
+                : 'border-[#323238] bg-[#242429] hover:border-[#EAB308]/50'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={groupWithPrevious}
+              onChange={(e) => setGroupWithPrevious(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[#EAB308]"
+            />
+            <div className="min-w-0 flex-1">
+              <p
+                className={`text-xs font-bold ${
+                  groupWithPrevious ? 'text-[#FACC15]' : 'text-[#F4F4F5]'
+                }`}
+              >
+                Agrupar com o anterior ({previousExercise.exerciseName})
+              </p>
+              <p className="text-[11px] text-[#A1A1AA]">
+                Executar os 2 exercícios seguidos sem descanso entre eles.
+              </p>
+            </div>
+          </label>
+        )}
         <div>
           <FieldLabel>Observações técnicas</FieldLabel>
           <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -1248,11 +1406,12 @@ const AddExerciseToPlanModal: React.FC<{
                 reps || '10-12',
                 load,
                 Math.max(0, Number(rest) || 90),
-                notes
+                notes,
+                groupWithPrevious
               )
             }
           >
-            Adicionar
+            {groupWithPrevious ? 'Adicionar em Bi-set' : 'Adicionar'}
           </GoldButton>
         </div>
       </div>

@@ -32,6 +32,7 @@ import com.example.data.model.WorkoutPlanItemRecord
 import com.example.data.model.WorkoutPlanRecord
 import com.example.data.model.currentLocalIsoDate
 import com.example.data.model.formatIsoDatePt
+import com.example.data.model.groupWorkoutPlanItems
 import com.example.data.model.isScheduledForFuture
 import com.example.data.model.isUnassignedDraft
 import com.example.ui.NewShapeViewModel
@@ -371,18 +372,136 @@ private fun WorkoutPlansBuilderSection(
                             color = TextSecondaryDark
                         )
                     } else {
-                        items.forEachIndexed { idx, exItem ->
-                            WorkoutPlanExerciseRow(
-                                index = idx + 1,
-                                item = exItem,
-                                clientId = plan.clientId,
-                                workoutPlans = state.workoutPlans,
-                                workoutPlanItems = state.workoutPlanItems,
-                                workoutLoadLogs = state.workoutLoadLogs,
-                                onOpenHistory = if (isDraft) null else ({ historyTargetItem = exItem }),
-                                onRemove = { viewModel.removeExerciseFromPlan(exItem.id) }
-                            )
-                            if (idx < items.lastIndex) {
+                        val blocks = groupWorkoutPlanItems(items)
+                        var flatIdx = 0
+                        blocks.forEachIndexed { blockIdx, block ->
+                            if (block.isGrouped) {
+                                Surface(
+                                    color = ElevatedCharcoal,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.65f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            StatusPill(
+                                                text = block.groupLabel,
+                                                textColor = NewShapeGoldBright,
+                                                containerColor = NewShapeGoldMuted
+                                            )
+                                            TextButton(
+                                                onClick = { viewModel.ungroupSupersetBlock(block.items) },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                modifier = Modifier.testTag("ungroup_superset_${block.supersetGroup}")
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.LinkOff,
+                                                    contentDescription = "Desagrupar exercícios",
+                                                    tint = TextSecondaryDark,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    "Desagrupar",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = TextSecondaryDark
+                                                )
+                                            }
+                                        }
+                                        block.items.forEachIndexed { inIdx, exItem ->
+                                            val isNonLast = inIdx < block.items.lastIndex
+                                            val isLast = inIdx == block.items.lastIndex
+                                            WorkoutPlanExerciseRow(
+                                                index = flatIdx + inIdx + 1,
+                                                item = exItem,
+                                                clientId = plan.clientId,
+                                                workoutPlans = state.workoutPlans,
+                                                workoutPlanItems = state.workoutPlanItems,
+                                                workoutLoadLogs = state.workoutLoadLogs,
+                                                labelPrefix = block.itemLabel(inIdx),
+                                                isSupersetNonLast = isNonLast,
+                                                isSupersetLast = isLast,
+                                                onOpenHistory = if (isDraft) null else ({ historyTargetItem = exItem }),
+                                                onRemove = { viewModel.removeExerciseFromPlan(exItem.id) }
+                                            )
+                                            if (isNonLast) {
+                                                Surface(
+                                                    color = NewShapeGoldMuted.copy(alpha = 0.75f),
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    modifier = Modifier.padding(vertical = 2.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Bolt,
+                                                            contentDescription = null,
+                                                            tint = NewShapeGoldBright,
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                        Text(
+                                                            "Sem descanso · passa logo ao seguinte",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = NewShapeGoldBright
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                flatIdx += block.items.size
+                            } else {
+                                val exItem = block.items.first()
+                                val prevItem = if (flatIdx > 0) items[flatIdx - 1] else null
+                                if (prevItem != null) {
+                                    TextButton(
+                                        onClick = { viewModel.linkExerciseWithPrevious(prevItem, exItem) },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                        modifier = Modifier.testTag("link_prev_ex_${exItem.id}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Link,
+                                            contentDescription = "Agrupar com o exercício anterior",
+                                            tint = NewShapeGoldBright,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            "Agrupar com anterior (sem descanso)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = NewShapeGoldBright
+                                        )
+                                    }
+                                }
+                                WorkoutPlanExerciseRow(
+                                    index = flatIdx + 1,
+                                    item = exItem,
+                                    clientId = plan.clientId,
+                                    workoutPlans = state.workoutPlans,
+                                    workoutPlanItems = state.workoutPlanItems,
+                                    workoutLoadLogs = state.workoutLoadLogs,
+                                    labelPrefix = block.itemLabel(0),
+                                    onOpenHistory = if (isDraft) null else ({ historyTargetItem = exItem }),
+                                    onRemove = { viewModel.removeExerciseFromPlan(exItem.id) }
+                                )
+                                flatIdx += 1
+                            }
+                            if (blockIdx < blocks.lastIndex) {
                                 HorizontalDivider(color = HairlineBorder.copy(alpha = 0.5f))
                             }
                         }
@@ -483,12 +602,25 @@ private fun WorkoutPlansBuilderSection(
     }
 
     targetPlanForExercise?.let { plan ->
+        val previousExercise = state.workoutPlanItems
+            .filter { it.planId == plan.id }
+            .maxByOrNull { it.orderIndex }
         AddExerciseToPlanDialog(
             planTitle = plan.title,
             exercises = state.exercises,
+            previousExercise = previousExercise,
             onDismiss = { targetPlanForExercise = null },
-            onAdd = { exercise, sets, reps, load, rest, notes ->
-                viewModel.addExerciseToPlan(plan.id, exercise, sets, reps, load, rest, notes)
+            onAdd = { exercise, sets, reps, load, rest, notes, groupWithPrevious ->
+                viewModel.addExerciseToPlan(
+                    planId = plan.id,
+                    exercise = exercise,
+                    sets = sets,
+                    reps = reps,
+                    loadKg = load,
+                    restSeconds = rest,
+                    notes = notes,
+                    groupWithPrevious = groupWithPrevious
+                )
                 targetPlanForExercise = null
             }
         )
@@ -517,6 +649,9 @@ fun WorkoutPlanExerciseRow(
     workoutPlans: List<WorkoutPlanRecord> = emptyList(),
     workoutPlanItems: List<WorkoutPlanItemRecord> = emptyList(),
     workoutLoadLogs: List<WorkoutLoadLogRecord> = emptyList(),
+    labelPrefix: String? = null,
+    isSupersetNonLast: Boolean = false,
+    isSupersetLast: Boolean = false,
     onOpenHistory: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null
 ) {
@@ -530,13 +665,18 @@ fun WorkoutPlanExerciseRow(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                text = "$index. ${item.exerciseName}",
+                text = "${labelPrefix ?: index.toString()}. ${item.exerciseName}",
                 style = MaterialTheme.typography.titleSmall,
                 color = TextPrimaryDark
             )
             val loadPart = if (item.loadKg.isNotBlank()) " · ${item.loadKg}" else ""
+            val restPart = when {
+                isSupersetNonLast -> "Sem descanso → passa ao seguinte"
+                isSupersetLast -> "Descanso após bloco: ${item.restSeconds}s"
+                else -> "Descanso ${item.restSeconds}s"
+            }
             Text(
-                text = "${item.sets} séries × ${item.reps}$loadPart · Descanso ${item.restSeconds}s",
+                text = "${item.sets} séries × ${item.reps}$loadPart · $restPart",
                 style = MaterialTheme.typography.bodySmall,
                 color = NewShapeGold
             )
@@ -1331,8 +1471,9 @@ private fun SchedulePlanAccessDialog(
 private fun AddExerciseToPlanDialog(
     planTitle: String,
     exercises: List<ExerciseRecord>,
+    previousExercise: WorkoutPlanItemRecord? = null,
     onDismiss: () -> Unit,
-    onAdd: (ExerciseRecord, Int, String, String, Int, String) -> Unit
+    onAdd: (ExerciseRecord, Int, String, String, Int, String, Boolean) -> Unit
 ) {
     var search by remember { mutableStateOf("") }
     var groupFilter by remember { mutableStateOf("Todos") }
@@ -1356,6 +1497,7 @@ private fun AddExerciseToPlanDialog(
     var loadText by remember { mutableStateOf("") }
     var restText by remember { mutableStateOf("90") }
     var notesText by remember { mutableStateOf("") }
+    var groupWithPrevious by remember(planTitle, previousExercise?.id) { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1449,12 +1591,57 @@ private fun AddExerciseToPlanDialog(
                     OutlinedTextField(
                         value = restText,
                         onValueChange = { restText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Descanso (s)") },
+                        label = { Text(if (groupWithPrevious) "Descanso após bloco (s)" else "Descanso (s)") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f),
                         colors = darkFieldColors()
                     )
+                }
+                if (previousExercise != null) {
+                    Surface(
+                        color = if (groupWithPrevious) NewShapeGoldMuted else ElevatedCharcoal,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (groupWithPrevious) NewShapeGold else HairlineBorder
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { groupWithPrevious = !groupWithPrevious }
+                            .testTag("toggle_group_with_previous")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = groupWithPrevious,
+                                onCheckedChange = { groupWithPrevious = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = NewShapeGold,
+                                    checkmarkColor = TextOnGold,
+                                    uncheckedColor = TextSecondaryDark
+                                )
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Agrupar com o anterior (${previousExercise.exerciseName})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (groupWithPrevious) NewShapeGoldBright else TextPrimaryDark
+                                )
+                                Text(
+                                    text = "Executar os 2 seguidos sem descanso entre eles",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondaryDark
+                                )
+                            }
+                        }
+                    }
                 }
                 OutlinedTextField(
                     value = notesText,
@@ -1467,7 +1654,7 @@ private fun AddExerciseToPlanDialog(
         },
         confirmButton = {
             GoldPrimaryButton(
-                text = "Adicionar",
+                text = if (groupWithPrevious) "Adicionar em Bi-set" else "Adicionar",
                 enabled = selectedExercise != null,
                 onClick = {
                     selectedExercise?.let { ex ->
@@ -1477,10 +1664,12 @@ private fun AddExerciseToPlanDialog(
                             repsText.ifBlank { "10-12" },
                             loadText,
                             restText.toIntOrNull()?.coerceIn(0, 600) ?: 90,
-                            notesText
+                            notesText,
+                            groupWithPrevious
                         )
                     }
-                }
+                },
+                testTag = "confirm_add_exercise_to_plan_btn"
             )
         },
         dismissButton = {

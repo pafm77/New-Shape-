@@ -1151,37 +1151,131 @@ private fun StudentWorkoutScreen(
                         Spacer(Modifier.height(8.dp))
                         Text("Plano sem exercícios ainda.", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
                     } else {
-                        items.forEachIndexed { idx, exItem ->
-                            StudentExerciseLoadRow(
-                                index = idx + 1,
-                                item = exItem,
-                                clientId = student.id,
-                                workoutPlans = state.workoutPlans,
-                                workoutPlanItems = state.workoutPlanItems,
-                                workoutLoadLogs = state.workoutLoadLogs,
-                                isExecuting = isExecuting,
-                                isCompleted = exItem.id in completedExerciseIds,
-                                onToggleComplete = {
-                                    completedExerciseIds = if (exItem.id in completedExerciseIds) {
-                                        completedExerciseIds - exItem.id
-                                    } else {
-                                        completedExerciseIds + exItem.id
+                        val blocks = groupWorkoutPlanItems(items)
+                        var flatIdx = 0
+                        blocks.forEachIndexed { blockIdx, block ->
+                            if (block.isGrouped) {
+                                Surface(
+                                    color = ElevatedCharcoal,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, NewShapeGold.copy(alpha = 0.65f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        StatusPill(
+                                            text = block.groupLabel,
+                                            textColor = NewShapeGoldBright,
+                                            containerColor = NewShapeGoldMuted
+                                        )
+                                        block.items.forEachIndexed { inIdx, exItem ->
+                                            val isNonLast = inIdx < block.items.lastIndex
+                                            val isLast = inIdx == block.items.lastIndex
+                                            StudentExerciseLoadRow(
+                                                index = flatIdx + inIdx + 1,
+                                                item = exItem,
+                                                clientId = student.id,
+                                                workoutPlans = state.workoutPlans,
+                                                workoutPlanItems = state.workoutPlanItems,
+                                                workoutLoadLogs = state.workoutLoadLogs,
+                                                isExecuting = isExecuting,
+                                                isCompleted = exItem.id in completedExerciseIds,
+                                                labelPrefix = block.itemLabel(inIdx),
+                                                isSupersetNonLast = isNonLast,
+                                                isSupersetLast = isLast,
+                                                onToggleComplete = {
+                                                    completedExerciseIds = if (exItem.id in completedExerciseIds) {
+                                                        completedExerciseIds - exItem.id
+                                                    } else {
+                                                        completedExerciseIds + exItem.id
+                                                    }
+                                                },
+                                                onStartRest = {
+                                                    restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
+                                                    restExerciseName = "Bloco ${block.blockNumber} (${exItem.exerciseName})"
+                                                },
+                                                onOpenHistory = { historyTargetItem = exItem },
+                                                onSaveLoad = { newLoad ->
+                                                    viewModel.updateWorkoutPlanItemLoad(
+                                                        itemId = exItem.id,
+                                                        loadKg = newLoad,
+                                                        previousLoadKg = exItem.loadKg
+                                                    )
+                                                }
+                                            )
+                                            if (isNonLast) {
+                                                Surface(
+                                                    color = NewShapeGoldMuted.copy(alpha = 0.75f),
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    modifier = Modifier.padding(vertical = 2.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Bolt,
+                                                            contentDescription = null,
+                                                            tint = NewShapeGoldBright,
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                        Text(
+                                                            "Sem descanso · passa logo ao seguinte",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = NewShapeGoldBright
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                },
-                                onStartRest = {
-                                    restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
-                                    restExerciseName = exItem.exerciseName
-                                },
-                                onOpenHistory = { historyTargetItem = exItem },
-                                onSaveLoad = { newLoad ->
-                                    viewModel.updateWorkoutPlanItemLoad(
-                                        itemId = exItem.id,
-                                        loadKg = newLoad,
-                                        previousLoadKg = exItem.loadKg
-                                    )
                                 }
-                            )
-                            if (idx < items.lastIndex) HorizontalDivider(color = HairlineBorder.copy(alpha = 0.5f))
+                                flatIdx += block.items.size
+                            } else {
+                                val exItem = block.items.first()
+                                StudentExerciseLoadRow(
+                                    index = flatIdx + 1,
+                                    item = exItem,
+                                    clientId = student.id,
+                                    workoutPlans = state.workoutPlans,
+                                    workoutPlanItems = state.workoutPlanItems,
+                                    workoutLoadLogs = state.workoutLoadLogs,
+                                    isExecuting = isExecuting,
+                                    isCompleted = exItem.id in completedExerciseIds,
+                                    labelPrefix = block.itemLabel(0),
+                                    onToggleComplete = {
+                                        completedExerciseIds = if (exItem.id in completedExerciseIds) {
+                                            completedExerciseIds - exItem.id
+                                        } else {
+                                            completedExerciseIds + exItem.id
+                                        }
+                                    },
+                                    onStartRest = {
+                                        restSecondsLeft = exItem.restSeconds.coerceAtLeast(15)
+                                        restExerciseName = exItem.exerciseName
+                                    },
+                                    onOpenHistory = { historyTargetItem = exItem },
+                                    onSaveLoad = { newLoad ->
+                                        viewModel.updateWorkoutPlanItemLoad(
+                                            itemId = exItem.id,
+                                            loadKg = newLoad,
+                                            previousLoadKg = exItem.loadKg
+                                        )
+                                    }
+                                )
+                                flatIdx += 1
+                            }
+                            if (blockIdx < blocks.lastIndex) {
+                                HorizontalDivider(color = HairlineBorder.copy(alpha = 0.5f))
+                            }
                         }
                     }
                 }
@@ -1230,6 +1324,9 @@ private fun StudentExerciseLoadRow(
     workoutLoadLogs: List<WorkoutLoadLogRecord>,
     isExecuting: Boolean,
     isCompleted: Boolean,
+    labelPrefix: String? = null,
+    isSupersetNonLast: Boolean = false,
+    isSupersetLast: Boolean = false,
     onToggleComplete: () -> Unit,
     onStartRest: () -> Unit,
     onOpenHistory: () -> Unit,
@@ -1262,12 +1359,17 @@ private fun StudentExerciseLoadRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "$index. ${item.exerciseName}",
+                    text = "${labelPrefix ?: index.toString()}. ${item.exerciseName}",
                     style = MaterialTheme.typography.titleSmall,
                     color = if (isCompleted) ConfirmedGreen else TextPrimaryDark
                 )
+                val restSummary = when {
+                    isSupersetNonLast -> "Sem descanso → próximo exercício"
+                    isSupersetLast -> "Descanso após bloco: ${item.restSeconds}s"
+                    else -> "Descanso ${item.restSeconds}s"
+                }
                 Text(
-                    text = "${item.sets} séries × ${item.reps} · Descanso ${item.restSeconds}s",
+                    text = "${item.sets} séries × ${item.reps} · $restSummary",
                     style = MaterialTheme.typography.bodySmall,
                     color = NewShapeGold
                 )
@@ -1329,7 +1431,7 @@ private fun StudentExerciseLoadRow(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     )
                 }
-                if (item.restSeconds > 0) {
+                if (!isSupersetNonLast && item.restSeconds > 0) {
                     Surface(
                         color = InfoBlueContainer,
                         shape = RoundedCornerShape(8.dp),
@@ -1340,7 +1442,7 @@ private fun StudentExerciseLoadRow(
                             .testTag("student_rest_timer_${item.id}")
                     ) {
                         Text(
-                            text = "⏱ Descanso ${item.restSeconds}s",
+                            text = if (isSupersetLast) "⏱ Descanso bloco ${item.restSeconds}s" else "⏱ Descanso ${item.restSeconds}s",
                             color = InfoBlue,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,

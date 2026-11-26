@@ -198,9 +198,56 @@ data class WorkoutPlanItemRecord(
     val restSeconds: Int = 90,
     val notes: String = "",
     val orderIndex: Int = 0,
+    val supersetGroup: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
+
+data class WorkoutExerciseBlock(
+    val blockNumber: Int,
+    val supersetGroup: String,
+    val items: List<WorkoutPlanItemRecord>
+) {
+    val isGrouped: Boolean
+        get() = supersetGroup.isNotBlank() && items.size >= 2
+
+    val groupLabel: String
+        get() = when {
+            items.size == 2 -> "Bi-set · Sem descanso entre eles"
+            items.size == 3 -> "Tri-set · Sem descanso entre eles"
+            else -> "Circuito (${items.size}) · Sem descanso entre eles"
+        }
+
+    fun itemLabel(indexInBlock: Int): String =
+        if (isGrouped) "${blockNumber}${('A' + indexInBlock)}" else "$blockNumber"
+}
+
+fun groupWorkoutPlanItems(sortedItems: List<WorkoutPlanItemRecord>): List<WorkoutExerciseBlock> {
+    if (sortedItems.isEmpty()) return emptyList()
+    val blocks = mutableListOf<WorkoutExerciseBlock>()
+    var idx = 0
+    var blockNum = 1
+    while (idx < sortedItems.size) {
+        val current = sortedItems[idx]
+        val group = current.supersetGroup.trim()
+        if (group.isNotBlank()) {
+            val grouped = mutableListOf(current)
+            var nextIdx = idx + 1
+            while (nextIdx < sortedItems.size && sortedItems[nextIdx].supersetGroup.trim() == group) {
+                grouped += sortedItems[nextIdx]
+                nextIdx++
+            }
+            if (grouped.size >= 2) {
+                blocks += WorkoutExerciseBlock(blockNumber = blockNum++, supersetGroup = group, items = grouped)
+                idx = nextIdx
+                continue
+            }
+        }
+        blocks += WorkoutExerciseBlock(blockNumber = blockNum++, supersetGroup = "", items = listOf(current))
+        idx++
+    }
+    return blocks
+}
 
 @Keep
 @IgnoreExtraProperties
