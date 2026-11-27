@@ -62,6 +62,7 @@ export interface ClientRecord {
   loginPinHash?: string;
   birthDate?: string;
   weeklyGoalSessions?: number;
+  createdAtMillis?: number;
 }
 
 export interface TrainingWeekRecord {
@@ -118,6 +119,7 @@ export interface BookingRecord {
   clientId: string;
   status: BookingStatus;
   attendanceStatus: AttendanceStatus;
+  makeup?: boolean;
   requestedAtMillis: number;
 }
 
@@ -404,4 +406,19 @@ export interface WorkoutFeedbackRecord {
   note: string;
   timestampMillis: number;
 }
+
+export type MakeupCreditReason = 'REMOVED' | 'ABSENT' | 'MISSED_WEEK' | 'MANUAL';
+
+export interface MakeupCreditRecord {
+  id: string;
+  userId: string;
+  clientId: string;
+  reason: MakeupCreditReason;
+  weekKey: string;
+  sourceLabel: string;
+  occurredAtMillis: number;
+  expiresAtMillis: number;
+  dismissed: boolean;
+}
+
 

@@ -1302,6 +1302,155 @@ test("Training week optional showDayWorkoutTypes and dayWorkoutTypes validation 
   );
 });
 
+test("Booking makeup flag and makeup_credits validation, permissions & 30-day expiry", async () => {
+  const STUDENT_UID = "student_makeup_123";
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: ADMIN_EMAIL }).firestore();
+  const studentDb = testEnv.authenticatedContext(STUDENT_UID, { email: "stu@example.com" }).firestore();
+  const outsiderDb = testEnv.authenticatedContext(BOB_UID, { email: BOB_EMAIL }).firestore();
+  const created = new Date(Date.now() - 10000);
+  const updated = new Date(Date.now() - 1000);
+  const nowMillis = Date.now();
+  const thirtyDaysMillis = 30 * 24 * 60 * 60 * 1000;
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection(`users/${ALICE_UID}/portal_members`).doc(STUDENT_UID).set({
+      userId: ALICE_UID,
+      memberUid: STUDENT_UID,
+      inviteCode: "NS202600",
+      clientId: "c1",
+      createdAt: created,
+      updatedAt: created,
+    });
+  });
+
+  // Student can create a PENDING booking with makeup: true
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/bookings`).doc("b_makeup_1").set({
+      userId: ALICE_UID,
+      sessionId: "s1",
+      weekKey: "2026-W48",
+      clientId: "c1",
+      status: "PENDING",
+      makeup: true,
+      requestedAtMillis: nowMillis,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Reject non-boolean makeup field on booking
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/bookings`).doc("b_makeup_bad").set({
+      userId: ALICE_UID,
+      sessionId: "s1",
+      weekKey: "2026-W48",
+      clientId: "c1",
+      status: "PENDING",
+      makeup: "yes",
+      requestedAtMillis: nowMillis,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // PT can create MANUAL and REMOVED makeup credits with 30-day expiry
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_1").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      reason: "MANUAL",
+      weekKey: "2026-W48",
+      sourceLabel: "Compensação manual atribuída pelo PT",
+      occurredAtMillis: nowMillis,
+      expiresAtMillis: nowMillis + thirtyDaysMillis,
+      dismissed: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Student can read makeup_credits and create REMOVED credit (when cancelling own confirmed booking)
+  await assertSucceeds(studentDb.collection(`users/${ALICE_UID}/makeup_credits`).get());
+  await assertSucceeds(
+    studentDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_student_removed").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      reason: "REMOVED",
+      weekKey: "2026-W48",
+      sourceLabel: "Treino desmarcado: Terça 18:00",
+      occurredAtMillis: nowMillis,
+      expiresAtMillis: nowMillis + thirtyDaysMillis,
+      dismissed: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // Student CANNOT forge a MANUAL credit or >31 day expiry
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_student_manual").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      reason: "MANUAL",
+      weekKey: "2026-W48",
+      sourceLabel: "Auto-atribuído",
+      occurredAtMillis: nowMillis,
+      expiresAtMillis: nowMillis + thirtyDaysMillis,
+      dismissed: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_too_long").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      reason: "MANUAL",
+      weekKey: "2026-W48",
+      sourceLabel: "Validade excessiva",
+      occurredAtMillis: nowMillis,
+      expiresAtMillis: nowMillis + 60 * 24 * 60 * 60 * 1000,
+      dismissed: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // PT can dismiss a credit; student cannot update or delete credits
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_1").update({
+      dismissed: true,
+      updatedAt: updated,
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_1").update({
+      dismissed: false,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+  await assertFails(
+    studentDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_1").delete()
+  );
+
+  // Outsider cannot read or write makeup_credits
+  await assertFails(outsiderDb.collection(`users/${ALICE_UID}/makeup_credits`).get());
+  await assertFails(
+    outsiderDb.collection(`users/${ALICE_UID}/makeup_credits`).doc("mc_outsider").set({
+      userId: ALICE_UID,
+      clientId: "c1",
+      reason: "REMOVED",
+      weekKey: "2026-W48",
+      sourceLabel: "Intruso",
+      occurredAtMillis: nowMillis,
+      expiresAtMillis: nowMillis + thirtyDaysMillis,
+      dismissed: false,
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+});
+
 
 
 

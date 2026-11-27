@@ -106,6 +106,7 @@ service cloud.firestore {
              data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
              data.status in ['PENDING', 'CONFIRMED', 'ALTERED', 'CANCELLED'] &&
              (!('attendanceStatus' in data) || (data.attendanceStatus in ['', 'PENDING', 'PRESENT', 'ABSENT'])) &&
+             (!('makeup' in data) || data.makeup is bool) &&
              data.requestedAtMillis is int;
     }
 
@@ -315,6 +316,19 @@ service cloud.firestore {
              data.timestampMillis is int && data.timestampMillis >= 0;
     }
 
+    function isValidMakeupCredit(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.clientId is string && data.clientId.size() >= 1 && data.clientId.size() <= 128 &&
+             data.reason in ['REMOVED', 'ABSENT', 'MISSED_WEEK', 'MANUAL'] &&
+             data.weekKey is string && data.weekKey.size() <= 30 &&
+             data.sourceLabel is string && data.sourceLabel.size() >= 1 && data.sourceLabel.size() <= 160 &&
+             data.occurredAtMillis is int && data.occurredAtMillis >= 0 &&
+             data.expiresAtMillis is int &&
+             data.expiresAtMillis >= data.occurredAtMillis &&
+             data.expiresAtMillis <= data.occurredAtMillis + 2678400000 &&
+             data.dismissed is bool;
+    }
+
     // --- PT Registration & Approval (Admin: pafm77pedrinho77@gmail.com) ---
     match /pt_accounts/{ptUid} {
       allow get: if isSuperAdmin() || (isSignedIn() && request.auth.uid == ptUid);
@@ -431,7 +445,7 @@ service cloud.firestore {
                          (isOwner(userId) || incoming().status in ['PENDING', 'ALTERED']) &&
                          (isOwner(userId) || !('attendanceStatus' in incoming()) || incoming().attendanceStatus == '') &&
                          incoming().keys().hasAll(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'attendanceStatus', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'sessionId', 'weekKey', 'clientId', 'status', 'attendanceStatus', 'makeup', 'requestedAtMillis', 'createdAt', 'updatedAt']) &&
                          isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
                          isValidBooking(incoming());
         allow update: if canAccessStudio(userId) && isValidId(bookingId) &&
@@ -441,7 +455,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['sessionId', 'status', 'attendanceStatus', 'requestedAtMillis', 'updatedAt']);
+                         incoming().diff(existing()).affectedKeys().hasOnly(['sessionId', 'status', 'attendanceStatus', 'makeup', 'requestedAtMillis', 'updatedAt']);
         allow delete: if canAccessStudio(userId) && isValidId(bookingId);
       }
 
@@ -792,6 +806,27 @@ service cloud.firestore {
                          isValidWorkoutFeedback(incoming());
         allow update: if false;
         allow delete: if isOwner(userId) && isValidId(feedbackId);
+      }
+
+      match /makeup_credits/{creditId} {
+        allow get: if canAccessStudio(userId) && isValidId(creditId);
+        allow list: if canAccessStudio(userId);
+        allow create: if canAccessStudio(userId) && isValidId(creditId) &&
+                         incoming().userId == userId &&
+                         incoming().dismissed == false &&
+                         (isOwner(userId) || incoming().reason == 'REMOVED') &&
+                         incoming().keys().hasAll(['userId', 'clientId', 'reason', 'weekKey', 'sourceLabel', 'occurredAtMillis', 'expiresAtMillis', 'dismissed', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'clientId', 'reason', 'weekKey', 'sourceLabel', 'occurredAtMillis', 'expiresAtMillis', 'dismissed', 'createdAt', 'updatedAt']) &&
+                         isValidTimestamp(incoming().createdAt) && isValidTimestamp(incoming().updatedAt) &&
+                         isValidMakeupCredit(incoming());
+        allow update: if isOwner(userId) && isValidId(creditId) &&
+                         isValidMakeupCredit(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().clientId == existing().clientId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['dismissed', 'sourceLabel', 'expiresAtMillis', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(creditId);
       }
     }
   }

@@ -28,6 +28,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import com.example.data.MakeupCreditCalculator
 import com.example.data.SeedCatalog
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
@@ -47,6 +48,11 @@ fun SemanasSection(
     val weekSessions = remember(state.sessions, activeWeek?.weekKey) {
         if (activeWeek == null) emptyList()
         else state.sessions.filter { it.weekKey == activeWeek.weekKey }.sortedBy { it.startMillis }
+    }
+    val makeupClientIdsForWeek = remember(state.bookings, activeWeek?.weekKey) {
+        val wk = activeWeek?.weekKey.orEmpty()
+        if (wk.isBlank()) emptySet()
+        else MakeupCreditCalculator.getMakeupClientIdsForWeek(state.bookings, wk)
     }
 
     var showNewSessionDialog by remember { mutableStateOf(false) }
@@ -503,6 +509,9 @@ fun SemanasSection(
                                 if (isToday) {
                                     StatusPill("Hoje", NewShapeGoldBright, NewShapeGoldMuted)
                                 }
+                                if (sessionBookings.any { it.clientId in makeupClientIdsForWeek || it.makeup }) {
+                                    StatusPill("Compensação", MakeupPurpleBright, MakeupPurpleContainer)
+                                }
                                 if (waitlistCount > 0) {
                                     StatusPill("Espera: $waitlistCount", PendingAmber, PendingAmberContainer)
                                 }
@@ -608,6 +617,7 @@ fun SemanasSection(
         SessionDetailDialog(
             session = freshSession,
             bookings = state.bookings.filter { it.sessionId == freshSession.id && it.status != BookingStatus.CANCELLED.name },
+            makeupClientIdsForWeek = makeupClientIdsForWeek,
             waitlistEntries = state.waitlistEntries
                 .filter { it.sessionId == freshSession.id }
                 .sortedBy { it.createdAtMillis },
@@ -960,6 +970,7 @@ private fun EditSessionDialog(
 private fun SessionDetailDialog(
     session: TrainingSessionRecord,
     bookings: List<BookingRecord>,
+    makeupClientIdsForWeek: Set<String> = emptySet(),
     waitlistEntries: List<WaitlistEntryRecord>,
     clients: List<ClientRecord>,
     onDismiss: () -> Unit,
@@ -1032,12 +1043,14 @@ private fun SessionDetailDialog(
                             val isPresent = b.attendanceStatus == "PRESENT"
                             val isAbsent = b.attendanceStatus == "ABSENT"
                             val isPersonal = c.trainingType == "PERSONALIZADO"
+                            val isMakeupClientThisWeek = b.clientId in makeupClientIdsForWeek || b.makeup
                             Surface(
-                                color = ElevatedCharcoal,
+                                color = if (isMakeupClientThisWeek) MakeupPurpleContainer.copy(alpha = 0.6f) else ElevatedCharcoal,
                                 shape = RoundedCornerShape(10.dp),
                                 border = BorderStroke(
-                                    1.dp,
+                                    if (isMakeupClientThisWeek) 1.5.dp else 1.dp,
                                     when {
+                                        isMakeupClientThisWeek -> MakeupPurple
                                         isPresent -> ConfirmedGreen.copy(alpha = 0.5f)
                                         isAbsent -> DangerRed.copy(alpha = 0.5f)
                                         else -> HairlineBorder
@@ -1056,12 +1069,23 @@ private fun SessionDetailDialog(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                                             ) {
-                                                Text(c.name, style = MaterialTheme.typography.titleSmall, color = TextPrimaryDark)
+                                                Text(
+                                                    c.name,
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    color = if (isMakeupClientThisWeek) MakeupPurpleBright else TextPrimaryDark
+                                                )
                                                 StatusPill(
                                                     text = if (isPersonal) "Pers." else "Grupo",
                                                     textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
                                                     containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
                                                 )
+                                                if (isMakeupClientThisWeek) {
+                                                    StatusPill(
+                                                        text = if (b.makeup) "Compensação" else "Em compensação",
+                                                        textColor = MakeupPurpleBright,
+                                                        containerColor = MakeupPurpleContainer
+                                                    )
+                                                }
                                             }
                                             Text(c.phone, style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
                                         }

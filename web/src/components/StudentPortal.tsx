@@ -40,6 +40,7 @@ import {
   FoodItemRecord,
   formatBlockItemLabel,
   groupWorkoutPlanItems,
+  MakeupCreditRecord,
   MealTypeKey,
   NutritionEntryRecord,
   PaymentRecord,
@@ -55,6 +56,7 @@ import {
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
 } from '../types/studio';
+import { computeClientMakeupSummary } from '../services/makeupCalculator';
 import {
   buildRecentMonthOptions,
   buildWhatsAppUrl,
@@ -141,6 +143,7 @@ interface StudentPortalProps {
   studioAnnouncements?: StudioAnnouncementRecord[];
   announcementReads?: AnnouncementReadRecord[];
   workoutFeedback?: WorkoutFeedbackRecord[];
+  makeupCredits?: MakeupCreditRecord[];
   settings: StudioSettingsRecord;
   initialWeekSlug?: string;
   showInstallPrompt?: boolean;
@@ -173,6 +176,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   studioAnnouncements = [],
   announcementReads = [],
   workoutFeedback = [],
+  makeupCredits = [],
   settings,
   initialWeekSlug,
   showInstallPrompt = false,
@@ -650,6 +654,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const monthPaid = clientPayments.find(
     (p) => p.monthYear === currentMonth.monthYear && p.paid
   );
+  const studentMakeupSummary = useMemo(
+    () =>
+      computeClientMakeupSummary(
+        client,
+        weeks,
+        sessions.filter((s) => !s.ptPrivatePersonal),
+        bookings,
+        weekResponses,
+        makeupCredits
+      ),
+    [client, weeks, sessions, bookings, weekResponses, makeupCredits]
+  );
 
   return (
     <div className="min-h-screen bg-[#121214] text-[#F4F4F5] pb-20 lg:pb-0 lg:flex">
@@ -829,6 +845,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 client={client}
                 firstName={firstName}
                 publishedWeeks={publishedWeeks}
+                allWeeks={weeks}
                 activeWeek={activeWeek}
                 activeWeekIdx={activeWeekIdx}
                 onSelectWeekKey={setSelectedWeekKey}
@@ -839,6 +856,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 setDraftSessionIds={setDraftSessionIds}
                 waitlistEntries={waitlistEntries}
                 weekResponse={weekResponse}
+                weekResponses={weekResponses}
+                makeupCredits={makeupCredits}
                 settings={settings}
                 weeklyLimit={weeklyLimit}
                 studioDefaultLeadMins={studioDefaultLeadMins}
@@ -1937,6 +1956,39 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 onInstalled={() => onBanner('App do Aluno adicionada ao ecrã principal!')}
               />
             )}
+
+            {/* Faltas & Compensações */}
+            <div className="rounded-2xl border border-[#A855F7]/55 bg-[#2E1065]/40 p-3.5 space-y-1.5 text-xs">
+              <p className="font-bold text-[#D8B4FE]">Faltas &amp; Compensações (30 dias)</p>
+              <div className="flex justify-between gap-2">
+                <span className="text-[#A1A1AA]">Faltas registadas</span>
+                <span className="font-semibold text-[#F4F4F5]">
+                  {studentMakeupSummary.totalAbsencesAllTime}
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-[#A1A1AA]">Compensações disponíveis</span>
+                <span className="font-extrabold text-[#D8B4FE]">
+                  {studentMakeupSummary.availableCount}
+                </span>
+              </div>
+              {studentMakeupSummary.nearestExpiryDays !== null && (
+                <div className="flex justify-between gap-2">
+                  <span className="text-[#A1A1AA]">Próxima validade</span>
+                  <span className="font-semibold text-[#FDE68A]">
+                    {studentMakeupSummary.nearestExpiryDays} dia(s)
+                  </span>
+                </div>
+              )}
+              {studentMakeupSummary.activeMakeupBookingsCount > 0 && (
+                <div className="flex justify-between gap-2">
+                  <span className="text-[#A1A1AA]">Compensações agendadas</span>
+                  <span className="font-semibold text-[#86EFAC]">
+                    {studentMakeupSummary.activeMakeupBookingsCount}
+                  </span>
+                </div>
+              )}
+            </div>
 
             {/* A Tua Conta */}
             <div className="rounded-2xl border border-[#323238] bg-[#1B1B1E] p-3.5 space-y-2 text-xs">

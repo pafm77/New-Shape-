@@ -33,6 +33,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.ComputedMakeupStatus
+import com.example.data.MakeupCreditCalculator
 import com.example.data.SeedCatalog
 import com.example.data.model.*
 import com.example.notifications.WorkoutNotificationHelper
@@ -207,7 +209,30 @@ internal fun StudentAgendaSection(
         }
     }
     val existingIds = remember(existingBookings) { existingBookings.map { it.sessionId }.toSet() }
+    val existingMakeupIds = remember(existingBookings) {
+        existingBookings.filter { it.makeup }.map { it.sessionId }.toSet()
+    }
     var selectedSessionIds by remember(currentWeek?.weekKey, existingIds) { mutableStateOf(existingIds) }
+    var draftMakeupSessionIds by remember(currentWeek?.weekKey, existingMakeupIds) { mutableStateOf(existingMakeupIds) }
+
+    val makeupSummary = remember(
+        student,
+        state.weeks,
+        visibleSessions,
+        state.bookings,
+        state.weekResponses,
+        state.makeupCredits
+    ) {
+        MakeupCreditCalculator.computeForClient(
+            client = student,
+            weeks = state.weeks,
+            sessions = visibleSessions,
+            bookings = state.bookings,
+            weekResponses = state.weekResponses,
+            makeupCredits = state.makeupCredits
+        )
+    }
+    var showMakeupDetails by remember { mutableStateOf(false) }
 
     val unavailableThisWeek = currentWeek != null && state.weekResponses.any {
         it.weekKey == currentWeek.weekKey && it.clientId == student.id && it.status == "UNAVAILABLE"
@@ -218,6 +243,8 @@ internal fun StudentAgendaSection(
     val hasConfirmedInWeek = existingBookings.any { it.status == BookingStatus.CONFIRMED.name }
     val canEditExisting = existingBookings.isEmpty() || !hasConfirmedInWeek || state.settings.clientsCanEdit
     val weeklyLimit = student.weeklySessionLimit.coerceAtLeast(0)
+    val totalMakeupBudgetForWeek = makeupSummary.availableCount + existingMakeupIds.size
+    val effectiveWeeklyLimit = if (weeklyLimit > 0) weeklyLimit + totalMakeupBudgetForWeek else 0
 
     // Data for "Marcações" sub-tab across all weeks
     val sessionMap = remember(visibleSessions) { visibleSessions.associateBy { it.id } }
@@ -315,6 +342,172 @@ internal fun StudentAgendaSection(
                 bookings = state.bookings,
                 sessions = visibleSessions
             )
+        }
+
+        if (makeupSummary.availableCount > 0 || makeupSummary.totalAbsencesAllTime > 0 || makeupSummary.activeMakeupBookingsCount > 0) {
+            item(key = "student_makeup_credits_card") {
+                Surface(
+                    color = MakeupPurpleContainer.copy(alpha = 0.55f),
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, MakeupPurple.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("student_makeup_summary_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showMakeupDetails = !showMakeupDetails },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Faltas & Compensações (30 dias)",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MakeupPurpleBright
+                                )
+                                Text(
+                                    text = when {
+                                        makeupSummary.availableCount > 0 && makeupSummary.nearestExpiryDays != null ->
+                                            "Tens ${makeupSummary.availableCount} treino(s) para compensar · Expira em ${makeupSummary.nearestExpiryDays} dia(s)"
+                                        makeupSummary.activeMakeupBookingsCount > 0 ->
+                                            "Tens ${makeupSummary.activeMakeupBookingsCount} compensação(ões) agendada(s)"
+                                        else ->
+                                            "Faltas registadas: ${makeupSummary.totalAbsencesAllTime} · Sem compensações pendentes"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextPrimaryDark
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (makeupSummary.availableCount > 0) {
+                                    StatusPill(
+                                        text = "${makeupSummary.availableCount} disp.",
+                                        textColor = MakeupPurpleBright,
+                                        containerColor = MakeupPurpleContainer
+                                    )
+                                }
+                                Icon(
+                                    imageVector = if (showMakeupDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (showMakeupDetails) "Ocultar detalhes" else "Ver detalhes",
+                                    tint = MakeupPurpleBright
+                                )
+                            }
+                        }
+
+                        if (makeupSummary.availableCount > 0) {
+                            Text(
+                                text = "Podes marcar o teu treino de compensação nos horários abaixo. Quando marcares uma compensação, os teus treinos aparecem a roxo para o PT.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MakeupPurpleBright.copy(alpha = 0.9f)
+                            )
+                        }
+
+                        if (showMakeupDetails) {
+                            HorizontalDivider(color = MakeupPurple.copy(alpha = 0.35f))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                StatusPill(
+                                    text = "Faltas: ${makeupSummary.totalAbsencesAllTime}",
+                                    textColor = if (makeupSummary.totalAbsencesAllTime > 0) DangerRed else TextSecondaryDark,
+                                    containerColor = if (makeupSummary.totalAbsencesAllTime > 0) DangerRedContainer else ElevatedCharcoal
+                                )
+                                if (makeupSummary.removedCount30d > 0) {
+                                    StatusPill(
+                                        text = "Removidos: ${makeupSummary.removedCount30d}",
+                                        textColor = PendingAmber,
+                                        containerColor = PendingAmberContainer
+                                    )
+                                }
+                                if (makeupSummary.missedWeekCount30d > 0) {
+                                    StatusPill(
+                                        text = "Não marcou: ${makeupSummary.missedWeekCount30d}",
+                                        textColor = MakeupPurpleBright,
+                                        containerColor = MakeupPurpleContainer
+                                    )
+                                }
+                            }
+                            val recentCredits = makeupSummary.credits.take(8)
+                            if (recentCredits.isEmpty()) {
+                                Text(
+                                    text = "Sem créditos de compensação nos últimos 30 dias.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondaryDark
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    recentCredits.forEach { credit ->
+                                        val isAvail = credit.status == ComputedMakeupStatus.AVAILABLE
+                                        val isUsed = credit.status == ComputedMakeupStatus.USED
+                                        Surface(
+                                            color = ObsidianBg.copy(alpha = 0.65f),
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isAvail) MakeupPurple.copy(alpha = 0.6f) else HairlineBorder
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = MakeupCreditCalculator.reasonLabel(credit.reason),
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (isAvail) MakeupPurpleBright else TextPrimaryDark
+                                                    )
+                                                    Text(
+                                                        text = credit.sourceLabel,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = TextSecondaryDark,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                Spacer(Modifier.width(8.dp))
+                                                StatusPill(
+                                                    text = when {
+                                                        isAvail -> "${credit.daysLeft}d"
+                                                        isUsed -> "Usado"
+                                                        else -> "Expirado"
+                                                    },
+                                                    textColor = when {
+                                                        isAvail -> MakeupPurpleBright
+                                                        isUsed -> ConfirmedGreen
+                                                        else -> TextSecondaryDark
+                                                    },
+                                                    containerColor = when {
+                                                        isAvail -> MakeupPurpleContainer
+                                                        isUsed -> ConfirmedGreenContainer
+                                                        else -> ElevatedCharcoal
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Sub-tab Switcher: Horários | Marcações
@@ -484,11 +677,31 @@ internal fun StudentAgendaSection(
                             Text(currentWeek?.label ?: "", style = MaterialTheme.typography.titleLarge, color = TextPrimaryDark)
                             if (weeklyLimit > 0) {
                                 Spacer(Modifier.height(4.dp))
-                                val atLimit = selectedSessionIds.size >= weeklyLimit
+                                val atLimit = selectedSessionIds.size >= effectiveWeeklyLimit
+                                val usingMakeup = draftMakeupSessionIds.isNotEmpty()
                                 StatusPill(
-                                    text = "Pacote: ${selectedSessionIds.size} / $weeklyLimit treinos esta semana",
-                                    textColor = if (atLimit) PendingAmber else NewShapeGoldBright,
-                                    containerColor = if (atLimit) PendingAmberContainer else NewShapeGoldMuted
+                                    text = if (totalMakeupBudgetForWeek > 0) {
+                                        "Pacote: ${selectedSessionIds.size} / $weeklyLimit (+$totalMakeupBudgetForWeek comp.)"
+                                    } else {
+                                        "Pacote: ${selectedSessionIds.size} / $weeklyLimit treinos esta semana"
+                                    },
+                                    textColor = when {
+                                        usingMakeup -> MakeupPurpleBright
+                                        atLimit -> PendingAmber
+                                        else -> NewShapeGoldBright
+                                    },
+                                    containerColor = when {
+                                        usingMakeup -> MakeupPurpleContainer
+                                        atLimit -> PendingAmberContainer
+                                        else -> NewShapeGoldMuted
+                                    }
+                                )
+                            } else if (totalMakeupBudgetForWeek > 0) {
+                                Spacer(Modifier.height(4.dp))
+                                StatusPill(
+                                    text = "Compensações: ${draftMakeupSessionIds.size} / $totalMakeupBudgetForWeek selecionada(s)",
+                                    textColor = MakeupPurpleBright,
+                                    containerColor = MakeupPurpleContainer
                                 )
                             }
                         }
@@ -755,6 +968,7 @@ internal fun StudentAgendaSection(
                     }
                     val isFull = confirmedCount >= session.capacity
                     val isSelected = session.id in selectedSessionIds
+                    val isMakeupDraft = session.id in draftMakeupSessionIds
                     val isPastSession = session.startMillis > 0L && session.startMillis <= nowMs
                     val isPastCutoff = isPastSession || (cutoffMs > 0L && session.startMillis > 0 && (session.startMillis - nowMs) < cutoffMs)
                     val existingForSession = existingBookings.find { it.sessionId == session.id }
@@ -781,6 +995,7 @@ internal fun StudentAgendaSection(
 
                     Surface(
                         color = when {
+                            isMakeupDraft && isSelected -> MakeupPurpleContainer.copy(alpha = 0.6f)
                             existingForSession?.status == BookingStatus.CONFIRMED.name && isSelected ->
                                 ConfirmedGreenContainer.copy(alpha = 0.55f)
                             isSelected -> NewShapeGoldMuted
@@ -792,6 +1007,7 @@ internal fun StudentAgendaSection(
                         border = BorderStroke(
                             width = if (isSelected) 2.dp else 1.dp,
                             color = when {
+                                isMakeupDraft && isSelected -> MakeupPurple
                                 existingForSession?.status == BookingStatus.CONFIRMED.name && isSelected -> ConfirmedGreen
                                 isSelected -> NewShapeGold
                                 myWaitlistEntry != null -> PendingAmber
@@ -805,6 +1021,7 @@ internal fun StudentAgendaSection(
                             .clickable(enabled = canToggle) {
                                 if (isSelected) {
                                     selectedSessionIds = selectedSessionIds - session.id
+                                    draftMakeupSessionIds = draftMakeupSessionIds - session.id
                                 } else if (otherBookedOnDay != null) {
                                     Toast.makeText(
                                         context,
@@ -813,16 +1030,30 @@ internal fun StudentAgendaSection(
                                     ).show()
                                 } else if (otherDraftOnDay != null) {
                                     val dayIds = daySessions.map { it.id }.toSet()
+                                    val prevWasMakeup = otherDraftOnDay.id in draftMakeupSessionIds
                                     selectedSessionIds = (selectedSessionIds - dayIds) + session.id
+                                    draftMakeupSessionIds = (draftMakeupSessionIds - dayIds) +
+                                        if (prevWasMakeup) setOf(session.id) else emptySet()
                                     Toast.makeText(
                                         context,
                                         "Horário deste dia atualizado para ${session.timeLabel} (máx. 1 treino por dia).",
                                         Toast.LENGTH_SHORT
                                     ).show()
-                                } else if (weeklyLimit > 0 && selectedSessionIds.size >= weeklyLimit) {
+                                } else if (weeklyLimit > 0 && selectedSessionIds.size >= effectiveWeeklyLimit) {
                                     Toast.makeText(
                                         context,
-                                        "Atingiste o limite semanal do teu pacote ($weeklyLimit treino(s)/semana).",
+                                        if (totalMakeupBudgetForWeek > 0)
+                                            "Atingiste o limite semanal ($weeklyLimit do pacote + $totalMakeupBudgetForWeek compensação)."
+                                        else
+                                            "Atingiste o limite semanal do teu pacote ($weeklyLimit treino(s)/semana).",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else if (weeklyLimit > 0 && selectedSessionIds.size >= weeklyLimit) {
+                                    selectedSessionIds = selectedSessionIds + session.id
+                                    draftMakeupSessionIds = draftMakeupSessionIds + session.id
+                                    Toast.makeText(
+                                        context,
+                                        "Treino selecionado como compensação!",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 } else {
@@ -915,6 +1146,13 @@ internal fun StudentAgendaSection(
                                     horizontalAlignment = Alignment.End,
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    if (isMakeupDraft && isSelected) {
+                                        StatusPill(
+                                            text = "Compensação",
+                                            textColor = MakeupPurpleBright,
+                                            containerColor = MakeupPurpleContainer
+                                        )
+                                    }
                                     if (existingForSession != null) {
                                         val conf = existingForSession.status == BookingStatus.CONFIRMED.name
                                         StatusPill(
@@ -950,9 +1188,56 @@ internal fun StudentAgendaSection(
                                     Icon(
                                         imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                         contentDescription = if (isSelected) "Selecionado" else "Selecionar",
-                                        tint = if (isSelected) NewShapeGold else TextSecondaryDark,
+                                        tint = if (isMakeupDraft && isSelected) MakeupPurpleBright else if (isSelected) NewShapeGold else TextSecondaryDark,
                                         modifier = Modifier.size(22.dp)
                                     )
+                                }
+                            }
+
+                            if (isSelected && totalMakeupBudgetForWeek > 0 && canToggle) {
+                                val minRequiredMakeups = if (weeklyLimit > 0) {
+                                    (selectedSessionIds.size - weeklyLimit).coerceAtLeast(0)
+                                } else 0
+                                val canEnableMakeup = !isMakeupDraft && draftMakeupSessionIds.size < totalMakeupBudgetForWeek
+                                val canDisableMakeup = isMakeupDraft && draftMakeupSessionIds.size > minRequiredMakeups
+                                if (canEnableMakeup || canDisableMakeup) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = if (isMakeupDraft) "Marcado como treino de compensação" else "Usar crédito de compensação neste treino?",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isMakeupDraft) MakeupPurpleBright else TextSecondaryDark,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        FilterChip(
+                                            selected = isMakeupDraft,
+                                            onClick = {
+                                                draftMakeupSessionIds = if (isMakeupDraft) {
+                                                    draftMakeupSessionIds - session.id
+                                                } else {
+                                                    draftMakeupSessionIds + session.id
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    if (isMakeupDraft) "Compensação ✓" else "Marcar comp.",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            },
+                                            modifier = Modifier.testTag("student_makeup_toggle_${session.id}"),
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = MakeupPurple,
+                                                selectedLabelColor = TextPrimaryDark,
+                                                containerColor = MakeupPurpleContainer.copy(alpha = 0.5f),
+                                                labelColor = MakeupPurpleBright
+                                            )
+                                        )
+                                    }
                                 }
                             }
 
@@ -1091,15 +1376,21 @@ internal fun StudentAgendaSection(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 selectedAcrossWeek.forEach { s ->
+                                    val chipIsMakeup = s.id in draftMakeupSessionIds
                                     FilterChip(
                                         selected = s.dayOfWeek == selectedDay,
                                         onClick = { selectedDay = s.dayOfWeek },
-                                        label = { Text("${STUDENT_DAY_SHORT_PT[s.dayOfWeek]} · ${s.timeLabel}") },
+                                        label = {
+                                            Text(
+                                                "${STUDENT_DAY_SHORT_PT[s.dayOfWeek]} · ${s.timeLabel}" +
+                                                    if (chipIsMakeup) " (Comp.)" else ""
+                                            )
+                                        },
                                         colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = NewShapeGold,
-                                            selectedLabelColor = TextOnGold,
-                                            containerColor = NewShapeGoldMuted,
-                                            labelColor = NewShapeGoldBright
+                                            selectedContainerColor = if (chipIsMakeup) MakeupPurple else NewShapeGold,
+                                            selectedLabelColor = if (chipIsMakeup) TextPrimaryDark else TextOnGold,
+                                            containerColor = if (chipIsMakeup) MakeupPurpleContainer else NewShapeGoldMuted,
+                                            labelColor = if (chipIsMakeup) MakeupPurpleBright else NewShapeGoldBright
                                         )
                                     )
                                 }
@@ -1130,14 +1421,25 @@ internal fun StudentAgendaSection(
                                     "Só podes marcar 1 treino por dia. Remove o horário duplicado antes de guardar.",
                                     Toast.LENGTH_LONG
                                 ).show()
-                            } else if (weeklyLimit > 0 && selectedSessionIds.size > weeklyLimit) {
+                            } else if (weeklyLimit > 0 && selectedSessionIds.size > effectiveWeeklyLimit) {
                                 Toast.makeText(
                                     context,
-                                    "O teu pacote permite até $weeklyLimit treino(s) por semana.",
+                                    "O teu pacote permite até $weeklyLimit treino(s) (+$totalMakeupBudgetForWeek compensação).",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else if (draftMakeupSessionIds.size > totalMakeupBudgetForWeek) {
+                                Toast.makeText(
+                                    context,
+                                    "Selecionaste mais compensações do que créditos disponíveis ($totalMakeupBudgetForWeek).",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             } else {
-                                viewModel.submitStudentBookings(currentWeek.weekKey, student.id, selectedSessionIds)
+                                viewModel.submitStudentBookings(
+                                    weekKey = currentWeek.weekKey,
+                                    clientId = student.id,
+                                    selectedSessionIds = selectedSessionIds,
+                                    makeupSessionIds = draftMakeupSessionIds
+                                )
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -1315,6 +1617,13 @@ internal fun StudentAgendaSection(
                                     horizontalAlignment = Alignment.End,
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
+                                    if (booking.makeup) {
+                                        StatusPill(
+                                            text = "Compensação",
+                                            textColor = MakeupPurpleBright,
+                                            containerColor = MakeupPurpleContainer
+                                        )
+                                    }
                                     StatusPill(
                                         text = "Confirmado ✓",
                                         textColor = ConfirmedGreen,
@@ -1454,11 +1763,23 @@ internal fun StudentAgendaSection(
                                                     color = NewShapeGoldBright
                                                 )
                                             }
-                                            StatusPill(
-                                                text = "Por confirmar",
-                                                textColor = PendingAmber,
-                                                containerColor = ObsidianBg.copy(alpha = 0.5f)
-                                            )
+                                            Column(
+                                                horizontalAlignment = Alignment.End,
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                if (booking.makeup) {
+                                                    StatusPill(
+                                                        text = "Compensação",
+                                                        textColor = MakeupPurpleBright,
+                                                        containerColor = MakeupPurpleContainer
+                                                    )
+                                                }
+                                                StatusPill(
+                                                    text = "Por confirmar",
+                                                    textColor = PendingAmber,
+                                                    containerColor = ObsidianBg.copy(alpha = 0.5f)
+                                                )
+                                            }
                                         }
                                         Spacer(Modifier.height(8.dp))
                                         HorizontalDivider(color = PendingAmber.copy(alpha = 0.2f))

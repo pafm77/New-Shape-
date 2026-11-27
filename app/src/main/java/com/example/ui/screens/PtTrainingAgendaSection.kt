@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.MakeupCreditCalculator
 import com.example.data.SeedCatalog
 import com.example.data.model.BookingStatus
 import com.example.data.model.TrainingSessionRecord
@@ -111,6 +112,9 @@ fun PtTrainingAgendaSection(
     }
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
     val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
+    val makeupClientIdsForWeek = remember(state.bookings, selectedWeekKey) {
+        MakeupCreditCalculator.getMakeupClientIdsForWeek(state.bookings, selectedWeekKey)
+    }
 
     val counterMonthCal = remember(todayMillis, counterMonthOffset) {
         (todayCal.clone() as Calendar).apply {
@@ -646,17 +650,20 @@ fun PtTrainingAgendaSection(
                                     val isPresent = booking.attendanceStatus == "PRESENT"
                                     val isAbsent = booking.attendanceStatus == "ABSENT"
                                     val isPersonal = client.trainingType == "PERSONALIZADO"
+                                    val isMakeupClientThisWeek = booking.clientId in makeupClientIdsForWeek || booking.makeup
 
                                     Surface(
                                         color = when {
+                                            isMakeupClientThisWeek -> MakeupPurpleContainer.copy(alpha = 0.6f)
                                             isPresent -> ConfirmedGreenContainer.copy(alpha = 0.45f)
                                             isAbsent -> DangerRedContainer.copy(alpha = 0.45f)
                                             else -> ElevatedCharcoal
                                         },
                                         shape = RoundedCornerShape(12.dp),
                                         border = BorderStroke(
-                                            1.dp,
+                                            if (isMakeupClientThisWeek) 1.5.dp else 1.dp,
                                             when {
+                                                isMakeupClientThisWeek -> MakeupPurple
                                                 isPresent -> ConfirmedGreen.copy(alpha = 0.6f)
                                                 isAbsent -> DangerRed.copy(alpha = 0.6f)
                                                 else -> HairlineBorder
@@ -681,13 +688,20 @@ fun PtTrainingAgendaSection(
                                                         Text(
                                                             text = client.name,
                                                             style = MaterialTheme.typography.titleSmall,
-                                                            color = TextPrimaryDark
+                                                            color = if (isMakeupClientThisWeek) MakeupPurpleBright else TextPrimaryDark
                                                         )
                                                         StatusPill(
                                                             text = if (isPersonal) "Pers." else "Grupo",
                                                             textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
                                                             containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
                                                         )
+                                                        if (isMakeupClientThisWeek) {
+                                                            StatusPill(
+                                                                text = if (booking.makeup) "Compensação" else "Em compensação",
+                                                                textColor = MakeupPurpleBright,
+                                                                containerColor = MakeupPurpleContainer
+                                                            )
+                                                        }
                                                     }
                                                     Text(
                                                         text = client.phone,

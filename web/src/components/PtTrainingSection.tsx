@@ -6,16 +6,19 @@ import {
   ExerciseRecord,
   formatBlockItemLabel,
   groupWorkoutPlanItems,
+  MakeupCreditRecord,
   MessageTemplateRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
+  WeekResponseRecord,
   WorkoutFeedbackRecord,
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
 } from '../types/studio';
 import * as repo from '../services/firestoreRepository';
+import { computeAllClientsMakeupSummaries } from '../services/makeupCalculator';
 import { DEFAULT_MUSCLE_GROUPS } from '../data/seedCatalog';
 import {
   BrandCard,
@@ -32,6 +35,7 @@ import { ExerciseLastLoadBadge } from './ExerciseLastLoadBadge';
 import { ExerciseProgressModal } from './ExerciseProgressModal';
 import { PtTrainingAgendaView } from './PtTrainingAgendaView';
 import { PtTrainingMarcacoesView } from './PtTrainingMarcacoesView';
+import { PtCompensacoesView } from './PtCompensacoesView';
 import { PtRecentFeedbackCard } from './StudentEngagementWidgets';
 
 interface PtTrainingSectionProps {
@@ -41,6 +45,8 @@ interface PtTrainingSectionProps {
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  weekResponses?: WeekResponseRecord[];
+  makeupCredits?: MakeupCreditRecord[];
   exercises: ExerciseRecord[];
   workoutPlans: WorkoutPlanRecord[];
   workoutPlanItems: WorkoutPlanItemRecord[];
@@ -61,6 +67,8 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   activeWeek,
   sessions,
   bookings,
+  weekResponses = [],
+  makeupCredits = [],
   exercises,
   workoutPlans,
   workoutPlanItems,
@@ -73,8 +81,23 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
   onOpenWhatsApp,
   onBanner,
 }) => {
-  const [subTab, setSubTab] = useState<'plans' | 'marcacoes' | 'agenda' | 'library'>('plans');
+  const [subTab, setSubTab] = useState<'plans' | 'marcacoes' | 'agenda' | 'compensacoes' | 'library'>('plans');
   const activeClients = useMemo(() => clients.filter((c) => c.active), [clients]);
+  const eligibleMakeupClientsCount = useMemo(() => {
+    const map = computeAllClientsMakeupSummaries(
+      activeClients,
+      weeks,
+      sessions,
+      bookings,
+      weekResponses,
+      makeupCredits
+    );
+    let count = 0;
+    map.forEach((s) => {
+      if (s.availableCount > 0) count += 1;
+    });
+    return count;
+  }, [activeClients, weeks, sessions, bookings, weekResponses, makeupCredits]);
   const [selectedClientId, setSelectedClientId] = useState(
     initialClientId || activeClients[0]?.id || ''
   );
@@ -129,7 +152,7 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5 sm:grid-cols-5">
         <button
           type="button"
           onClick={() => setSubTab('plans')}
@@ -162,6 +185,19 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
           }`}
         >
           Agenda
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('compensacoes')}
+          className={`min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition ${
+            subTab === 'compensacoes'
+              ? 'bg-[#A855F7] text-white'
+              : eligibleMakeupClientsCount > 0
+              ? 'text-[#D8B4FE] hover:bg-[#2E1065]/40 hover:text-white'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          Compensações{eligibleMakeupClientsCount > 0 ? ` (${eligibleMakeupClientsCount})` : ''}
         </button>
         <button
           type="button"
@@ -767,6 +803,18 @@ export const PtTrainingSection: React.FC<PtTrainingSectionProps> = ({
             setSelectedClientId(cid);
             setSubTab('plans');
           }}
+          onBanner={onBanner}
+        />
+      ) : subTab === 'compensacoes' ? (
+        <PtCompensacoesView
+          uid={uid}
+          clients={clients}
+          weeks={weeks}
+          sessions={sessions}
+          bookings={bookings}
+          weekResponses={weekResponses}
+          makeupCredits={makeupCredits}
+          onOpenWhatsApp={onOpenWhatsApp}
           onBanner={onBanner}
         />
       ) : (

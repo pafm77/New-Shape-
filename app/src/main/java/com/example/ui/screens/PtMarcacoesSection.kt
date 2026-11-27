@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.MakeupCreditCalculator
 import com.example.data.model.*
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
@@ -89,6 +90,10 @@ fun PtMarcacoesSection(
     val weekBookings = remember(state.bookings, weekKey) {
         if (weekKey.isBlank()) emptyList()
         else state.bookings.filter { it.weekKey == weekKey }
+    }
+    val makeupClientIdsForWeek = remember(weekBookings, weekKey) {
+        if (weekKey.isBlank()) emptySet()
+        else MakeupCreditCalculator.getMakeupClientIdsForWeek(weekBookings, weekKey)
     }
 
     val dayStats = remember(activeWeek?.startDateMillis, weekSessions, weekBookings) {
@@ -565,6 +570,13 @@ fun PtMarcacoesSection(
                                             containerColor = PendingAmberContainer
                                         )
                                     }
+                                    if (slotBookings.any { it.clientId in makeupClientIdsForWeek || it.makeup }) {
+                                        StatusPill(
+                                            text = "Compensação",
+                                            textColor = MakeupPurpleBright,
+                                            containerColor = MakeupPurpleContainer
+                                        )
+                                    }
                                     if (slotWaitlist.isNotEmpty()) {
                                         StatusPill(
                                             text = "Espera: ${slotWaitlist.size}",
@@ -682,13 +694,22 @@ fun PtMarcacoesSection(
                                             val isPresent = b.attendanceStatus == "PRESENT"
                                             val isAbsent = b.attendanceStatus == "ABSENT"
                                             val isPersonal = client.trainingType == "PERSONALIZADO"
+                                            val isMakeupClientThisWeek = b.clientId in makeupClientIdsForWeek || b.makeup
 
                                             Surface(
-                                                color = if (isConfirmed) ConfirmedGreenContainer.copy(alpha = 0.45f) else ElevatedCharcoal,
+                                                color = when {
+                                                    isMakeupClientThisWeek -> MakeupPurpleContainer.copy(alpha = 0.6f)
+                                                    isConfirmed -> ConfirmedGreenContainer.copy(alpha = 0.45f)
+                                                    else -> ElevatedCharcoal
+                                                },
                                                 shape = RoundedCornerShape(12.dp),
                                                 border = BorderStroke(
-                                                    1.dp,
-                                                    if (isConfirmed) ConfirmedGreen.copy(alpha = 0.45f) else HairlineBorder
+                                                    if (isMakeupClientThisWeek) 1.5.dp else 1.dp,
+                                                    when {
+                                                        isMakeupClientThisWeek -> MakeupPurple
+                                                        isConfirmed -> ConfirmedGreen.copy(alpha = 0.45f)
+                                                        else -> HairlineBorder
+                                                    }
                                                 ),
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
@@ -709,13 +730,20 @@ fun PtMarcacoesSection(
                                                                 Text(
                                                                     text = client.name,
                                                                     style = MaterialTheme.typography.titleSmall,
-                                                                    color = TextPrimaryDark
+                                                                    color = if (isMakeupClientThisWeek) MakeupPurpleBright else TextPrimaryDark
                                                                 )
                                                                 StatusPill(
                                                                     text = if (isPersonal) "Pers." else "Grupo",
                                                                     textColor = if (isPersonal) NewShapeGoldBright else InfoBlue,
                                                                     containerColor = if (isPersonal) NewShapeGoldMuted else InfoBlueContainer
                                                                 )
+                                                                if (isMakeupClientThisWeek) {
+                                                                    StatusPill(
+                                                                        text = if (b.makeup) "Compensação" else "Em compensação",
+                                                                        textColor = MakeupPurpleBright,
+                                                                        containerColor = MakeupPurpleContainer
+                                                                    )
+                                                                }
                                                             }
                                                             Text(
                                                                 text = "${client.phone}${if (b.requestedAtMillis > 0L) " · ${formatTimeAgo(b.requestedAtMillis)}" else ""}",
@@ -852,7 +880,7 @@ fun PtMarcacoesSection(
                                                             horizontalArrangement = Arrangement.End
                                                         ) {
                                                             TextButton(
-                                                                onClick = { viewModel.rejectBookingSilently(b, client.name) },
+                                                                onClick = { viewModel.removeBooking(b.id) },
                                                                 modifier = Modifier.testTag("marcacoes_remove_${b.id}")
                                                             ) {
                                                                 Text("Remover", color = DangerRed, style = MaterialTheme.typography.labelMedium)

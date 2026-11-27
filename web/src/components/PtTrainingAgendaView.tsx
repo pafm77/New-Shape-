@@ -31,6 +31,7 @@ import {
   MONTHS_PT,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
+import { getMakeupClientIdsForWeek } from '../services/makeupCalculator';
 import { BrandCard, EmptyState, GoldButton, SecondaryButton, StatusPill } from './UiPrimitives';
 import { PrivatePersonalSessionModal } from './PrivatePersonalSessionModal';
 import { DayWorkoutTypesModal } from './DayWorkoutTypesModal';
@@ -96,6 +97,10 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
   const selectedWeek = useMemo(
     () => weeks.find((w) => w.weekKey === selectedWeekKey) || null,
     [weeks, selectedWeekKey]
+  );
+  const makeupClientIdsForSelectedWeek = useMemo(
+    () => getMakeupClientIdsForWeek(bookings, selectedWeekKey),
+    [bookings, selectedWeekKey]
   );
 
   const counterMonthDate = useMemo(() => {
@@ -528,7 +533,7 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
                         type="button"
                         aria-label="Apagar treino personalizado oculto"
                         onClick={async () => {
-                          await repo.deleteSession(uid, session.id, allActiveBookings);
+                          await repo.deleteSession(uid, session.id, allActiveBookings, session);
                           onBanner('Treino personalizado oculto removido.');
                         }}
                         className="inline-flex items-center gap-1 rounded-xl border border-[#EF4444]/40 bg-[#3B1518]/50 px-2.5 py-1.5 text-xs font-bold text-[#FCA5A5] hover:bg-[#EF4444] hover:text-white"
@@ -555,12 +560,16 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
                       const isPresent = b.attendanceStatus === 'PRESENT';
                       const isAbsent = b.attendanceStatus === 'ABSENT';
                       const isBusy = busyBookingId === b.id;
+                      const isMakeupClientWeek =
+                        Boolean(b.makeup) || makeupClientIdsForSelectedWeek.has(b.clientId);
 
                       return (
                         <div
                           key={b.id}
                           className={`rounded-xl border p-3 transition ${
-                            isPresent
+                            isMakeupClientWeek
+                              ? 'border-[#A855F7] bg-[#2E1065]/45'
+                              : isPresent
                               ? 'border-[#22C55E]/55 bg-[#143521]/30'
                               : isAbsent
                               ? 'border-[#EF4444]/55 bg-[#3B1518]/30'
@@ -570,9 +579,18 @@ export const PtTrainingAgendaView: React.FC<PtTrainingAgendaViewProps> = ({
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-sm font-bold text-[#F4F4F5]">
+                                <span
+                                  className={`text-sm font-bold ${
+                                    isMakeupClientWeek ? 'text-[#E9D5FF]' : 'text-[#F4F4F5]'
+                                  }`}
+                                >
                                   {client.name}
                                 </span>
+                                {b.makeup ? (
+                                  <StatusPill tone="purple">Compensação</StatusPill>
+                                ) : isMakeupClientWeek ? (
+                                  <StatusPill tone="purple">Em compensação</StatusPill>
+                                ) : null}
                                 <StatusPill
                                   tone={
                                     client.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'

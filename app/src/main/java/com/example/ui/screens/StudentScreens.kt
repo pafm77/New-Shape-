@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.MakeupCreditCalculator
 import com.example.data.ReportExporter
 import com.example.data.SeedCatalog
 import com.example.data.model.*
@@ -310,6 +311,23 @@ private fun StudentSettingsDialog(
     val firstName = student.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { student.name }
     val studioDefaultLead = state.settings.effectiveReminderLeadMinutes()
     val visibleSessions = remember(state.sessions) { state.sessions.filter { !it.ptPrivatePersonal } }
+    val makeupSummary = remember(
+        student,
+        state.weeks,
+        visibleSessions,
+        state.bookings,
+        state.weekResponses,
+        state.makeupCredits
+    ) {
+        MakeupCreditCalculator.computeForClient(
+            client = student,
+            weeks = state.weeks,
+            sessions = visibleSessions,
+            bookings = state.bookings,
+            weekResponses = state.weekResponses,
+            makeupCredits = state.makeupCredits
+        )
+    }
 
     var hasNotifPermission by remember { mutableStateOf(WorkoutNotificationHelper.hasNotificationPermission(context)) }
     var remindersEnabled by remember { mutableStateOf(WorkoutNotificationHelper.isStudentRemindersEnabled(context)) }
@@ -831,6 +849,47 @@ private fun StudentSettingsDialog(
                             modifier = Modifier.fillMaxWidth(),
                             testTag = "settings_save_birthdate_btn"
                         )
+                    }
+                }
+
+                Surface(
+                    color = MakeupPurpleContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MakeupPurple.copy(alpha = 0.65f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "Faltas & Compensações (30 dias)",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MakeupPurpleBright,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Faltas registadas", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                            Text("${makeupSummary.totalAbsencesAllTime}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = TextPrimaryDark)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Compensações disponíveis", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                            Text(
+                                "${makeupSummary.availableCount}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (makeupSummary.availableCount > 0) MakeupPurpleBright else TextPrimaryDark
+                            )
+                        }
+                        if (makeupSummary.nearestExpiryDays != null) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Próxima validade", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                                Text("${makeupSummary.nearestExpiryDays} dia(s)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = PendingAmber)
+                            }
+                        }
+                        if (makeupSummary.activeMakeupBookingsCount > 0) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Compensações agendadas", style = MaterialTheme.typography.bodySmall, color = TextSecondaryDark)
+                                Text("${makeupSummary.activeMakeupBookingsCount}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = ConfirmedGreen)
+                            }
+                        }
                     }
                 }
 

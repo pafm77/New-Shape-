@@ -99,6 +99,7 @@ data class BookingRecord(
     val clientId: String = "",
     val status: String = BookingStatus.PENDING.name,
     val attendanceStatus: String = "",
+    val makeup: Boolean = false,
     val requestedAtMillis: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -541,6 +542,22 @@ data class WorkoutFeedbackRecord(
     val feeling: String = "IDEAL",
     val note: String = "",
     val timestampMillis: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class MakeupCreditRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val clientId: String = "",
+    val reason: String = "REMOVED", // REMOVED | ABSENT | MISSED_WEEK | MANUAL
+    val weekKey: String = "",
+    val sourceLabel: String = "",
+    val occurredAtMillis: Long = 0L,
+    val expiresAtMillis: Long = 0L,
+    val dismissed: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

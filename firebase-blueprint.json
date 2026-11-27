@@ -70,6 +70,7 @@
         "clientId": { "type": "string" },
         "status": { "type": "string", "enum": ["PENDING", "CONFIRMED", "ALTERED", "CANCELLED"] },
         "attendanceStatus": { "type": "string", "enum": ["", "PENDING", "PRESENT", "ABSENT"] },
+        "makeup": { "type": "boolean" },
         "requestedAtMillis": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -426,6 +427,24 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "clientId", "clientName", "planId", "planTitle", "rpe", "feeling", "note", "timestampMillis", "createdAt", "updatedAt"]
+    },
+    "MakeupCredit": {
+      "title": "MakeupCredit",
+      "description": "Crédito de compensação de treino com validade de 30 dias (treino removido, falta, semana não marcada ou manual)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "reason": { "type": "string", "enum": ["REMOVED", "ABSENT", "MISSED_WEEK", "MANUAL"] },
+        "weekKey": { "type": "string" },
+        "sourceLabel": { "type": "string" },
+        "occurredAtMillis": { "type": "integer" },
+        "expiresAtMillis": { "type": "integer" },
+        "dismissed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "reason", "weekKey", "sourceLabel", "occurredAtMillis", "expiresAtMillis", "dismissed", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -520,6 +539,10 @@
     "/users/{userId}/workout_feedback/{feedbackId}": {
       "schema": { "$ref": "#/entities/WorkoutFeedback" },
       "description": "Feedback rápido pós-treino submetido pelos alunos"
+    },
+    "/users/{userId}/makeup_credits/{creditId}": {
+      "schema": { "$ref": "#/entities/MakeupCredit" },
+      "description": "Créditos de compensação de treino com validade de 30 dias"
     },
     "/pt_accounts/{ptUid}": {
       "schema": { "$ref": "#/entities/PtAccount" },

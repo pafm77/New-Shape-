@@ -21,6 +21,7 @@ import {
   BookingRecord,
   ClientRecord,
   FidelizacaoRecord,
+  MakeupCreditRecord,
   PaymentRecord,
   PhysicalAssessmentRecord,
   TrainingSessionRecord,
@@ -31,6 +32,13 @@ import {
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
 } from '../types/studio';
+import {
+  computeAllClientsMakeupSummaries,
+  computeClientMakeupSummary,
+  formatShortDatePt,
+  makeupReasonLabel,
+} from '../services/makeupCalculator';
+import { ManualMakeupCreditModal } from './PtCompensacoesView';
 import { openStudentEvolutionPdfReport } from '../services/evolutionReportGenerator';
 import {
   DEFAULT_JOIA_EUR,
@@ -69,10 +77,12 @@ interface PtClientsSectionProps {
   uid: string;
   isSuperAdmin: boolean;
   clients: ClientRecord[];
+  weeks?: TrainingWeekRecord[];
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
   weekResponses: WeekResponseRecord[];
+  makeupCredits?: MakeupCreditRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   assessments: PhysicalAssessmentRecord[];
@@ -89,10 +99,12 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
   uid,
   isSuperAdmin,
   clients,
+  weeks = [],
   activeWeek,
   sessions,
   bookings,
   weekResponses,
+  makeupCredits = [],
   payments,
   fidelizacoes,
   assessments,
@@ -159,17 +171,32 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
     return map;
   }, [bookings, sessions]);
 
+  const clientMakeupMap = useMemo(
+    () =>
+      computeAllClientsMakeupSummaries(
+        clients,
+        weeks,
+        sessions,
+        bookings,
+        weekResponses,
+        makeupCredits
+      ),
+    [clients, weeks, sessions, bookings, weekResponses, makeupCredits]
+  );
+
   if (selectedClient) {
     return (
       <ClientProfileView
         uid={uid}
         isSuperAdmin={isSuperAdmin}
         client={selectedClient}
+        weeks={weeks}
         activeWeek={activeWeek}
         sessions={sessions}
         allBookings={bookings}
         bookings={bookings.filter((b) => b.clientId === selectedClient.id)}
         weekResponses={weekResponses}
+        makeupCredits={makeupCredits}
         payments={payments.filter((p) => p.clientId === selectedClient.id)}
         fidelizacoes={fidelizacoes.filter((f) => f.clientId === selectedClient.id)}
         assessments={assessments.filter((a) => a.clientId === selectedClient.id)}
@@ -372,6 +399,14 @@ export const PtClientsSection: React.FC<PtClientsSectionProps> = ({
                       ) : (
                         <StatusPill tone="neutral">Por marcar</StatusPill>
                       )}
+                      {(() => {
+                        const mk = clientMakeupMap.get(c.id);
+                        return mk && mk.availableCount > 0 ? (
+                          <StatusPill tone="purple">
+                            {mk.availableCount} comp.
+                          </StatusPill>
+                        ) : null;
+                      })()}
                       {c.newClient && <StatusPill tone="blue">Novo</StatusPill>}
                       {!c.active && <StatusPill>Inativo</StatusPill>}
                     </div>
@@ -534,11 +569,13 @@ const ClientProfileView: React.FC<{
   uid: string;
   isSuperAdmin: boolean;
   client: ClientRecord;
+  weeks: TrainingWeekRecord[];
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   allBookings: BookingRecord[];
   bookings: BookingRecord[];
   weekResponses: WeekResponseRecord[];
+  makeupCredits: MakeupCreditRecord[];
   payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   assessments: PhysicalAssessmentRecord[];
@@ -556,11 +593,13 @@ const ClientProfileView: React.FC<{
   uid,
   isSuperAdmin,
   client,
+  weeks,
   activeWeek,
   sessions,
   allBookings,
   bookings,
   weekResponses,
+  makeupCredits,
   payments,
   fidelizacoes,
   assessments,
@@ -605,6 +644,29 @@ const ClientProfileView: React.FC<{
   const [showPay, setShowPay] = useState(false);
   const [splitTargetPayment, setSplitTargetPayment] = useState<PaymentRecord | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showManualCreditModal, setShowManualCreditModal] = useState(false);
+  const [showMakeupDetails, setShowMakeupDetails] = useState(false);
+
+  const profileMakeupSummary = useMemo(
+    () =>
+      computeClientMakeupSummary(
+        client,
+        weeks,
+        sessions,
+        allBookings,
+        weekResponses,
+        makeupCredits
+      ),
+    [client, weeks, sessions, allBookings, weekResponses, makeupCredits]
+  );
+
+  const makeupWeekKeys = useMemo(() => {
+    const set = new Set<string>();
+    bookings.forEach((b) => {
+      if (b.makeup && b.status !== 'CANCELLED') set.add(b.weekKey);
+    });
+    return set;
+  }, [bookings]);
 
   const monthPayment = payments.find(
     (p) => p.monthYear === currentMonthYear && p.paid && !isExtraFeePayment(p.note)
@@ -934,17 +996,156 @@ const ClientProfileView: React.FC<{
           </p>
         ) : (
           <div className="mt-2.5 flex flex-wrap gap-2">
-            {upcomingBookings.map(({ booking, session }) => (
+            {upcomingBookings.map(({ booking, session }) => {
+              const isMakeupWeek = Boolean(booking.makeup) || makeupWeekKeys.has(booking.weekKey);
+              return (
+                <div
+                  key={booking.id}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-semibold ${
+                    isMakeupWeek
+                      ? 'border-[#A855F7] bg-[#2E1065]/55 text-[#E9D5FF]'
+                      : booking.status === 'CONFIRMED'
+                      ? 'border-[#22C55E]/40 bg-[#143524]/40 text-[#86EFAC]'
+                      : 'border-[#F59E0B]/40 bg-[#3F2A10]/40 text-[#FDE68A]'
+                  }`}
+                >
+                  {session.dateLabel} · {session.timeLabel.replace(':', 'h')}{' '}
+                  {booking.status === 'CONFIRMED' ? '✓' : '(por confirmar)'}
+                  {booking.makeup ? ' · Compensação' : isMakeupWeek ? ' · Em compensação' : ''}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </BrandCard>
+
+      <BrandCard
+        className={
+          profileMakeupSummary.availableCount > 0 || profileMakeupSummary.activeMakeupBookingsCount > 0
+            ? 'border-[#A855F7]/70 bg-[#2E1065]/25'
+            : undefined
+        }
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-base font-bold text-[#F4F4F5]">Faltas &amp; Compensações (30 dias)</h3>
+            <p className="text-xs text-[#A1A1AA]">
+              Direito a compensar em faltas, treinos removidos ou semanas sem marcação (validade 30d).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {profileMakeupSummary.availableCount > 0 ? (
+              <StatusPill tone="purple">
+                {profileMakeupSummary.availableCount} disponível
+                {profileMakeupSummary.availableCount > 1 ? 'eis' : ''}
+              </StatusPill>
+            ) : (
+              <StatusPill tone="neutral">0 disponíveis</StatusPill>
+            )}
+            {profileMakeupSummary.nearestExpiryDays !== null && (
+              <StatusPill tone={profileMakeupSummary.nearestExpiryDays <= 7 ? 'amber' : 'purple'}>
+                Expira em {profileMakeupSummary.nearestExpiryDays}d
+              </StatusPill>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-xl border border-[#A855F7]/40 bg-[#2E1065]/45 p-2.5 text-center">
+            <p className="text-[10px] font-bold uppercase text-[#D8B4FE]">Por compensar</p>
+            <p className="text-lg font-extrabold text-[#E9D5FF]">
+              {profileMakeupSummary.availableCount}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#EF4444]/35 bg-[#3B1518]/35 p-2.5 text-center">
+            <p className="text-[10px] font-bold uppercase text-[#FCA5A5]">Faltas (30d / total)</p>
+            <p className="text-lg font-extrabold text-[#EF4444]">
+              {profileMakeupSummary.absentCount30d}
+              <span className="text-xs font-semibold text-[#A1A1AA]">
+                /{profileMakeupSummary.totalAbsencesAllTime}
+              </span>
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#323238] bg-[#242429] p-2.5 text-center">
+            <p className="text-[10px] font-bold uppercase text-[#A1A1AA]">Removidos (30d)</p>
+            <p className="text-lg font-extrabold text-[#FDE68A]">
+              {profileMakeupSummary.removedCount30d}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#323238] bg-[#242429] p-2.5 text-center">
+            <p className="text-[10px] font-bold uppercase text-[#A1A1AA]">Não marcou (30d)</p>
+            <p className="text-lg font-extrabold text-[#D8B4FE]">
+              {profileMakeupSummary.missedWeekCount30d}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setShowManualCreditModal(true)}
+            className="inline-flex min-h-[38px] items-center gap-1 rounded-xl border border-[#A855F7]/70 bg-[#2E1065]/70 px-3 py-1.5 text-xs font-bold text-[#E9D5FF] hover:bg-[#A855F7] hover:text-white"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            +1 Compensação (30d)
+          </button>
+          {profileMakeupSummary.credits.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowMakeupDetails((v) => !v)}
+              className="text-xs font-bold text-[#D8B4FE] hover:underline"
+            >
+              {showMakeupDetails
+                ? 'Ocultar histórico'
+                : `Ver histórico (${profileMakeupSummary.credits.length})`}
+            </button>
+          )}
+        </div>
+
+        {showMakeupDetails && profileMakeupSummary.credits.length > 0 && (
+          <div className="mt-3 space-y-1.5 border-t border-[#323238] pt-3">
+            {profileMakeupSummary.credits.map((credit) => (
               <div
-                key={booking.id}
-                className={`rounded-xl border px-3 py-1.5 text-xs font-semibold ${
-                  booking.status === 'CONFIRMED'
-                    ? 'border-[#22C55E]/40 bg-[#143524]/40 text-[#86EFAC]'
-                    : 'border-[#F59E0B]/40 bg-[#3F2A10]/40 text-[#FDE68A]'
-                }`}
+                key={credit.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#323238] bg-[#18181B] px-3 py-2 text-xs"
               >
-                {session.dateLabel} · {session.timeLabel.replace(':', 'h')}{' '}
-                {booking.status === 'CONFIRMED' ? '✓' : '(por confirmar)'}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-bold text-[#F4F4F5]">{credit.sourceLabel}</span>
+                    <StatusPill
+                      tone={
+                        credit.status === 'AVAILABLE'
+                          ? 'purple'
+                          : credit.status === 'USED'
+                          ? 'green'
+                          : 'neutral'
+                      }
+                    >
+                      {credit.status === 'AVAILABLE'
+                        ? `Disponível (${credit.daysLeft}d)`
+                        : credit.status === 'USED'
+                        ? 'Usada ✓'
+                        : 'Expirada'}
+                    </StatusPill>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-[#A1A1AA]">
+                    {makeupReasonLabel(credit.reason)} · Origem:{' '}
+                    {formatShortDatePt(credit.occurredAtMillis)} · Válida até:{' '}
+                    {formatShortDatePt(credit.expiresAtMillis)}
+                  </p>
+                </div>
+                {credit.dismissibleCreditDocId && credit.status === 'AVAILABLE' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await repo.dismissMakeupCredit(uid, credit.dismissibleCreditDocId!, true);
+                      onBanner('Crédito de compensação anulado.');
+                    }}
+                    className="rounded-lg border border-[#EF4444]/40 bg-[#3B1518]/50 px-2.5 py-1 text-[11px] font-bold text-[#FCA5A5] hover:bg-[#EF4444] hover:text-white"
+                  >
+                    Anular
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1380,6 +1581,18 @@ const ClientProfileView: React.FC<{
         </div>
       )}
         </>
+      )}
+
+      {showManualCreditModal && (
+        <ManualMakeupCreditModal
+          open
+          clientName={client.name}
+          onClose={() => setShowManualCreditModal(false)}
+          onConfirm={async (note) => {
+            await repo.addManualMakeupCredit(uid, client.id, note);
+            onBanner(`+1 compensação (30 dias) atribuída a ${client.name} ✓`);
+          }}
+        />
       )}
 
       {isSuperAdmin && showDeleteConfirm && (

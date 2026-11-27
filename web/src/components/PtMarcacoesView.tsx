@@ -32,6 +32,7 @@ import {
   MONTHS_PT,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
+import { getMakeupClientIdsForWeek } from '../services/makeupCalculator';
 import {
   BrandCard,
   EmptyState,
@@ -97,6 +98,11 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
         ? bookings.filter((b) => b.weekKey === activeWeek.weekKey)
         : [],
     [bookings, activeWeek]
+  );
+
+  const makeupClientIdsForWeek = useMemo(
+    () => getMakeupClientIdsForWeek(bookings, activeWeek?.weekKey || ''),
+    [bookings, activeWeek?.weekKey]
   );
 
   // Per-day metadata for the 7 weekly tabs
@@ -312,7 +318,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
   const handleAcceptOne = async (booking: BookingRecord, clientName: string) => {
     setBusyBookingId(booking.id);
     try {
-      await repo.confirmClientBookings(uid, [booking]);
+      await repo.confirmClientBookings(uid, [booking], allSessionMap);
       addClientToNotifyQueue(booking.clientId);
       onBanner(`${clientName} aceite ✓ (envia a mensagem no final quando quiseres)`);
     } finally {
@@ -320,11 +326,23 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
     }
   };
 
-  const handleRejectOne = async (booking: BookingRecord, clientName: string) => {
+  const handleRejectOne = async (
+    booking: BookingRecord,
+    clientName: string,
+    grantRemovedCredit: boolean
+  ) => {
     setBusyBookingId(booking.id);
     try {
-      await repo.removeBooking(uid, booking.id);
-      onBanner(`Pedido de ${clientName} recusado.`);
+      await repo.removeBooking(uid, booking.id, {
+        booking,
+        session: allSessionMap.get(booking.sessionId) || null,
+        grantRemovedCredit,
+      });
+      onBanner(
+        grantRemovedCredit
+          ? `Treino de ${clientName} removido (crédito de compensação 30d registado).`
+          : `Pedido de ${clientName} recusado.`
+      );
     } finally {
       setBusyBookingId(null);
     }
@@ -332,7 +350,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
 
   const handleAcceptAllInSession = async (pendingList: BookingRecord[]) => {
     if (pendingList.length === 0) return;
-    await repo.confirmClientBookings(uid, pendingList);
+    await repo.confirmClientBookings(uid, pendingList, allSessionMap);
     pendingList.forEach((b) => addClientToNotifyQueue(b.clientId));
     onBanner(`${pendingList.length} marcação(ões) aceite(s) ✓`);
   };
@@ -531,13 +549,20 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
               .filter((w) => w.sessionId === session.id)
               .sort((a, b) => a.createdAtMillis - b.createdAtMillis);
             const isFull = confirmedBookings.length >= session.capacity;
+            const hasMakeupInSlot = sessionBookings.some(
+              (b) => b.makeup || makeupClientIdsForWeek.has(b.clientId)
+            );
 
             return (
               <div
                 key={session.id}
                 className={`overflow-hidden rounded-2xl border transition ${
                   isOpen
-                    ? 'border-[#EAB308] bg-[#1B1B1E]'
+                    ? hasMakeupInSlot
+                      ? 'border-[#A855F7] bg-[#1B1B1E]'
+                      : 'border-[#EAB308] bg-[#1B1B1E]'
+                    : hasMakeupInSlot
+                    ? 'border-[#A855F7]/70 bg-[#2E1065]/25 hover:border-[#A855F7]'
                     : pendingBookings.length > 0
                     ? 'border-[#F59E0B]/50 bg-[#1B1B1E] hover:border-[#EAB308]'
                     : 'border-[#323238] bg-[#1B1B1E] hover:border-[#52525B]'
@@ -576,6 +601,9 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                             ? 'Sem pedidos'
                             : `${sessionBookings.length} pessoa(s) neste horário`}
                         </span>
+                        {hasMakeupInSlot && (
+                          <StatusPill tone="purple">Compensação</StatusPill>
+                        )}
                         {session.ptPrivatePersonal && (
                           <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
                         )}
@@ -635,7 +663,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                         <button
                           type="button"
                           onClick={async () => {
-                            await repo.deleteSession(uid, session.id, sessionBookings);
+                            await repo.deleteSession(uid, session.id, sessionBookings, session);
                             setSelectedSessionId(null);
                             onBanner('Treino personalizado oculto removido.');
                           }}
@@ -661,12 +689,16 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                           const isPresent = b.attendanceStatus === 'PRESENT';
                           const isAbsent = b.attendanceStatus === 'ABSENT';
                           const isBusy = busyBookingId === b.id;
+                          const isMakeupClientWeek =
+                            Boolean(b.makeup) || makeupClientIdsForWeek.has(b.clientId);
 
                           return (
                             <div
                               key={b.id}
                               className={`rounded-xl border p-3 space-y-2 ${
-                                isPresent
+                                isMakeupClientWeek
+                                  ? 'border-[#A855F7] bg-[#2E1065]/50'
+                                  : isPresent
                                   ? 'border-[#22C55E]/55 bg-[#143521]/35'
                                   : isAbsent
                                   ? 'border-[#EF4444]/55 bg-[#3B1518]/30'
@@ -678,9 +710,18 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-1.5">
-                                    <span className="text-sm font-bold text-[#F4F4F5]">
+                                    <span
+                                      className={`text-sm font-bold ${
+                                        isMakeupClientWeek ? 'text-[#E9D5FF]' : 'text-[#F4F4F5]'
+                                      }`}
+                                    >
                                       {client.name}
                                     </span>
+                                    {b.makeup ? (
+                                      <StatusPill tone="purple">Compensação</StatusPill>
+                                    ) : isMakeupClientWeek ? (
+                                      <StatusPill tone="purple">Em compensação</StatusPill>
+                                    ) : null}
                                     <StatusPill
                                       tone={
                                         client.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'
@@ -717,7 +758,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                                       <button
                                         type="button"
                                         disabled={isBusy}
-                                        onClick={() => handleRejectOne(b, client.name)}
+                                        onClick={() => handleRejectOne(b, client.name, false)}
                                         className="inline-flex min-h-[38px] items-center gap-1 rounded-xl border border-[#EF4444]/60 bg-[#3B1518]/50 px-3 py-1.5 text-xs font-bold text-[#FCA5A5] transition hover:bg-[#EF4444] hover:text-white disabled:opacity-40"
                                       >
                                         <X className="h-3.5 w-3.5" />
@@ -737,7 +778,7 @@ export const PtMarcacoesView: React.FC<PtMarcacoesViewProps> = ({
                                     <button
                                       type="button"
                                       disabled={isBusy}
-                                      onClick={() => handleRejectOne(b, client.name)}
+                                      onClick={() => handleRejectOne(b, client.name, true)}
                                       className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#EF4444] hover:bg-[#3B1518]/60"
                                     >
                                       Remover

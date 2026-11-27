@@ -47,8 +47,11 @@ import {
   WorkoutLoadLogRecord,
   WorkoutPlanItemRecord,
   WorkoutPlanRecord,
+  MakeupCreditReason,
+  MakeupCreditRecord,
   isSuperAdminEmail,
 } from '../types/studio';
+import { MAKEUP_VALIDITY_MILLIS } from './makeupCalculator';
 import {
   buildConsecutiveMonths,
   calculateBmi,
@@ -102,6 +105,7 @@ export interface StudioStreams {
   studioAnnouncements?: (items: StudioAnnouncementRecord[]) => void;
   announcementReads?: (items: AnnouncementReadRecord[]) => void;
   workoutFeedback?: (items: WorkoutFeedbackRecord[]) => void;
+  makeupCredits?: (items: MakeupCreditRecord[]) => void;
   settings: (item: StudioSettingsRecord | null) => void;
   onError: (err: Error) => void;
 }
@@ -209,6 +213,10 @@ export function subscribeStudioData(
       loginPinHash: typeof d.loginPinHash === 'string' ? d.loginPinHash : '',
       birthDate: typeof d.birthDate === 'string' ? d.birthDate : '',
       weeklyGoalSessions: Number(d.weeklyGoalSessions ?? 0),
+      createdAtMillis:
+        d.createdAt && typeof (d.createdAt as { toMillis?: () => number }).toMillis === 'function'
+          ? (d.createdAt as { toMillis: () => number }).toMillis()
+          : 0,
     }),
     (list) =>
       list.sort((a, b) => {
@@ -270,6 +278,7 @@ export function subscribeStudioData(
     handlers.studioAnnouncements?.([]);
     handlers.announcementReads?.([]);
     handlers.workoutFeedback?.([]);
+    handlers.makeupCredits?.([]);
     return () => unsubs.forEach((u) => u());
   }
 
@@ -323,6 +332,7 @@ export function subscribeStudioData(
         d.attendanceStatus === 'PENDING'
           ? d.attendanceStatus
           : '',
+      makeup: Boolean(d.makeup ?? false),
       requestedAtMillis: Number(d.requestedAtMillis ?? 0),
     }),
     (list) => list.sort((a, b) => a.requestedAtMillis - b.requestedAtMillis),
@@ -655,6 +665,32 @@ export function subscribeStudioData(
       }),
       (list) => list.sort((a, b) => b.timestampMillis - a.timestampMillis),
       handlers.workoutFeedback,
+      true
+    );
+  }
+
+  if (handlers.makeupCredits) {
+    listen<MakeupCreditRecord>(
+      'makeup_credits',
+      (id, d) => ({
+        id,
+        userId: String(d.userId ?? uid),
+        clientId: String(d.clientId ?? ''),
+        reason: (
+          d.reason === 'ABSENT' ||
+          d.reason === 'MISSED_WEEK' ||
+          d.reason === 'MANUAL'
+            ? d.reason
+            : 'REMOVED'
+        ) as MakeupCreditReason,
+        weekKey: String(d.weekKey ?? ''),
+        sourceLabel: String(d.sourceLabel ?? ''),
+        occurredAtMillis: Number(d.occurredAtMillis ?? 0),
+        expiresAtMillis: Number(d.expiresAtMillis ?? 0),
+        dismissed: Boolean(d.dismissed ?? false),
+      }),
+      (list) => list.sort((a, b) => b.occurredAtMillis - a.occurredAtMillis),
+      handlers.makeupCredits,
       true
     );
   }
@@ -1703,12 +1739,37 @@ export async function updateSession(uid: string, session: TrainingSessionRecord)
 export async function deleteSession(
   uid: string,
   sessionId: string,
-  relatedBookings: BookingRecord[]
+  relatedBookings: BookingRecord[],
+  session?: TrainingSessionRecord | null
 ): Promise<void> {
+  const now = Date.now();
   const batch = writeBatch(db);
   relatedBookings
     .filter((b) => b.sessionId === sessionId)
-    .forEach((b) => batch.delete(doc(subcol(uid, 'bookings'), b.id)));
+    .forEach((b) => {
+      batch.delete(doc(subcol(uid, 'bookings'), b.id));
+      if (!b.makeup && b.status === 'CONFIRMED' && b.attendanceStatus !== 'ABSENT') {
+        const occurred =
+          (session && session.startMillis > 0 ? session.startMillis : 0) ||
+          (b.requestedAtMillis > 0 ? b.requestedAtMillis : 0) ||
+          now;
+        const label = session
+          ? `Sessão removida · ${session.dateLabel} ${session.timeLabel}`
+          : `Treino removido (${b.weekKey})`;
+        batch.set(doc(subcol(uid, 'makeup_credits')), {
+          userId: uid,
+          clientId: b.clientId,
+          reason: 'REMOVED',
+          weekKey: b.weekKey.slice(0, 30),
+          sourceLabel: label.slice(0, 160),
+          occurredAtMillis: Math.round(occurred),
+          expiresAtMillis: Math.round(occurred + MAKEUP_VALIDITY_MILLIS),
+          dismissed: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
   batch.delete(doc(subcol(uid, 'sessions'), sessionId));
   await batch.commit();
 }
@@ -1909,21 +1970,127 @@ export async function addManualBooking(
   await batch.commit();
 }
 
-export async function removeBooking(uid: string, bookingId: string): Promise<void> {
+export async function removeBooking(
+  uid: string,
+  bookingId: string,
+  options?: {
+    booking?: BookingRecord | null;
+    session?: TrainingSessionRecord | null;
+    grantRemovedCredit?: boolean;
+  }
+): Promise<void> {
+  const booking = options?.booking;
+  const session = options?.session;
+  const grantRemovedCredit = options?.grantRemovedCredit ?? true;
+
+  if (
+    grantRemovedCredit &&
+    booking &&
+    !booking.makeup &&
+    booking.status === 'CONFIRMED' &&
+    booking.attendanceStatus !== 'ABSENT'
+  ) {
+    const now = Date.now();
+    const occurred =
+      (session && session.startMillis > 0 ? session.startMillis : 0) ||
+      (booking.requestedAtMillis > 0 ? booking.requestedAtMillis : 0) ||
+      now;
+    const label = session
+      ? `Treino removido · ${session.dateLabel} ${session.timeLabel}`
+      : `Treino removido (${booking.weekKey})`;
+    const batch = writeBatch(db);
+    batch.delete(doc(subcol(uid, 'bookings'), bookingId));
+    batch.set(doc(subcol(uid, 'makeup_credits')), {
+      userId: uid,
+      clientId: booking.clientId,
+      reason: 'REMOVED',
+      weekKey: booking.weekKey.slice(0, 30),
+      sourceLabel: label.slice(0, 160),
+      occurredAtMillis: Math.round(occurred),
+      expiresAtMillis: Math.round(occurred + MAKEUP_VALIDITY_MILLIS),
+      dismissed: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await batch.commit();
+    return;
+  }
+
   await deleteDoc(doc(subcol(uid, 'bookings'), bookingId));
 }
 
-export async function confirmClientBookings(uid: string, bookings: BookingRecord[]): Promise<void> {
+export async function confirmClientBookings(
+  uid: string,
+  bookings: BookingRecord[],
+  sessionsById?: Map<string, TrainingSessionRecord>
+): Promise<void> {
+  const now = Date.now();
   const batch = writeBatch(db);
   bookings.forEach((b) => {
     const ref = doc(subcol(uid, 'bookings'), b.id);
     if (b.status === 'CANCELLED') {
       batch.delete(ref);
+      if (!b.makeup && b.attendanceStatus !== 'ABSENT') {
+        const sess = sessionsById?.get(b.sessionId);
+        const occurred =
+          (sess && sess.startMillis > 0 ? sess.startMillis : 0) ||
+          (b.requestedAtMillis > 0 ? b.requestedAtMillis : 0) ||
+          now;
+        const label = sess
+          ? `Treino cancelado · ${sess.dateLabel} ${sess.timeLabel}`
+          : `Treino cancelado (${b.weekKey})`;
+        batch.set(doc(subcol(uid, 'makeup_credits')), {
+          userId: uid,
+          clientId: b.clientId,
+          reason: 'REMOVED',
+          weekKey: b.weekKey.slice(0, 30),
+          sourceLabel: label.slice(0, 160),
+          occurredAtMillis: Math.round(occurred),
+          expiresAtMillis: Math.round(occurred + MAKEUP_VALIDITY_MILLIS),
+          dismissed: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
     } else {
       batch.update(ref, { status: 'CONFIRMED', updatedAt: serverTimestamp() });
     }
   });
   await batch.commit();
+}
+
+export async function addManualMakeupCredit(
+  uid: string,
+  clientId: string,
+  sourceLabel: string,
+  weekKey = '',
+  occurredAtMillis: number = Date.now()
+): Promise<void> {
+  const safeOccurred = Math.max(0, Math.round(occurredAtMillis));
+  const cleanLabel = sourceLabel.trim().slice(0, 160) || 'Compensação atribuída pelo PT';
+  await setDoc(doc(subcol(uid, 'makeup_credits')), {
+    userId: uid,
+    clientId,
+    reason: 'MANUAL',
+    weekKey: weekKey.trim().slice(0, 30),
+    sourceLabel: cleanLabel,
+    occurredAtMillis: safeOccurred,
+    expiresAtMillis: Math.round(safeOccurred + MAKEUP_VALIDITY_MILLIS),
+    dismissed: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function dismissMakeupCredit(
+  uid: string,
+  creditId: string,
+  dismissed = true
+): Promise<void> {
+  await updateDoc(doc(subcol(uid, 'makeup_credits'), creditId), {
+    dismissed,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export async function restoreBookings(uid: string, snapshots: BookingRecord[]): Promise<void> {
@@ -2005,7 +2172,9 @@ export async function submitStudentBookings(
   clientId: string,
   selectedSessionIds: Set<string>,
   existingClientBookings: BookingRecord[],
-  visibleSessionDayById?: Map<string, number>
+  visibleSessionDayById?: Map<string, number>,
+  makeupSessionIds?: Set<string>,
+  sessionsById?: Map<string, TrainingSessionRecord>
 ): Promise<void> {
   const lockKey = `${uid}_${weekKey}_${clientId}`;
   if (inFlightStudentBookingKeys.has(lockKey)) {
@@ -2051,6 +2220,7 @@ export async function submitStudentBookings(
           clientId: bClientId,
           status: bStatus,
           attendanceStatus: String(data.attendanceStatus ?? '') as AttendanceStatus,
+          makeup: Boolean(data.makeup ?? false),
           requestedAtMillis: Number(data.requestedAtMillis ?? 0),
         });
       });
@@ -2080,6 +2250,7 @@ export async function submitStudentBookings(
 
     const wasConfirmed = activeExisting.some((b) => b.status === 'CONFIRMED');
     const now = Date.now();
+    const makeupSet = makeupSessionIds ?? new Set<string>();
 
     if (selectedSessionIds.size === 0 && activeExisting.length > 0) {
       if (wasConfirmed) {
@@ -2104,30 +2275,68 @@ export async function submitStudentBookings(
     }
 
     const keptSessionIds = new Set<string>();
+    const removedConfirmedNonMakeup: BookingRecord[] = [];
     activeExisting.forEach((b) => {
       if (!selectedSessionIds.has(b.sessionId) || keptSessionIds.has(b.sessionId)) {
-        // Delete unselected bookings AND any duplicate docs for the same sessionId
         batch.delete(doc(subcol(uid, 'bookings'), b.id));
+        if (
+          !selectedSessionIds.has(b.sessionId) &&
+          b.status === 'CONFIRMED' &&
+          !b.makeup &&
+          b.attendanceStatus !== 'ABSENT'
+        ) {
+          removedConfirmedNonMakeup.push(b);
+        }
       } else {
-        // Keep already-booked sessions with their existing status (CONFIRMED stays CONFIRMED)
-        // so cancelling or editing another session never forces the PT to re-confirm them.
         keptSessionIds.add(b.sessionId);
+        const wantsMakeup = makeupSet.has(b.sessionId);
+        if (Boolean(b.makeup) !== wantsMakeup) {
+          batch.update(doc(subcol(uid, 'bookings'), b.id), {
+            makeup: wantsMakeup,
+            updatedAt: serverTimestamp(),
+          });
+        }
       }
     });
 
-    selectedSessionIds.forEach((sid) => {
-      if (!keptSessionIds.has(sid)) {
-        batch.set(doc(subcol(uid, 'bookings')), {
-          userId: uid,
-          sessionId: sid,
-          weekKey,
-          clientId,
-          status: wasConfirmed ? 'ALTERED' : 'PENDING',
-          requestedAtMillis: now,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
+    const addedSessionIds = Array.from(selectedSessionIds).filter((sid) => !keptSessionIds.has(sid));
+    const addedNonMakeupCount = addedSessionIds.filter((sid) => !makeupSet.has(sid)).length;
+    const netLostConfirmed = Math.max(0, removedConfirmedNonMakeup.length - addedNonMakeupCount);
+    removedConfirmedNonMakeup.slice(0, netLostConfirmed).forEach((removed) => {
+      const sess = sessionsById?.get(removed.sessionId);
+      const occurred =
+        (sess && sess.startMillis > 0 ? sess.startMillis : 0) ||
+        (removed.requestedAtMillis > 0 ? removed.requestedAtMillis : 0) ||
+        now;
+      const label = sess
+        ? `Treino desmarcado · ${sess.dateLabel} ${sess.timeLabel}`
+        : `Treino desmarcado (${weekKey})`;
+      batch.set(doc(subcol(uid, 'makeup_credits')), {
+        userId: uid,
+        clientId,
+        reason: 'REMOVED',
+        weekKey: weekKey.slice(0, 30),
+        sourceLabel: label.slice(0, 160),
+        occurredAtMillis: Math.round(occurred),
+        expiresAtMillis: Math.round(occurred + MAKEUP_VALIDITY_MILLIS),
+        dismissed: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    addedSessionIds.forEach((sid) => {
+      batch.set(doc(subcol(uid, 'bookings')), {
+        userId: uid,
+        sessionId: sid,
+        weekKey,
+        clientId,
+        status: wasConfirmed ? 'ALTERED' : 'PENDING',
+        makeup: makeupSet.has(sid),
+        requestedAtMillis: now,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
     });
 
     await batch.commit();

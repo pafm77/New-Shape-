@@ -60,6 +60,7 @@ import {
   normalizeFixedSlots,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
+import { getMakeupClientIdsForWeek } from '../services/makeupCalculator';
 import {
   dispatchLocalPushNotification,
   formatLeadMinutesLabel,
@@ -608,7 +609,11 @@ const PorConfirmarView: React.FC<{
                   ptUid: uid,
                   studentPortalCode: settings.studentPortalCode,
                 });
-                await repo.removeBooking(uid, item.booking.id);
+                await repo.removeBooking(uid, item.booking.id, {
+                  booking: item.booking,
+                  session: item.session,
+                  grantRemovedCredit: false,
+                });
                 onBanner('Horário recusado e removido.');
                 onOpenWhatsApp(card.client.phone, msg);
               }}
@@ -661,6 +666,10 @@ const PendingCardItem: React.FC<{
   const [moveOpenId, setMoveOpenId] = useState<string | null>(null);
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const hasPhone = Boolean(card.client.phone && card.client.phone.trim().length > 0);
+  const isMakeupClientWeek = useMemo(() => {
+    const makeupIds = getMakeupClientIdsForWeek(allBookings, card.week.weekKey);
+    return makeupIds.has(card.client.id) || card.items.some((i) => Boolean(i.booking.makeup));
+  }, [allBookings, card.week.weekKey, card.client.id, card.items]);
 
   const previewText = buildMessageFromTemplate(
     templates,
@@ -676,11 +685,23 @@ const PendingCardItem: React.FC<{
   );
 
   return (
-    <BrandCard highlight={isFirst}>
+    <BrandCard
+      highlight={!isMakeupClientWeek && isFirst}
+      className={isMakeupClientWeek ? 'border-[#A855F7] bg-[#2E1065]/35' : undefined}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-bold text-[#F4F4F5]">{card.client.name}</h3>
+            <h3
+              className={`text-lg font-bold ${
+                isMakeupClientWeek ? 'text-[#E9D5FF]' : 'text-[#F4F4F5]'
+              }`}
+            >
+              {card.client.name}
+            </h3>
+            {isMakeupClientWeek && (
+              <StatusPill tone="purple">Compensação</StatusPill>
+            )}
             {(card.client.fixedSlots?.length ?? 0) > 0 && (
               <StatusPill tone="gold">Horário Fixo</StatusPill>
             )}
@@ -712,11 +733,29 @@ const PendingCardItem: React.FC<{
           });
 
           return (
-            <div key={item.booking.id} className="rounded-xl bg-[#242429]/60 p-3">
+            <div
+              key={item.booking.id}
+              className={`rounded-xl p-3 ${
+                isMakeupClientWeek
+                  ? 'border border-[#A855F7]/70 bg-[#2E1065]/55'
+                  : 'bg-[#242429]/60'
+              }`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-[#F4F4F5]">
-                  {item.session.dateLabel} – {item.session.timeLabel.replace(':', 'h')}
-                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p
+                    className={`text-sm font-semibold ${
+                      isMakeupClientWeek ? 'text-[#E9D5FF]' : 'text-[#F4F4F5]'
+                    }`}
+                  >
+                    {item.session.dateLabel} – {item.session.timeLabel.replace(':', 'h')}
+                  </p>
+                  {item.booking.makeup ? (
+                    <StatusPill tone="purple">Compensação</StatusPill>
+                  ) : isMakeupClientWeek ? (
+                    <StatusPill tone="purple">Em compensação</StatusPill>
+                  ) : null}
+                </div>
                 {!card.isCancelledAll && (
                   <div className="flex items-center gap-3 text-xs font-semibold">
                     <button
@@ -912,6 +951,10 @@ const SemanasView: React.FC<{
   }, [weekSessions, visibilityFilter]);
 
   const detailSession = detailSessionId ? sessions.find((s) => s.id === detailSessionId) || null : null;
+  const makeupClientIdsForWeek = useMemo(
+    () => getMakeupClientIdsForWeek(bookings, activeWeek?.weekKey || ''),
+    [bookings, activeWeek?.weekKey]
+  );
 
   const inviteMsg = activeWeek
     ? buildMessageFromTemplate(templates, 'CONVITE', settings.siteBaseUrl, {
@@ -1378,13 +1421,18 @@ const SemanasView: React.FC<{
               nowDate.getFullYear() === sesDate.getFullYear() &&
               nowDate.getMonth() === sesDate.getMonth() &&
               nowDate.getDate() === sesDate.getDate();
+            const hasMakeupInSession = sBookings.some(
+              (b) => b.makeup || makeupClientIdsForWeek.has(b.clientId)
+            );
 
             return (
               <div
                 key={session.id}
                 onClick={() => setDetailSessionId(session.id)}
                 className={`flex cursor-pointer items-center justify-between gap-3 rounded-2xl border p-4 transition hover:border-[#EAB308]/60 ${
-                  isToday
+                  hasMakeupInSession
+                    ? 'border-[#A855F7]/80 bg-[#2E1065]/30'
+                    : isToday
                     ? 'border-[#EAB308]/70 bg-[#3D3314]/35'
                     : session.ptPrivatePersonal
                     ? 'border-[#EAB308]/45 bg-[#231F14]/70'
@@ -1396,6 +1444,9 @@ const SemanasView: React.FC<{
                     <p className="text-sm font-bold text-[#F4F4F5]">
                       {session.dateLabel} · {session.timeLabel.replace(':', 'h')}
                     </p>
+                    {hasMakeupInSession && (
+                      <StatusPill tone="purple">Compensação</StatusPill>
+                    )}
                     {session.ptPrivatePersonal && (
                       <StatusPill tone="gold">Personalizado · Só PT</StatusPill>
                     )}
@@ -1530,6 +1581,7 @@ const SemanasView: React.FC<{
         <SessionDetailModal
           session={detailSession}
           bookings={bookings.filter((b) => b.sessionId === detailSession.id && b.status !== 'CANCELLED')}
+          makeupClientIdsForWeek={makeupClientIdsForWeek}
           waitlistEntries={waitlistEntries
             .filter((w) => w.sessionId === detailSession.id)
             .sort((a, b) => a.createdAtMillis - b.createdAtMillis)}
@@ -1540,7 +1592,12 @@ const SemanasView: React.FC<{
             onBanner('Cliente adicionado e confirmado.');
           }}
           onRemoveBooking={async (bid) => {
-            await repo.removeBooking(uid, bid);
+            const targetBooking = bookings.find((b) => b.id === bid) || null;
+            await repo.removeBooking(uid, bid, {
+              booking: targetBooking,
+              session: detailSession,
+              grantRemovedCredit: true,
+            });
             onBanner('Inscrição removida.');
           }}
           onPromoteWaitlist={async (entry) => {
@@ -1600,7 +1657,7 @@ const SemanasView: React.FC<{
             type="button"
             onClick={async () => {
               if (deleteTarget) {
-                await repo.deleteSession(uid, deleteTarget.id, bookings);
+                await repo.deleteSession(uid, deleteTarget.id, bookings, deleteTarget);
                 setDeleteTarget(null);
                 onBanner('Treino apagado.');
               }
@@ -1873,6 +1930,7 @@ const EditSessionModal: React.FC<{
 const SessionDetailModal: React.FC<{
   session: TrainingSessionRecord;
   bookings: BookingRecord[];
+  makeupClientIdsForWeek: Set<string>;
   waitlistEntries: WaitlistEntryRecord[];
   clients: ClientRecord[];
   onClose: () => void;
@@ -1885,6 +1943,7 @@ const SessionDetailModal: React.FC<{
 }> = ({
   session,
   bookings,
+  makeupClientIdsForWeek,
   waitlistEntries,
   clients,
   onClose,
@@ -1938,15 +1997,32 @@ const SessionDetailModal: React.FC<{
                 const confirmed = b.status === 'CONFIRMED';
                 const isPresent = b.attendanceStatus === 'PRESENT';
                 const isAbsent = b.attendanceStatus === 'ABSENT';
+                const isMakeupClientWeek =
+                  Boolean(b.makeup) || makeupClientIdsForWeek.has(b.clientId);
                 return (
                   <div
                     key={b.id}
-                    className="space-y-2 rounded-xl border border-[#323238] bg-[#242429] p-3"
+                    className={`space-y-2 rounded-xl border p-3 ${
+                      isMakeupClientWeek
+                        ? 'border-[#A855F7] bg-[#2E1065]/50'
+                        : 'border-[#323238] bg-[#242429]'
+                    }`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <p className="text-sm font-bold text-[#F4F4F5]">{c.name}</p>
+                          <p
+                            className={`text-sm font-bold ${
+                              isMakeupClientWeek ? 'text-[#E9D5FF]' : 'text-[#F4F4F5]'
+                            }`}
+                          >
+                            {c.name}
+                          </p>
+                          {b.makeup ? (
+                            <StatusPill tone="purple">Compensação</StatusPill>
+                          ) : isMakeupClientWeek ? (
+                            <StatusPill tone="purple">Em compensação</StatusPill>
+                          ) : null}
                           <StatusPill
                             tone={c.trainingType === 'PERSONALIZADO' ? 'gold' : 'blue'}
                           >

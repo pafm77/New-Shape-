@@ -6,9 +6,12 @@ import {
   CalendarCheck2,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
+  RefreshCw,
   Sparkles,
   X,
   XCircle,
@@ -16,6 +19,7 @@ import {
 import {
   BookingRecord,
   ClientRecord,
+  MakeupCreditRecord,
   StudioSettingsRecord,
   TrainingSessionRecord,
   TrainingWeekRecord,
@@ -23,6 +27,10 @@ import {
   WeekResponseRecord,
   getWeekDayWorkoutType,
 } from '../types/studio';
+import {
+  computeClientMakeupSummary,
+  makeupReasonLabel,
+} from '../services/makeupCalculator';
 import {
   DAYS_PT,
   formatCutoffLabel,
@@ -97,6 +105,7 @@ export interface StudentAgendaSectionProps {
   client: ClientRecord;
   firstName: string;
   publishedWeeks: TrainingWeekRecord[];
+  allWeeks?: TrainingWeekRecord[];
   activeWeek: TrainingWeekRecord | null;
   activeWeekIdx: number;
   onSelectWeekKey: (weekKey: string) => void;
@@ -107,6 +116,8 @@ export interface StudentAgendaSectionProps {
   setDraftSessionIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   waitlistEntries: WaitlistEntryRecord[];
   weekResponse?: WeekResponseRecord;
+  weekResponses?: WeekResponseRecord[];
+  makeupCredits?: MakeupCreditRecord[];
   settings: StudioSettingsRecord;
   weeklyLimit: number;
   studioDefaultLeadMins: number;
@@ -127,6 +138,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
   client,
   firstName,
   publishedWeeks,
+  allWeeks,
   activeWeek,
   activeWeekIdx,
   onSelectWeekKey,
@@ -137,6 +149,8 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
   setDraftSessionIds,
   waitlistEntries,
   weekResponse,
+  weekResponses = [],
+  makeupCredits = [],
   settings,
   weeklyLimit,
   studioDefaultLeadMins,
@@ -165,6 +179,44 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
     week?: TrainingWeekRecord;
   } | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [showMakeupDetails, setShowMakeupDetails] = useState(false);
+
+  const existingMakeupSignature = useMemo(
+    () =>
+      clientWeekBookings
+        .filter((b) => b.makeup)
+        .map((b) => b.sessionId)
+        .sort()
+        .join('|'),
+    [clientWeekBookings]
+  );
+  const existingMakeupIds = useMemo(
+    () => new Set(clientWeekBookings.filter((b) => b.makeup).map((b) => b.sessionId)),
+    [clientWeekBookings]
+  );
+  const [draftMakeupSessionIds, setDraftMakeupSessionIds] = useState<Set<string>>(
+    () => new Set(existingMakeupIds)
+  );
+
+  useEffect(() => {
+    setDraftMakeupSessionIds(new Set(existingMakeupIds));
+  }, [activeWeek?.weekKey, existingMakeupSignature]);
+
+  const makeupSummary = useMemo(
+    () =>
+      computeClientMakeupSummary(
+        client,
+        allWeeks && allWeeks.length > 0 ? allWeeks : publishedWeeks,
+        sessions,
+        bookings,
+        weekResponses,
+        makeupCredits
+      ),
+    [client, allWeeks, publishedWeeks, sessions, bookings, weekResponses, makeupCredits]
+  );
+
+  const totalMakeupBudgetForWeek = makeupSummary.availableCount + existingMakeupIds.size;
+  const effectiveWeeklyLimit = weeklyLimit > 0 ? weeklyLimit + totalMakeupBudgetForWeek : 0;
 
   const weekSessions = useMemo(() => {
     if (!activeWeek) return [];
@@ -293,8 +345,12 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
     for (const id of draftSessionIds) {
       if (!existingIds.has(id)) return true;
     }
+    if (existingMakeupIds.size !== draftMakeupSessionIds.size) return true;
+    for (const id of draftMakeupSessionIds) {
+      if (!existingMakeupIds.has(id)) return true;
+    }
     return false;
-  }, [clientWeekBookings, draftSessionIds]);
+  }, [clientWeekBookings, draftSessionIds, existingMakeupIds, draftMakeupSessionIds]);
 
   const cutoffMinutes = getEffectiveCutoffMinutes(settings);
   const cutoffMs = cutoffMinutes * 60_000;
@@ -342,17 +398,26 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
           .filter((sid) => sid !== target.booking.sessionId)
       );
 
+      const nextMakeupIds = new Set(
+        activeForWeek
+          .filter((b) => b.makeup && b.sessionId !== target.booking.sessionId)
+          .map((b) => b.sessionId)
+      );
+
       await repo.submitStudentBookings(
         uid,
         weekKey,
         client.id,
         nextIds,
         activeForWeek,
-        visibleSessionDayById
+        visibleSessionDayById,
+        nextMakeupIds,
+        sessionMap
       );
 
       if (activeWeek?.weekKey === weekKey) {
         setDraftSessionIds(nextIds);
+        setDraftMakeupSessionIds(nextMakeupIds);
       }
 
       const cancelledDesc = `${target.session.dateLabel} às ${target.session.timeLabel.replace(':', 'h')}`;
@@ -414,17 +479,29 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
       );
       nextIds.add(newSession.id);
 
+      const nextMakeupIds = new Set(
+        activeForWeek
+          .filter((b) => b.makeup && b.sessionId !== target.booking.sessionId)
+          .map((b) => b.sessionId)
+      );
+      if (target.booking.makeup) {
+        nextMakeupIds.add(newSession.id);
+      }
+
       await repo.submitStudentBookings(
         uid,
         weekKey,
         client.id,
         nextIds,
         activeForWeek,
-        visibleSessionDayById
+        visibleSessionDayById,
+        nextMakeupIds,
+        sessionMap
       );
 
       if (activeWeek?.weekKey === weekKey) {
         setDraftSessionIds(nextIds);
+        setDraftMakeupSessionIds(nextMakeupIds);
       }
 
       const oldDesc = `${target.session.dateLabel} às ${target.session.timeLabel.replace(':', 'h')}`;
@@ -514,6 +591,116 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Faltas & Compensações (30 dias) Banner */}
+      {(makeupSummary.availableCount > 0 ||
+        makeupSummary.totalAbsencesAllTime > 0 ||
+        makeupSummary.activeMakeupBookingsCount > 0) && (
+        <div className="rounded-2xl border border-[#A855F7]/60 bg-[#2E1065]/40 p-3.5 space-y-2.5">
+          <button
+            type="button"
+            onClick={() => setShowMakeupDetails((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-sm font-extrabold text-[#D8B4FE]">
+                  <RefreshCw className="h-4 w-4" />
+                  Faltas &amp; Compensações (30 dias)
+                </span>
+                {makeupSummary.availableCount > 0 && (
+                  <StatusPill tone="purple">
+                    {makeupSummary.availableCount} por compensar
+                  </StatusPill>
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-[#E4E4E7]">
+                {makeupSummary.availableCount > 0 && makeupSummary.nearestExpiryDays !== null
+                  ? `Tens ${makeupSummary.availableCount} treino(s) para compensar · Expira em ${makeupSummary.nearestExpiryDays} dia(s)`
+                  : makeupSummary.activeMakeupBookingsCount > 0
+                  ? `Tens ${makeupSummary.activeMakeupBookingsCount} treino(s) de compensação agendado(s)`
+                  : `Faltas registadas: ${makeupSummary.totalAbsencesAllTime} · Sem compensações pendentes`}
+              </p>
+            </div>
+            <span className="text-[#D8B4FE] shrink-0">
+              {showMakeupDetails ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </span>
+          </button>
+
+          {makeupSummary.availableCount > 0 && (
+            <p className="text-[11px] text-[#E9D5FF]/90">
+              Podes marcar os teus treinos de compensação diretamente nos horários abaixo. Quando
+              marcares uma compensação, os teus treinos aparecem a roxo para o PT.
+            </p>
+          )}
+
+          {showMakeupDetails && (
+            <div className="pt-2 border-t border-[#A855F7]/30 space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                <StatusPill tone={makeupSummary.totalAbsencesAllTime > 0 ? 'red' : 'neutral'}>
+                  Faltas: {makeupSummary.totalAbsencesAllTime}
+                </StatusPill>
+                {makeupSummary.removedCount30d > 0 && (
+                  <StatusPill tone="amber">Removidos: {makeupSummary.removedCount30d}</StatusPill>
+                )}
+                {makeupSummary.missedWeekCount30d > 0 && (
+                  <StatusPill tone="purple">
+                    Não marcou: {makeupSummary.missedWeekCount30d}
+                  </StatusPill>
+                )}
+              </div>
+              {makeupSummary.credits.length === 0 ? (
+                <p className="text-xs text-[#A1A1AA]">
+                  Sem créditos de compensação nos últimos 30 dias.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {makeupSummary.credits.slice(0, 8).map((credit) => (
+                    <div
+                      key={credit.id}
+                      className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs ${
+                        credit.status === 'AVAILABLE'
+                          ? 'border-[#A855F7]/50 bg-[#121214]/70'
+                          : 'border-[#323238] bg-[#121214]/50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p
+                          className={`font-bold ${
+                            credit.status === 'AVAILABLE' ? 'text-[#D8B4FE]' : 'text-[#F4F4F5]'
+                          }`}
+                        >
+                          {makeupReasonLabel(credit.reason)}
+                        </p>
+                        <p className="text-[11px] text-[#A1A1AA] truncate">{credit.sourceLabel}</p>
+                      </div>
+                      <StatusPill
+                        tone={
+                          credit.status === 'AVAILABLE'
+                            ? 'purple'
+                            : credit.status === 'USED'
+                            ? 'green'
+                            : 'neutral'
+                        }
+                      >
+                        {credit.status === 'AVAILABLE'
+                          ? `${credit.daysLeft}d`
+                          : credit.status === 'USED'
+                          ? 'Usado'
+                          : 'Expirado'}
+                      </StatusPill>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Sub-tab Switcher: Horários (Marcar) vs Marcações (Confirmados) */}
       <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#323238] bg-[#1B1B1E] p-1.5">
         <button
@@ -600,15 +787,30 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                     <h2 className="text-lg font-bold text-[#F4F4F5]">
                       Semana {activeWeek?.label}
                     </h2>
-                    {weeklyLimit > 0 && (
+                    {weeklyLimit > 0 ? (
                       <div className="mt-1.5 flex justify-center">
                         <StatusPill
-                          tone={draftSessionIds.size >= weeklyLimit ? 'amber' : 'gold'}
+                          tone={
+                            draftMakeupSessionIds.size > 0
+                              ? 'purple'
+                              : draftSessionIds.size >= effectiveWeeklyLimit
+                              ? 'amber'
+                              : 'gold'
+                          }
                         >
-                          Pacote: {draftSessionIds.size} / {weeklyLimit} treinos esta semana
+                          {totalMakeupBudgetForWeek > 0
+                            ? `Pacote: ${draftSessionIds.size} / ${weeklyLimit} (+${totalMakeupBudgetForWeek} comp.)`
+                            : `Pacote: ${draftSessionIds.size} / ${weeklyLimit} treinos esta semana`}
                         </StatusPill>
                       </div>
-                    )}
+                    ) : totalMakeupBudgetForWeek > 0 ? (
+                      <div className="mt-1.5 flex justify-center">
+                        <StatusPill tone="purple">
+                          Compensações: {draftMakeupSessionIds.size} / {totalMakeupBudgetForWeek}{' '}
+                          selecionada(s)
+                        </StatusPill>
+                      </div>
+                    ) : null}
                   </div>
                   <button
                     type="button"
@@ -823,6 +1025,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         ).length;
                         const isFull = confirmedCount >= s.capacity;
                         const isMine = draftSessionIds.has(s.id);
+                        const isMakeupDraft = draftMakeupSessionIds.has(s.id);
                         const existingForSession = clientWeekBookings.find(
                           (b) => b.sessionId === s.id
                         );
@@ -875,7 +1078,9 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                           : isFull
                           ? 'red'
                           : isMine
-                          ? 'gold'
+                          ? isMakeupDraft
+                            ? 'purple'
+                            : 'gold'
                           : 'green';
 
                         const pillLabel = existingForSession
@@ -891,14 +1096,18 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                           : isFull
                           ? 'Esgotado'
                           : isMine
-                          ? 'Selecionado'
+                          ? isMakeupDraft
+                            ? 'Compensação'
+                            : 'Selecionado'
                           : 'Disponível';
 
                         return (
                           <div
                             key={s.id}
                             className={`rounded-2xl border transition ${
-                              existingForSession?.status === 'CONFIRMED' && isMine
+                              isMakeupDraft && isMine
+                                ? 'border-[#A855F7] bg-[#2E1065]/55'
+                                : existingForSession?.status === 'CONFIRMED' && isMine
                                 ? 'border-[#22C55E] bg-[#143521]/45'
                                 : isMine
                                 ? 'border-[#EAB308] bg-[#3D3314]/70'
@@ -919,6 +1128,11 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                     next.delete(s.id);
                                     return next;
                                   });
+                                  setDraftMakeupSessionIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(s.id);
+                                    return next;
+                                  });
                                   return;
                                 }
                                 // Enforce max 1 training per day
@@ -929,10 +1143,19 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                   return;
                                 }
                                 if (otherDraftOnDay) {
+                                  const prevWasMakeup = draftMakeupSessionIds.has(
+                                    otherDraftOnDay.id
+                                  );
                                   setDraftSessionIds((prev) => {
                                     const next = new Set(prev);
                                     daySessions.forEach((ds) => next.delete(ds.id));
                                     next.add(s.id);
+                                    return next;
+                                  });
+                                  setDraftMakeupSessionIds((prev) => {
+                                    const next = new Set(prev);
+                                    daySessions.forEach((ds) => next.delete(ds.id));
+                                    if (prevWasMakeup) next.add(s.id);
                                     return next;
                                   });
                                   onBanner(
@@ -940,10 +1163,29 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                   );
                                   return;
                                 }
-                                if (weeklyLimit > 0 && draftSessionIds.size >= weeklyLimit) {
+                                if (
+                                  weeklyLimit > 0 &&
+                                  draftSessionIds.size >= effectiveWeeklyLimit
+                                ) {
                                   onBanner(
-                                    `Atingiste o limite semanal do teu pacote (${weeklyLimit} treino(s)/semana). Retira um horário ou fala com o teu PT.`
+                                    totalMakeupBudgetForWeek > 0
+                                      ? `Atingiste o limite semanal (${weeklyLimit} do pacote + ${totalMakeupBudgetForWeek} compensação).`
+                                      : `Atingiste o limite semanal do teu pacote (${weeklyLimit} treino(s)/semana). Retira um horário ou fala com o teu PT.`
                                   );
+                                  return;
+                                }
+                                if (weeklyLimit > 0 && draftSessionIds.size >= weeklyLimit) {
+                                  setDraftSessionIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.add(s.id);
+                                    return next;
+                                  });
+                                  setDraftMakeupSessionIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.add(s.id);
+                                    return next;
+                                  });
+                                  onBanner('Treino selecionado como compensação!');
                                   return;
                                 }
                                 setDraftSessionIds((prev) => {
@@ -1019,10 +1261,15 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                 </div>
 
                                 <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                  {isMakeupDraft && isMine && existingForSession && (
+                                    <StatusPill tone="purple">Compensação</StatusPill>
+                                  )}
                                   <StatusPill tone={pillTone}>{pillLabel}</StatusPill>
                                   <span
                                     className={`inline-flex h-6 w-6 items-center justify-center rounded-full border ${
-                                      isMine
+                                      isMakeupDraft && isMine
+                                        ? 'border-[#A855F7] bg-[#A855F7] text-white'
+                                        : isMine
                                         ? 'border-[#EAB308] bg-[#EAB308] text-[#121214]'
                                         : 'border-[#52525B] text-transparent'
                                     }`}
@@ -1032,6 +1279,47 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                                 </div>
                               </div>
                             </button>
+
+                            {isMine && totalMakeupBudgetForWeek > 0 && !editLocked && (() => {
+                              const minRequiredMakeups =
+                                weeklyLimit > 0
+                                  ? Math.max(0, draftSessionIds.size - weeklyLimit)
+                                  : 0;
+                              const canEnable =
+                                !isMakeupDraft &&
+                                draftMakeupSessionIds.size < totalMakeupBudgetForWeek;
+                              const canDisable =
+                                isMakeupDraft &&
+                                draftMakeupSessionIds.size > minRequiredMakeups;
+                              if (!canEnable && !canDisable) return null;
+                              return (
+                                <div className="mx-3.5 mb-2.5 flex items-center justify-between gap-2 border-t border-[#A855F7]/30 pt-2">
+                                  <span className="text-[11px] text-[#D8B4FE]">
+                                    {isMakeupDraft
+                                      ? 'Marcado como treino de compensação'
+                                      : 'Usar crédito de compensação neste treino?'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDraftMakeupSessionIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (isMakeupDraft) next.delete(s.id);
+                                        else next.add(s.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
+                                      isMakeupDraft
+                                        ? 'border-[#A855F7] bg-[#A855F7] text-white'
+                                        : 'border-[#A855F7]/60 bg-[#2E1065]/60 text-[#D8B4FE] hover:bg-[#3B1780]'
+                                    }`}
+                                  >
+                                    {isMakeupDraft ? 'Compensação ✓' : 'Marcar comp.'}
+                                  </button>
+                                </div>
+                              );
+                            })()}
 
                             {existingForSession && (() => {
                               const editState = getBookingEditState(existingForSession, s);
@@ -1161,10 +1449,15 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                         s.startMillis > 0 &&
                         Date.now() > s.startMillis - cutoffMs;
                       const canRemoveChip = settings.clientsCanEdit && !lockedByCutoff;
+                      const chipIsMakeup = draftMakeupSessionIds.has(s.id);
                       return (
                         <div
                           key={s.id}
-                          className="inline-flex items-center rounded-xl border border-[#EAB308]/50 bg-[#3D3314]/60 text-xs font-bold text-[#FACC15]"
+                          className={`inline-flex items-center rounded-xl border text-xs font-bold ${
+                            chipIsMakeup
+                              ? 'border-[#A855F7]/70 bg-[#2E1065]/75 text-[#E9D5FF]'
+                              : 'border-[#EAB308]/50 bg-[#3D3314]/60 text-[#FACC15]'
+                          }`}
                         >
                           <button
                             type="button"
@@ -1172,18 +1465,24 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                             className="px-2.5 py-1 hover:text-white"
                           >
                             {DAY_SHORT_PT[s.dayOfWeek]} · {s.timeLabel}
+                            {chipIsMakeup ? ' (Comp.)' : ''}
                           </button>
                           {canRemoveChip && (
                             <button
                               type="button"
                               aria-label={`Remover ${DAY_SHORT_PT[s.dayOfWeek]} ${s.timeLabel}`}
-                              onClick={() =>
+                              onClick={() => {
                                 setDraftSessionIds((prev) => {
                                   const next = new Set(prev);
                                   next.delete(s.id);
                                   return next;
-                                })
-                              }
+                                });
+                                setDraftMakeupSessionIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(s.id);
+                                  return next;
+                                });
+                              }}
                               className="border-l border-[#EAB308]/35 px-1.5 py-1 text-[#FCA5A5] hover:bg-[#3B1518] rounded-r-xl"
                             >
                               <X className="h-3.5 w-3.5" />
@@ -1204,9 +1503,15 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                     disabled={!settings.clientsCanEdit || actionBusy}
                     onClick={async () => {
                       if (actionBusy) return;
-                      if (weeklyLimit > 0 && draftSessionIds.size > weeklyLimit) {
+                      if (weeklyLimit > 0 && draftSessionIds.size > effectiveWeeklyLimit) {
                         onBanner(
-                          `O teu pacote permite até ${weeklyLimit} treino(s) por semana.`
+                          `O teu pacote permite até ${weeklyLimit} treino(s) (+${totalMakeupBudgetForWeek} compensação).`
+                        );
+                        return;
+                      }
+                      if (draftMakeupSessionIds.size > totalMakeupBudgetForWeek) {
+                        onBanner(
+                          `Selecionaste mais compensações do que créditos disponíveis (${totalMakeupBudgetForWeek}).`
                         );
                         return;
                       }
@@ -1245,7 +1550,9 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                           client.id,
                           draftSessionIds,
                           clientWeekBookings,
-                          visibleSessionDayById
+                          visibleSessionDayById,
+                          draftMakeupSessionIds,
+                          sessionMap
                         );
 
                         const isPartialCancelOnly =
@@ -1510,6 +1817,7 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                       </div>
 
                       <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        {booking.makeup && <StatusPill tone="purple">Compensação</StatusPill>}
                         <StatusPill tone="green">Confirmado ✓</StatusPill>
                         {booking.attendanceStatus === 'PRESENT' && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#86EFAC]">
@@ -1594,7 +1902,10 @@ export const StudentAgendaSection: React.FC<StudentAgendaSectionProps> = ({
                             {session.note ? ` · ${session.note}` : ''}
                           </p>
                         </div>
-                        <StatusPill tone="amber">Por confirmar</StatusPill>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          {booking.makeup && <StatusPill tone="purple">Compensação</StatusPill>}
+                          <StatusPill tone="amber">Por confirmar</StatusPill>
+                        </div>
                       </div>
                       {editState.canModify ? (
                         <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#EAB308]/20">

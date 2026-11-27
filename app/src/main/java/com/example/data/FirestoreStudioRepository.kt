@@ -188,6 +188,9 @@ class FirestoreStudioRepository(
     fun observeWorkoutFeedback(uid: String): Flow<List<WorkoutFeedbackRecord>> =
         observeSubcollection<WorkoutFeedbackRecord>(uid, "workout_feedback") { it.sortedByDescending { f -> f.timestampMillis } }
 
+    fun observeMakeupCredits(uid: String): Flow<List<MakeupCreditRecord>> =
+        observeSubcollection<MakeupCreditRecord>(uid, "makeup_credits") { it.sortedByDescending { c -> c.occurredAtMillis } }
+
     fun observeOwnPtAccount(uid: String): Flow<PtAccountRecord?> = flow {
         require(uid.isNotBlank()) { "UID inválido." }
         val docRef = db.collection("pt_accounts").document(uid)
@@ -1420,11 +1423,42 @@ class FirestoreStudioRepository(
         }
     }
 
-    suspend fun deleteSession(sessionId: String, relatedBookings: List<BookingRecord>): Result<Unit> = try {
+    suspend fun deleteSession(
+        sessionId: String,
+        relatedBookings: List<BookingRecord>,
+        session: TrainingSessionRecord? = null
+    ): Result<Unit> = try {
         val uid = requireUserId()
+        val now = System.currentTimeMillis()
         val batch = db.batch()
         relatedBookings.filter { it.sessionId == sessionId }.forEach { b ->
             batch.delete(userDoc(uid).collection("bookings").document(b.id))
+            if (!b.makeup && b.status == BookingStatus.CONFIRMED.name && b.attendanceStatus != "ABSENT") {
+                val occurred = session?.startMillis?.takeIf { it > 0L }
+                    ?: b.requestedAtMillis.takeIf { it > 0L }
+                    ?: now
+                val label = if (session != null) {
+                    "Sessão removida · ${session.dateLabel} ${session.timeLabel}"
+                } else {
+                    "Treino removido (${b.weekKey})"
+                }
+                val creditRef = userDoc(uid).collection("makeup_credits").document()
+                batch.set(
+                    creditRef,
+                    mapOf(
+                        "userId" to uid,
+                        "clientId" to b.clientId,
+                        "reason" to "REMOVED",
+                        "weekKey" to b.weekKey.take(30),
+                        "sourceLabel" to label.take(160),
+                        "occurredAtMillis" to occurred,
+                        "expiresAtMillis" to (occurred + MAKEUP_VALIDITY_MILLIS),
+                        "dismissed" to false,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
         }
         batch.delete(userDoc(uid).collection("sessions").document(sessionId))
         batch.commit().await()
@@ -1667,9 +1701,49 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
-    suspend fun removeBooking(bookingId: String): Result<Unit> = try {
+    suspend fun removeBooking(
+        bookingId: String,
+        booking: BookingRecord? = null,
+        session: TrainingSessionRecord? = null,
+        grantRemovedCredit: Boolean = true
+    ): Result<Unit> = try {
         val uid = requireUserId()
-        userDoc(uid).collection("bookings").document(bookingId).delete().await()
+        val batch = db.batch()
+        batch.delete(userDoc(uid).collection("bookings").document(bookingId))
+        if (
+            grantRemovedCredit &&
+            booking != null &&
+            !booking.makeup &&
+            booking.status == BookingStatus.CONFIRMED.name &&
+            booking.attendanceStatus != "ABSENT"
+        ) {
+            val now = System.currentTimeMillis()
+            val occurred = session?.startMillis?.takeIf { it > 0L }
+                ?: booking.requestedAtMillis.takeIf { it > 0L }
+                ?: now
+            val label = if (session != null) {
+                "Treino removido · ${session.dateLabel} ${session.timeLabel}"
+            } else {
+                "Treino removido (${booking.weekKey})"
+            }
+            val creditRef = userDoc(uid).collection("makeup_credits").document()
+            batch.set(
+                creditRef,
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to booking.clientId,
+                    "reason" to "REMOVED",
+                    "weekKey" to booking.weekKey.take(30),
+                    "sourceLabel" to label.take(160),
+                    "occurredAtMillis" to occurred,
+                    "expiresAtMillis" to (occurred + MAKEUP_VALIDITY_MILLIS),
+                    "dismissed" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        }
+        batch.commit().await()
         Result.success(Unit)
     } catch (e: CancellationException) {
         throw e
@@ -1678,13 +1752,44 @@ class FirestoreStudioRepository(
         Result.failure(e)
     }
 
-    suspend fun confirmClientBookings(bookings: List<BookingRecord>): Result<Unit> = try {
+    suspend fun confirmClientBookings(
+        bookings: List<BookingRecord>,
+        sessionsById: Map<String, TrainingSessionRecord> = emptyMap()
+    ): Result<Unit> = try {
         val uid = requireUserId()
+        val now = System.currentTimeMillis()
         val batch = db.batch()
         bookings.forEach { b ->
             val ref = userDoc(uid).collection("bookings").document(b.id)
             if (b.status == BookingStatus.CANCELLED.name) {
                 batch.delete(ref)
+                if (!b.makeup && b.attendanceStatus != "ABSENT") {
+                    val session = sessionsById[b.sessionId]
+                    val occurred = session?.startMillis?.takeIf { it > 0L }
+                        ?: b.requestedAtMillis.takeIf { it > 0L }
+                        ?: now
+                    val label = if (session != null) {
+                        "Treino cancelado · ${session.dateLabel} ${session.timeLabel}"
+                    } else {
+                        "Treino cancelado (${b.weekKey})"
+                    }
+                    val creditRef = userDoc(uid).collection("makeup_credits").document()
+                    batch.set(
+                        creditRef,
+                        mapOf(
+                            "userId" to uid,
+                            "clientId" to b.clientId,
+                            "reason" to "REMOVED",
+                            "weekKey" to b.weekKey.take(30),
+                            "sourceLabel" to label.take(160),
+                            "occurredAtMillis" to occurred,
+                            "expiresAtMillis" to (occurred + MAKEUP_VALIDITY_MILLIS),
+                            "dismissed" to false,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
             } else {
                 batch.update(ref, mapOf("status" to BookingStatus.CONFIRMED.name, "updatedAt" to FieldValue.serverTimestamp()))
             }
@@ -1695,6 +1800,55 @@ class FirestoreStudioRepository(
         throw e
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/bookings")
+        Result.failure(e)
+    }
+
+    suspend fun addManualMakeupCredit(
+        clientId: String,
+        sourceLabel: String,
+        weekKey: String = "",
+        occurredAtMillis: Long = System.currentTimeMillis()
+    ): Result<Unit> = try {
+        val uid = requireUserId()
+        val safeOccurred = occurredAtMillis.coerceAtLeast(0L)
+        val cleanLabel = sourceLabel.trim().take(160).ifBlank { "Compensação atribuída pelo PT" }
+        userDoc(uid).collection("makeup_credits").document()
+            .set(
+                mapOf(
+                    "userId" to uid,
+                    "clientId" to clientId,
+                    "reason" to "MANUAL",
+                    "weekKey" to weekKey.trim().take(30),
+                    "sourceLabel" to cleanLabel,
+                    "occurredAtMillis" to safeOccurred,
+                    "expiresAtMillis" to (safeOccurred + MAKEUP_VALIDITY_MILLIS),
+                    "dismissed" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.CREATE, "users/$uidOrUnknown/makeup_credits")
+        Result.failure(e)
+    }
+
+    suspend fun dismissMakeupCredit(creditId: String, dismissed: Boolean = true): Result<Unit> = try {
+        val uid = requireUserId()
+        userDoc(uid).collection("makeup_credits").document(creditId)
+            .update(
+                mapOf(
+                    "dismissed" to dismissed,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.UPDATE, "users/$uidOrUnknown/makeup_credits/$creditId")
         Result.failure(e)
     }
 
@@ -1820,7 +1974,9 @@ class FirestoreStudioRepository(
         clientId: String,
         selectedSessionIds: Set<String>,
         existingBookings: List<BookingRecord>,
-        visibleSessionDayById: Map<String, Int> = emptyMap()
+        visibleSessionDayById: Map<String, Int> = emptyMap(),
+        makeupSessionIds: Set<String> = emptySet(),
+        sessionsById: Map<String, TrainingSessionRecord> = emptyMap()
     ): Result<Unit> {
         val uid = try {
             requireUserId()
@@ -1867,6 +2023,7 @@ class FirestoreStudioRepository(
                         clientId = bClientId,
                         status = bStatus,
                         attendanceStatus = doc.getString("attendanceStatus").orEmpty(),
+                        makeup = doc.getBoolean("makeup") ?: false,
                         requestedAtMillis = doc.getLong("requestedAtMillis") ?: 0L
                     )
                 }
@@ -1920,17 +2077,66 @@ class FirestoreStudioRepository(
             } else {
                 val newStatus = if (hadConfirmed) BookingStatus.ALTERED.name else BookingStatus.PENDING.name
                 val keptSessionIds = mutableSetOf<String>()
+                val removedConfirmedNonMakeup = mutableListOf<BookingRecord>()
 
                 activeExisting.forEach { b ->
                     if (b.sessionId !in selectedSessionIds || !keptSessionIds.add(b.sessionId)) {
                         // Delete unselected bookings AND any duplicate docs for the same sessionId
                         batch.delete(userDoc(uid).collection("bookings").document(b.id))
+                        if (
+                            b.sessionId !in selectedSessionIds &&
+                            b.status == BookingStatus.CONFIRMED.name &&
+                            !b.makeup &&
+                            b.attendanceStatus != "ABSENT"
+                        ) {
+                            removedConfirmedNonMakeup += b
+                        }
+                    } else {
+                        val wantsMakeup = b.sessionId in makeupSessionIds
+                        if (b.makeup != wantsMakeup) {
+                            batch.update(
+                                userDoc(uid).collection("bookings").document(b.id),
+                                mapOf(
+                                    "makeup" to wantsMakeup,
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            )
+                        }
                     }
-                    // Kept bookings keep their existing status (e.g. CONFIRMED remains CONFIRMED)
-                    // so cancelling or editing another session never forces the PT to re-confirm them.
                 }
 
-                selectedSessionIds.filter { it !in keptSessionIds }.forEach { sessionId ->
+                val addedSessionIds = selectedSessionIds.filter { it !in keptSessionIds }
+                val addedNonMakeupCount = addedSessionIds.count { it !in makeupSessionIds }
+                val netLostConfirmed = (removedConfirmedNonMakeup.size - addedNonMakeupCount).coerceAtLeast(0)
+                removedConfirmedNonMakeup.take(netLostConfirmed).forEach { removed ->
+                    val sess = sessionsById[removed.sessionId]
+                    val occurred = sess?.startMillis?.takeIf { it > 0L }
+                        ?: removed.requestedAtMillis.takeIf { it > 0L }
+                        ?: now
+                    val label = if (sess != null) {
+                        "Treino desmarcado · ${sess.dateLabel} ${sess.timeLabel}"
+                    } else {
+                        "Treino desmarcado ($weekKey)"
+                    }
+                    val creditRef = userDoc(uid).collection("makeup_credits").document()
+                    batch.set(
+                        creditRef,
+                        mapOf(
+                            "userId" to uid,
+                            "clientId" to clientId,
+                            "reason" to "REMOVED",
+                            "weekKey" to weekKey.take(30),
+                            "sourceLabel" to label.take(160),
+                            "occurredAtMillis" to occurred,
+                            "expiresAtMillis" to (occurred + MAKEUP_VALIDITY_MILLIS),
+                            "dismissed" to false,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+
+                addedSessionIds.forEach { sessionId ->
                     val ref = userDoc(uid).collection("bookings").document()
                     batch.set(
                         ref,
@@ -1940,6 +2146,7 @@ class FirestoreStudioRepository(
                             "weekKey" to weekKey,
                             "clientId" to clientId,
                             "status" to newStatus,
+                            "makeup" to (sessionId in makeupSessionIds),
                             "requestedAtMillis" to now,
                             "createdAt" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp()

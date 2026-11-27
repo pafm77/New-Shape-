@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.MakeupCreditCalculator
 import com.example.data.SeedCatalog
 import com.example.data.model.ClientRecord
 import com.example.data.model.ExerciseRecord
@@ -54,7 +55,30 @@ fun PtTrainingTab(
     var selectedClientId by remember(activeClients) {
         mutableStateOf(activeClients.firstOrNull()?.id.orEmpty())
     }
-    val subTabs = listOf("Planos", "Marcações", "Agenda", "Exercícios (${state.exercises.size})")
+    val eligibleMakeupCount = remember(
+        activeClients,
+        state.weeks,
+        state.sessions,
+        state.bookings,
+        state.weekResponses,
+        state.makeupCredits
+    ) {
+        MakeupCreditCalculator.computeAllClients(
+            clients = activeClients,
+            weeks = state.weeks,
+            sessions = state.sessions,
+            bookings = state.bookings,
+            weekResponses = state.weekResponses,
+            makeupCredits = state.makeupCredits
+        ).values.count { it.availableCount > 0 }
+    }
+    val subTabs = listOf(
+        "Planos",
+        "Marcações",
+        "Agenda",
+        if (eligibleMakeupCount > 0) "Compensações ($eligibleMakeupCount)" else "Compensações",
+        "Exercícios (${state.exercises.size})"
+    )
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScrollableTabRow(
@@ -65,6 +89,7 @@ fun PtTrainingTab(
             divider = { HorizontalDivider(color = HairlineBorder) }
         ) {
             subTabs.forEachIndexed { idx, title ->
+                val isCompTab = idx == 3
                 Tab(
                     selected = selectedSubTab == idx,
                     onClick = { selectedSubTab = idx },
@@ -74,7 +99,12 @@ fun PtTrainingTab(
                             text = title,
                             maxLines = 1,
                             fontWeight = if (selectedSubTab == idx) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selectedSubTab == idx) NewShapeGold else TextSecondaryDark
+                            color = when {
+                                selectedSubTab == idx && isCompTab -> MakeupPurpleBright
+                                selectedSubTab == idx -> NewShapeGold
+                                isCompTab && eligibleMakeupCount > 0 -> MakeupPurpleBright.copy(alpha = 0.85f)
+                                else -> TextSecondaryDark
+                            }
                         )
                     }
                 )
@@ -101,6 +131,10 @@ fun PtTrainingTab(
                     selectedClientId = cid
                     selectedSubTab = 0
                 }
+            )
+            3 -> PtCompensacoesSection(
+                state = state,
+                viewModel = viewModel
             )
             else -> ExerciseLibrarySection(state = state, viewModel = viewModel)
         }

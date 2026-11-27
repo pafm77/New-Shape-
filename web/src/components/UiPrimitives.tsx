@@ -15,7 +15,7 @@ export const BrandCard: React.FC<{
   </div>
 );
 
-export type PillTone = 'gold' | 'green' | 'amber' | 'red' | 'blue' | 'neutral';
+export type PillTone = 'gold' | 'green' | 'amber' | 'red' | 'blue' | 'purple' | 'neutral';
 
 const TONE_MAP: Record<PillTone, string> = {
   gold: 'bg-[#3D3314] text-[#FACC15] border-[#EAB308]/40',
@@ -23,6 +23,7 @@ const TONE_MAP: Record<PillTone, string> = {
   amber: 'bg-[#3B2A10] text-[#F59E0B] border-[#F59E0B]/40',
   red: 'bg-[#3B1518] text-[#EF4444] border-[#EF4444]/40',
   blue: 'bg-[#102A3A] text-[#38BDF8] border-[#38BDF8]/40',
+  purple: 'bg-[#2E1065] text-[#D8B4FE] border-[#A855F7]/50',
   neutral: 'bg-[#242429] text-[#A1A1AA] border-[#323238]',
 };
 

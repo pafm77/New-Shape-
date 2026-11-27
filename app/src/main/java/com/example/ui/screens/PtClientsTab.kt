@@ -27,6 +27,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.ComputedMakeupStatus
+import com.example.data.MakeupCreditCalculator
 import com.example.data.ReportExporter
 import com.example.data.SeedCatalog
 import com.example.data.model.BookingStatus
@@ -87,6 +89,23 @@ fun PtClientsTab(
             val eff = SeedCatalog.getEffectiveClientFidelizacaoMonths(client, state.fidelizacoes)
             client.id to if (eff == 6 || eff == 12) eff else 0
         }
+    }
+    val clientMakeupMap = remember(
+        baseVisibleClients,
+        state.weeks,
+        state.sessions,
+        state.bookings,
+        state.weekResponses,
+        state.makeupCredits
+    ) {
+        MakeupCreditCalculator.computeAllClients(
+            clients = baseVisibleClients,
+            weeks = state.weeks,
+            sessions = state.sessions,
+            bookings = state.bookings,
+            weekResponses = state.weekResponses,
+            makeupCredits = state.makeupCredits
+        )
     }
     val clientUpcomingBookingsMap = remember(state.bookings, state.sessions) {
         val startOfToday = Calendar.getInstance().apply {
@@ -390,6 +409,14 @@ fun PtClientsTab(
                                             containerColor = PendingAmberContainer
                                         )
                                     }
+                                    val clientMakeup = clientMakeupMap[client.id]
+                                    if (clientMakeup != null && clientMakeup.availableCount > 0) {
+                                        StatusPill(
+                                            text = "${clientMakeup.availableCount} comp.",
+                                            textColor = MakeupPurpleBright,
+                                            containerColor = MakeupPurpleContainer
+                                        )
+                                    }
                                 }
                                 if (client.fixedSlots.isNotEmpty()) {
                                     Spacer(Modifier.height(4.dp))
@@ -638,6 +665,25 @@ fun PtClientProfileScreen(
     val pendingCount = confirmedBookings.size - markedCount
     val donePct = if (markedCount > 0) (presentCount * 100.0 / markedCount) else 0.0
     val absentPct = if (markedCount > 0) (absentCount * 100.0 / markedCount) else 0.0
+    val profileMakeupSummary = remember(
+        client,
+        state.weeks,
+        state.sessions,
+        state.bookings,
+        state.weekResponses,
+        state.makeupCredits
+    ) {
+        MakeupCreditCalculator.computeForClient(
+            client = client,
+            weeks = state.weeks,
+            sessions = state.sessions,
+            bookings = state.bookings,
+            weekResponses = state.weekResponses,
+            makeupCredits = state.makeupCredits
+        )
+    }
+    var showManualCreditDialog by remember { mutableStateOf(false) }
+    var showMakeupHistory by remember { mutableStateOf(false) }
     var showResetPinConfirm by remember { mutableStateOf(false) }
     var showDeleteClientConfirm by remember { mutableStateOf(false) }
 
@@ -802,6 +848,197 @@ fun PtClientProfileScreen(
                     }
                 }
 
+                // Faltas & Compensações (30 dias) Card
+                item {
+                    Surface(
+                        color = if (profileMakeupSummary.availableCount > 0) MakeupPurpleContainer.copy(alpha = 0.45f) else CharcoalSurface,
+                        shape = MaterialTheme.shapes.large,
+                        border = BorderStroke(
+                            if (profileMakeupSummary.availableCount > 0) 1.5.dp else 1.dp,
+                            if (profileMakeupSummary.availableCount > 0) MakeupPurple else HairlineBorder
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_makeup_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Faltas & Compensações (30 dias)",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MakeupPurpleBright
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append("Total faltas: ${profileMakeupSummary.totalAbsencesAllTime}")
+                                            if (profileMakeupSummary.nearestExpiryDays != null) {
+                                                append(" · Expira em ${profileMakeupSummary.nearestExpiryDays}d")
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondaryDark
+                                    )
+                                }
+                                StatusPill(
+                                    text = "${profileMakeupSummary.availableCount} disp.",
+                                    textColor = if (profileMakeupSummary.availableCount > 0) MakeupPurpleBright else TextSecondaryDark,
+                                    containerColor = if (profileMakeupSummary.availableCount > 0) MakeupPurpleContainer else ElevatedCharcoal
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                StatusPill(
+                                    text = "Faltas (30d): ${profileMakeupSummary.absentCount30d}",
+                                    textColor = if (profileMakeupSummary.absentCount30d > 0) DangerRed else TextSecondaryDark,
+                                    containerColor = if (profileMakeupSummary.absentCount30d > 0) DangerRedContainer else ElevatedCharcoal
+                                )
+                                StatusPill(
+                                    text = "Removidos: ${profileMakeupSummary.removedCount30d}",
+                                    textColor = if (profileMakeupSummary.removedCount30d > 0) PendingAmber else TextSecondaryDark,
+                                    containerColor = if (profileMakeupSummary.removedCount30d > 0) PendingAmberContainer else ElevatedCharcoal
+                                )
+                                StatusPill(
+                                    text = "Não marcou: ${profileMakeupSummary.missedWeekCount30d}",
+                                    textColor = if (profileMakeupSummary.missedWeekCount30d > 0) MakeupPurpleBright else TextSecondaryDark,
+                                    containerColor = if (profileMakeupSummary.missedWeekCount30d > 0) MakeupPurpleContainer else ElevatedCharcoal
+                                )
+                                if (profileMakeupSummary.activeMakeupBookingsCount > 0) {
+                                    StatusPill(
+                                        text = "Agendadas: ${profileMakeupSummary.activeMakeupBookingsCount}",
+                                        textColor = ConfirmedGreen,
+                                        containerColor = ConfirmedGreenContainer
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showManualCreditDialog = true },
+                                    border = BorderStroke(1.dp, MakeupPurple.copy(alpha = 0.7f)),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = MakeupPurpleContainer.copy(alpha = 0.5f),
+                                        contentColor = MakeupPurpleBright
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 44.dp)
+                                        .testTag("profile_add_makeup_btn")
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("+1 Compensação (30d)", fontWeight = FontWeight.Bold)
+                                }
+                                if (profileMakeupSummary.credits.isNotEmpty()) {
+                                    TextButton(
+                                        onClick = { showMakeupHistory = !showMakeupHistory },
+                                        modifier = Modifier.testTag("profile_toggle_makeup_history")
+                                    ) {
+                                        Text(
+                                            text = if (showMakeupHistory) "Ocultar" else "Histórico (${profileMakeupSummary.credits.size})",
+                                            color = MakeupPurpleBright,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (showMakeupHistory && profileMakeupSummary.credits.isNotEmpty()) {
+                                HorizontalDivider(color = HairlineBorder)
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    profileMakeupSummary.credits.take(10).forEach { credit ->
+                                        val isAvail = credit.status == ComputedMakeupStatus.AVAILABLE
+                                        val isUsed = credit.status == ComputedMakeupStatus.USED
+                                        Surface(
+                                            color = ObsidianBg.copy(alpha = 0.7f),
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isAvail) MakeupPurple.copy(alpha = 0.55f) else HairlineBorder
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "${MakeupCreditCalculator.reasonLabel(credit.reason)} · ${MakeupCreditCalculator.formatShortDate(credit.occurredAtMillis)}",
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (isAvail) MakeupPurpleBright else TextPrimaryDark
+                                                    )
+                                                    Text(
+                                                        text = credit.sourceLabel,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = TextSecondaryDark
+                                                    )
+                                                }
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    StatusPill(
+                                                        text = when {
+                                                            isAvail -> "${credit.daysLeft}d"
+                                                            isUsed -> "Usado"
+                                                            else -> "Expirado"
+                                                        },
+                                                        textColor = when {
+                                                            isAvail -> MakeupPurpleBright
+                                                            isUsed -> ConfirmedGreen
+                                                            else -> TextSecondaryDark
+                                                        },
+                                                        containerColor = when {
+                                                            isAvail -> MakeupPurpleContainer
+                                                            isUsed -> ConfirmedGreenContainer
+                                                            else -> ElevatedCharcoal
+                                                        }
+                                                    )
+                                                    if (isAvail && credit.dismissibleCreditDocId != null) {
+                                                        IconButton(
+                                                            onClick = { viewModel.dismissMakeupCredit(credit.dismissibleCreditDocId) },
+                                                            modifier = Modifier.size(32.dp)
+                                                        ) {
+                                                            Icon(
+                                                                Icons.Default.Close,
+                                                                contentDescription = "Anular crédito",
+                                                                tint = DangerRed,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Upcoming Booked Trainings Card
                 item {
                     BrandCard {
@@ -833,10 +1070,12 @@ fun PtClientProfileScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 upcomingBookings.take(6).forEach { (booking, session) ->
                                     val isConfirmed = booking.status == BookingStatus.CONFIRMED.name
+                                    val weekHasMakeup = booking.makeup ||
+                                        client.id in MakeupCreditCalculator.getMakeupClientIdsForWeek(state.bookings, booking.weekKey)
                                     Surface(
-                                        color = ElevatedCharcoal,
+                                        color = if (weekHasMakeup) MakeupPurpleContainer.copy(alpha = 0.55f) else ElevatedCharcoal,
                                         shape = RoundedCornerShape(10.dp),
-                                        border = BorderStroke(1.dp, HairlineBorder),
+                                        border = BorderStroke(1.dp, if (weekHasMakeup) MakeupPurple else HairlineBorder),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Row(
@@ -845,12 +1084,24 @@ fun PtClientProfileScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = "${session.dateLabel} · ${session.timeLabel}",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = TextPrimaryDark
-                                                )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "${session.dateLabel} · ${session.timeLabel}",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (weekHasMakeup) MakeupPurpleBright else TextPrimaryDark
+                                                    )
+                                                    if (weekHasMakeup) {
+                                                        StatusPill(
+                                                            text = if (booking.makeup) "Compensação" else "Em compensação",
+                                                            textColor = MakeupPurpleBright,
+                                                            containerColor = MakeupPurpleContainer
+                                                        )
+                                                    }
+                                                }
                                                 if (session.note.isNotBlank()) {
                                                     Text(
                                                         text = session.note,
@@ -1645,6 +1896,17 @@ fun PtClientProfileScreen(
                 }
             }
         }
+    }
+
+    if (showManualCreditDialog) {
+        ManualMakeupCreditDialog(
+            clientName = client.name,
+            onDismiss = { showManualCreditDialog = false },
+            onConfirm = { note ->
+                viewModel.addManualMakeupCredit(client.id, note)
+                showManualCreditDialog = false
+            }
+        )
     }
 
     if (state.isSuperAdmin && showDeleteClientConfirm) {

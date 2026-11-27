@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.MakeupCreditCalculator
 import com.example.data.model.*
 import com.example.ui.NewShapeViewModel
 import com.example.ui.StudioUiState
@@ -91,6 +92,10 @@ internal fun PtTrainingMarcacoesSection(
     val clientMap = remember(state.clients) { state.clients.associateBy { it.id } }
     val sessionMap = remember(state.sessions) { state.sessions.associateBy { it.id } }
     val weekMap = remember(state.weeks) { state.weeks.associateBy { it.weekKey } }
+    val makeupClientIdsForWeek = remember(state.bookings, weekKey) {
+        if (weekKey.isBlank()) emptySet()
+        else MakeupCreditCalculator.getMakeupClientIdsForWeek(state.bookings, weekKey)
+    }
 
     // Map clientId -> Pair(confirmedCount, pendingCount) in active week
     val clientWeekBookingCounts = remember(state.bookings, weekKey) {
@@ -681,10 +686,12 @@ internal fun PtTrainingMarcacoesSection(
                                 val isPresent = booking.attendanceStatus == "PRESENT"
                                 val isAbsent = booking.attendanceStatus == "ABSENT"
                                 val isSwappingThis = swappingTarget?.first?.id == booking.id
+                                val isMakeupClientThisWeek = booking.clientId in makeupClientIdsForWeek || booking.makeup
                                 val endTime = ptBookEndTime(session.timeLabel, session.durationMinutes)
                                 Surface(
                                     color = when {
                                         isSwappingThis -> NewShapeGoldMuted.copy(alpha = 0.65f)
+                                        isMakeupClientThisWeek -> MakeupPurpleContainer.copy(alpha = 0.6f)
                                         isPresent -> ConfirmedGreenContainer.copy(alpha = 0.55f)
                                         isAbsent -> DangerRedContainer.copy(alpha = 0.45f)
                                         isConfirmed -> ConfirmedGreenContainer.copy(alpha = 0.45f)
@@ -692,9 +699,10 @@ internal fun PtTrainingMarcacoesSection(
                                     },
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(
-                                        1.dp,
+                                        if (isMakeupClientThisWeek && !isSwappingThis) 1.5.dp else 1.dp,
                                         when {
                                             isSwappingThis -> NewShapeGold
+                                            isMakeupClientThisWeek -> MakeupPurple
                                             isPresent -> ConfirmedGreen.copy(alpha = 0.7f)
                                             isAbsent -> DangerRed.copy(alpha = 0.6f)
                                             isConfirmed -> ConfirmedGreen.copy(alpha = 0.5f)
@@ -718,8 +726,15 @@ internal fun PtTrainingMarcacoesSection(
                                                         text = session.dateLabel,
                                                         style = MaterialTheme.typography.bodyMedium,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = TextPrimaryDark
+                                                        color = if (isMakeupClientThisWeek) MakeupPurpleBright else TextPrimaryDark
                                                     )
+                                                    if (isMakeupClientThisWeek) {
+                                                        StatusPill(
+                                                            text = if (booking.makeup) "Compensação" else "Em compensação",
+                                                            textColor = MakeupPurpleBright,
+                                                            containerColor = MakeupPurpleContainer
+                                                        )
+                                                    }
                                                     if (session.ptPrivatePersonal) {
                                                         StatusPill(
                                                             text = "Oculto",
@@ -731,7 +746,7 @@ internal fun PtTrainingMarcacoesSection(
                                                 Text(
                                                     text = "${session.timeLabel}${if (endTime.isNotEmpty()) " – $endTime" else ""} · ${session.durationMinutes} min",
                                                     style = MaterialTheme.typography.labelMedium,
-                                                    color = NewShapeGoldBright,
+                                                    color = if (isMakeupClientThisWeek) MakeupPurpleBright else NewShapeGoldBright,
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                             }

@@ -75,6 +75,7 @@ data class StudioUiState(
     val studioAnnouncements: List<StudioAnnouncementRecord> = emptyList(),
     val announcementReads: List<AnnouncementReadRecord> = emptyList(),
     val workoutFeedback: List<WorkoutFeedbackRecord> = emptyList(),
+    val makeupCredits: List<MakeupCreditRecord> = emptyList(),
     val settings: StudioSettingsRecord = StudioSettingsRecord(),
     val waitingWhatsAppReturn: Boolean = false,
     val undoSnapshot: UndoConfirmationSnapshot? = null,
@@ -262,9 +263,10 @@ class NewShapeViewModel(
     private val engagementDataFlow = combine(
         repository.observeStudioAnnouncements(currentUserId),
         repository.observeAnnouncementReads(currentUserId),
-        repository.observeWorkoutFeedback(currentUserId)
-    ) { announcements, reads, feedback ->
-        Triple(announcements, reads, feedback)
+        repository.observeWorkoutFeedback(currentUserId),
+        repository.observeMakeupCredits(currentUserId)
+    ) { announcements, reads, feedback, makeupCredits ->
+        EngagementSlice(announcements, reads, feedback, makeupCredits)
     }
 
     private val extraDataFlow = combine(
@@ -281,7 +283,7 @@ class NewShapeViewModel(
         repository.observeWorkoutLoadLogs(currentUserId),
         repository.observeWaitlistEntries(currentUserId),
         engagementDataFlow
-    ) { (foods, nutrition, assessments), (chats, templates, settings), loadLogs, waitlist, (announcements, reads, feedback) ->
+    ) { (foods, nutrition, assessments), (chats, templates, settings), loadLogs, waitlist, engagement ->
         ExtraSlice(
             foodItems = foods,
             nutritionEntries = nutrition,
@@ -291,9 +293,10 @@ class NewShapeViewModel(
             settings = settings ?: StudioSettingsRecord(),
             workoutLoadLogs = loadLogs,
             waitlistEntries = waitlist,
-            studioAnnouncements = announcements,
-            announcementReads = reads,
-            workoutFeedback = feedback
+            studioAnnouncements = engagement.studioAnnouncements,
+            announcementReads = engagement.announcementReads,
+            workoutFeedback = engagement.workoutFeedback,
+            makeupCredits = engagement.makeupCredits
         )
     }
 
@@ -354,6 +357,7 @@ class NewShapeViewModel(
             studioAnnouncements = extra.studioAnnouncements,
             announcementReads = extra.announcementReads,
             workoutFeedback = extra.workoutFeedback,
+            makeupCredits = extra.makeupCredits,
             settings = extra.settings,
             waitingWhatsAppReturn = ctrl.waitingWhatsAppReturn,
             undoSnapshot = ctrl.undoSnapshot,
@@ -651,9 +655,11 @@ class NewShapeViewModel(
     }
 
     fun deleteSession(sessionId: String) {
-        val bookings = currentData?.bookings.orEmpty()
+        val data = currentData
+        val bookings = data?.bookings.orEmpty()
+        val session = data?.sessions?.find { it.id == sessionId }
         viewModelScope.launch {
-            repository.deleteSession(sessionId, bookings)
+            repository.deleteSession(sessionId, bookings, session)
                 .onSuccess { _statusBanner.value = "Treino apagado." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
@@ -796,9 +802,10 @@ class NewShapeViewModel(
 
     // --- Bookings & Confirmations ---
     fun confirmCardAndNotify(card: PendingConfirmationCard) {
+        val sessionMap = currentData?.sessions?.associateBy { it.id }.orEmpty()
         viewModelScope.launch {
             val snapshots = card.items.map { it.booking }
-            repository.confirmClientBookings(snapshots)
+            repository.confirmClientBookings(snapshots, sessionMap)
                 .onSuccess {
                     _waitingWhatsApp.value = true
                     _undoSnapshot.value = UndoConfirmationSnapshot(card.client.name, snapshots)
@@ -813,9 +820,10 @@ class NewShapeViewModel(
     }
 
     fun confirmCardSilently(card: PendingConfirmationCard) {
+        val sessionMap = currentData?.sessions?.associateBy { it.id }.orEmpty()
         viewModelScope.launch {
             val snapshots = card.items.map { it.booking }
-            repository.confirmClientBookings(snapshots)
+            repository.confirmClientBookings(snapshots, sessionMap)
                 .onSuccess {
                     _statusBanner.value = "Confirmado para ${card.client.name} ✓ (sem envio de mensagem)"
                     _undoSnapshot.value = UndoConfirmationSnapshot(card.client.name, snapshots)
@@ -842,15 +850,16 @@ class NewShapeViewModel(
 
     fun rejectBooking(booking: BookingRecord) {
         viewModelScope.launch {
-            repository.removeBooking(booking.id)
+            repository.removeBooking(booking.id, booking = booking, grantRemovedCredit = false)
                 .onSuccess { _waitingWhatsApp.value = true }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
 
     fun acceptBookingSilently(booking: BookingRecord, clientName: String = "") {
+        val sessionMap = currentData?.sessions?.associateBy { it.id }.orEmpty()
         viewModelScope.launch {
-            repository.confirmClientBookings(listOf(booking))
+            repository.confirmClientBookings(listOf(booking), sessionMap)
                 .onSuccess {
                     _statusBanner.value = if (clientName.isNotBlank()) {
                         "$clientName aceite ✓ (envia a mensagem no final quando quiseres)"
@@ -864,8 +873,9 @@ class NewShapeViewModel(
 
     fun acceptBookingsSilently(bookingsToAccept: List<BookingRecord>) {
         if (bookingsToAccept.isEmpty()) return
+        val sessionMap = currentData?.sessions?.associateBy { it.id }.orEmpty()
         viewModelScope.launch {
-            repository.confirmClientBookings(bookingsToAccept)
+            repository.confirmClientBookings(bookingsToAccept, sessionMap)
                 .onSuccess {
                     _statusBanner.value = "${bookingsToAccept.size} marcação(ões) aceite(s) ✓"
                 }
@@ -875,7 +885,7 @@ class NewShapeViewModel(
 
     fun rejectBookingSilently(booking: BookingRecord, clientName: String = "") {
         viewModelScope.launch {
-            repository.removeBooking(booking.id)
+            repository.removeBooking(booking.id, booking = booking, grantRemovedCredit = false)
                 .onSuccess {
                     _statusBanner.value = if (clientName.isNotBlank()) {
                         "Pedido de $clientName recusado."
@@ -922,8 +932,42 @@ class NewShapeViewModel(
     }
 
     fun removeBooking(bookingId: String) {
+        val data = currentData
+        val booking = data?.bookings?.find { it.id == bookingId }
+        val session = booking?.let { b -> data.sessions.find { it.id == b.sessionId } }
         viewModelScope.launch {
-            repository.removeBooking(bookingId)
+            repository.removeBooking(
+                bookingId = bookingId,
+                booking = booking,
+                session = session,
+                grantRemovedCredit = true
+            )
+                .onSuccess {
+                    if (booking != null && !booking.makeup && booking.status == BookingStatus.CONFIRMED.name && booking.attendanceStatus != "ABSENT") {
+                        _statusBanner.value = "Treino removido · Direito a compensação (30 dias) registado ✓"
+                    }
+                }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun addManualMakeupCredit(clientId: String, clientName: String, note: String = "") {
+        val label = note.trim().ifBlank { "Compensação atribuída pelo PT" }
+        viewModelScope.launch {
+            repository.addManualMakeupCredit(
+                clientId = clientId,
+                sourceLabel = label,
+                weekKey = currentData?.selectedWeekKey.orEmpty()
+            )
+                .onSuccess { _statusBanner.value = "+1 compensação (30 dias) atribuída a $clientName ✓" }
+                .onFailure { _statusBanner.value = it.localizedMessage }
+        }
+    }
+
+    fun dismissMakeupCredit(creditId: String) {
+        viewModelScope.launch {
+            repository.dismissMakeupCredit(creditId, dismissed = true)
+                .onSuccess { _statusBanner.value = "Crédito de compensação anulado." }
                 .onFailure { _statusBanner.value = it.localizedMessage }
         }
     }
@@ -934,7 +978,7 @@ class NewShapeViewModel(
                 .onSuccess {
                     _statusBanner.value = when (attendanceStatus) {
                         "PRESENT" -> "Presença confirmada."
-                        "ABSENT" -> "Falta registada."
+                        "ABSENT" -> "Falta registada (direito a compensação durante 30 dias)."
                         else -> "Registo de presença limpo."
                     }
                 }
@@ -950,7 +994,12 @@ class NewShapeViewModel(
         }
     }
 
-    fun submitStudentBookings(weekKey: String, clientId: String, selectedSessionIds: Set<String>) {
+    fun submitStudentBookings(
+        weekKey: String,
+        clientId: String,
+        selectedSessionIds: Set<String>,
+        makeupSessionIds: Set<String> = emptySet()
+    ) {
         if (_bookingActionBusy.value) return
         val data = currentData
         val visibleSessions = data?.sessions?.filter { !it.ptPrivatePersonal }.orEmpty()
@@ -974,8 +1023,12 @@ class NewShapeViewModel(
                 it.sessionId in visibleSessionIds
         }.orEmpty()
         val existingIds = existing.map { it.sessionId }.toSet()
+        val effectiveMakeupIds = makeupSessionIds.intersect(selectedSessionIds)
+        val existingMakeupIds = existing.filter { it.makeup }.map { it.sessionId }.toSet()
         val isCancel = existing.isNotEmpty() && selectedSessionIds.isEmpty()
-        val isModify = existing.isNotEmpty() && selectedSessionIds.isNotEmpty() && existingIds != selectedSessionIds
+        val isModify = existing.isNotEmpty() && selectedSessionIds.isNotEmpty() &&
+            (existingIds != selectedSessionIds || existingMakeupIds != effectiveMakeupIds)
+        val hasNewMakeup = (effectiveMakeupIds - existingMakeupIds).isNotEmpty()
         val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
         val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
         val sessionMap = data?.sessions?.associateBy { it.id }.orEmpty()
@@ -983,12 +1036,23 @@ class NewShapeViewModel(
         fun formatList(ids: Collection<String>): String =
             ids.mapNotNull { sessionMap[it] }
                 .sortedBy { it.startMillis }
-                .joinToString(", ") { "${it.dateLabel} ${it.timeLabel.replace(":", "h")}" }
+                .joinToString(", ") {
+                    val tag = if (it.id in effectiveMakeupIds) " [Compensação]" else ""
+                    "${it.dateLabel} ${it.timeLabel.replace(":", "h")}$tag"
+                }
 
         viewModelScope.launch {
             _bookingActionBusy.value = true
             try {
-                repository.submitStudentBookings(weekKey, clientId, selectedSessionIds, existing, visibleSessionDayById)
+                repository.submitStudentBookings(
+                    weekKey = weekKey,
+                    clientId = clientId,
+                    selectedSessionIds = selectedSessionIds,
+                    existingBookings = existing,
+                    visibleSessionDayById = visibleSessionDayById,
+                    makeupSessionIds = effectiveMakeupIds,
+                    sessionsById = sessionMap
+                )
                     .onSuccess {
                         if (isCancel) {
                             val removedText = formatList(existingIds)
@@ -1005,7 +1069,7 @@ class NewShapeViewModel(
                         } else if (isModify) {
                             val removedIds = existingIds - selectedSessionIds
                             val addedIds = selectedSessionIds - existingIds
-                            val isPartialCancelOnly = removedIds.isNotEmpty() && addedIds.isEmpty()
+                            val isPartialCancelOnly = removedIds.isNotEmpty() && addedIds.isEmpty() && !hasNewMakeup
                             if (isPartialCancelOnly) {
                                 val removedText = formatList(removedIds)
                                 val summary = "$clientName desmarcou o treino de $removedText (semana $weekLabel). Os restantes treinos mantêm-se confirmados."
@@ -1023,19 +1087,31 @@ class NewShapeViewModel(
                                 val parts = mutableListOf<String>()
                                 if (removedIds.isNotEmpty()) parts.add("saiu de ${formatList(removedIds)}")
                                 if (addedIds.isNotEmpty()) parts.add("marcou ${formatList(addedIds)}")
-                                val summary = "Alterou o horário da semana $weekLabel (${parts.joinToString(" · ")})."
+                                val makeupPrefix = if (hasNewMakeup) "🔄 Compensação · " else ""
+                                val summary = "${makeupPrefix}Alterou o horário da semana $weekLabel (${parts.joinToString(" · ")})."
                                 repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
-                                val waMsg = "Olá! Sou $clientName. Alterei o meu horário de treino na New Shape (semana $weekLabel). Novo horário: $newText. Podes confirmar?"
+                                val waMsg = "Olá! Sou $clientName. Alterei o meu horário de treino na New Shape (semana $weekLabel)${if (hasNewMakeup) " (inclui treino de compensação)" else ""}. Novo horário: $newText. Podes confirmar?"
                                 _pendingWhatsAppPrompt.value = StudentWhatsAppAlertPrompt(
                                     type = "ALTERED",
-                                    title = "Horário alterado — avisa o teu PT",
-                                    detail = "O teu PT já foi notificado na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o novo horário.",
+                                    title = if (hasNewMakeup) "Treino de compensação pedido — avisa o teu PT" else "Horário alterado — avisa o teu PT",
+                                    detail = "O teu PT já foi notificado na aplicação. Envia agora mensagem pelo WhatsApp para confirmar o horário.",
                                     whatsappMessage = waMsg
                                 )
-                                _statusBanner.value = "Alteração guardada. Avisa o PT pelo WhatsApp."
+                                _statusBanner.value = if (hasNewMakeup) {
+                                    "Treino de compensação pedido! O PT já consegue ver o teu pedido a roxo."
+                                } else {
+                                    "Alteração guardada. Avisa o PT pelo WhatsApp."
+                                }
                             }
                         } else {
-                            _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp."
+                            if (hasNewMakeup) {
+                                val makeupDesc = formatList(effectiveMakeupIds)
+                                val summary = "🔄 $clientName pediu treino de compensação na semana $weekLabel ($makeupDesc)."
+                                repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
+                                _statusBanner.value = "Treino de compensação pedido! O PT vai ver a tua marcação em destaque."
+                            } else {
+                                _statusBanner.value = "Pedido recebido! Vais receber a confirmação no WhatsApp."
+                            }
                         }
                     }
                     .onFailure { _statusBanner.value = it.localizedMessage }
@@ -1059,6 +1135,7 @@ class NewShapeViewModel(
                 it.sessionId in visibleSessionIds
         }.orEmpty()
         val nextIds = existing.map { it.sessionId }.filter { it != sessionIdToCancel }.toSet()
+        val preservedMakeupIds = existing.filter { it.makeup && it.sessionId != sessionIdToCancel }.map { it.sessionId }.toSet()
         val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
         val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
         val cancelledSession = sessionMap[sessionIdToCancel]
@@ -1067,7 +1144,15 @@ class NewShapeViewModel(
         viewModelScope.launch {
             _bookingActionBusy.value = true
             try {
-                repository.submitStudentBookings(weekKey, clientId, nextIds, existing, visibleSessionDayById)
+                repository.submitStudentBookings(
+                    weekKey = weekKey,
+                    clientId = clientId,
+                    selectedSessionIds = nextIds,
+                    existingBookings = existing,
+                    visibleSessionDayById = visibleSessionDayById,
+                    makeupSessionIds = preservedMakeupIds,
+                    sessionsById = sessionMap
+                )
                     .onSuccess {
                         val summary = "$clientName desmarcou o treino de $cancelledDesc (semana $weekLabel)."
                         repository.createPtNotification(clientId, clientName, "CANCELLED", summary, weekKey)
@@ -1118,6 +1203,12 @@ class NewShapeViewModel(
             }
         }
         val nextIds = (existing.map { it.sessionId }.filter { it != fromSessionId } + toSessionId).toSet()
+        val wasFromMakeup = existing.any { it.sessionId == fromSessionId && it.makeup }
+        val nextMakeupIds = existing
+            .filter { it.makeup && it.sessionId != fromSessionId }
+            .map { it.sessionId }
+            .toMutableSet()
+            .apply { if (wasFromMakeup) add(toSessionId) }
         val clientName = data?.clients?.find { it.id == clientId }?.name ?: "Aluno"
         val weekLabel = data?.weeks?.find { it.weekKey == weekKey }?.label ?: weekKey
         val oldDesc = oldSession?.let { "${it.dateLabel} às ${it.timeLabel.replace(":", "h")}" } ?: "horário anterior"
@@ -1126,7 +1217,15 @@ class NewShapeViewModel(
         viewModelScope.launch {
             _bookingActionBusy.value = true
             try {
-                repository.submitStudentBookings(weekKey, clientId, nextIds, existing, visibleSessionDayById)
+                repository.submitStudentBookings(
+                    weekKey = weekKey,
+                    clientId = clientId,
+                    selectedSessionIds = nextIds,
+                    existingBookings = existing,
+                    visibleSessionDayById = visibleSessionDayById,
+                    makeupSessionIds = nextMakeupIds,
+                    sessionsById = sessionMap
+                )
                     .onSuccess {
                         val summary = "$clientName trocou o treino na semana $weekLabel: saiu de $oldDesc para $newDesc."
                         repository.createPtNotification(clientId, clientName, "ALTERED", summary, weekKey)
@@ -1866,6 +1965,13 @@ private data class MgmtSlice(
     val workoutPlanItems: List<WorkoutPlanItemRecord>
 )
 
+private data class EngagementSlice(
+    val studioAnnouncements: List<StudioAnnouncementRecord>,
+    val announcementReads: List<AnnouncementReadRecord>,
+    val workoutFeedback: List<WorkoutFeedbackRecord>,
+    val makeupCredits: List<MakeupCreditRecord>
+)
+
 private data class ExtraSlice(
     val foodItems: List<FoodItemRecord>,
     val nutritionEntries: List<NutritionEntryRecord>,
@@ -1877,7 +1983,8 @@ private data class ExtraSlice(
     val waitlistEntries: List<WaitlistEntryRecord>,
     val studioAnnouncements: List<StudioAnnouncementRecord>,
     val announcementReads: List<AnnouncementReadRecord>,
-    val workoutFeedback: List<WorkoutFeedbackRecord>
+    val workoutFeedback: List<WorkoutFeedbackRecord>,
+    val makeupCredits: List<MakeupCreditRecord>
 )
 
 private data class ControlSlice(

@@ -35,6 +35,7 @@ import {
   ExerciseRecord,
   FidelizacaoRecord,
   FoodItemRecord,
+  MakeupCreditRecord,
   MessageTemplateRecord,
   NutritionEntryRecord,
   PaymentRecord,
@@ -252,6 +253,7 @@ export function App() {
   const [studioAnnouncements, setStudioAnnouncements] = useState<StudioAnnouncementRecord[]>([]);
   const [announcementReads, setAnnouncementReads] = useState<AnnouncementReadRecord[]>([]);
   const [workoutFeedback, setWorkoutFeedback] = useState<WorkoutFeedbackRecord[]>([]);
+  const [makeupCredits, setMakeupCredits] = useState<MakeupCreditRecord[]>([]);
   const [foods, setFoods] = useState<FoodItemRecord[]>([]);
   const [nutritionEntries, setNutritionEntries] = useState<NutritionEntryRecord[]>([]);
   const [assessments, setAssessments] = useState<PhysicalAssessmentRecord[]>([]);
@@ -575,6 +577,7 @@ export function App() {
         studioAnnouncements: setStudioAnnouncements,
         announcementReads: setAnnouncementReads,
         workoutFeedback: setWorkoutFeedback,
+        makeupCredits: setMakeupCredits,
         foods: setFoods,
         nutritionEntries: setNutritionEntries,
         physicalAssessments: setAssessments,
@@ -831,7 +834,8 @@ export function App() {
   const handleConfirmCard = async (card: PendingConfirmationCard) => {
     if (!studioUid) return;
     const snapshots = card.items.map((i) => ({ ...i.booking }));
-    await repo.confirmClientBookings(studioUid, snapshots);
+    const sessionsById = new Map(sessions.map((s) => [s.id, s]));
+    await repo.confirmClientBookings(studioUid, snapshots, sessionsById);
     setUndoSnapshot({ clientName: card.client.name, bookings: snapshots });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setUndoSnapshot(null), 10000);
@@ -1198,6 +1202,7 @@ export function App() {
           studioAnnouncements={studioAnnouncements}
           announcementReads={announcementReads}
           workoutFeedback={workoutFeedback}
+          makeupCredits={makeupCredits}
           settings={effectiveSettings}
           initialWeekSlug={pathInfo.weekSlug}
           showInstallPrompt={isExternalStudentPortal}
@@ -1507,10 +1512,12 @@ export function App() {
               uid={studioUid}
               isSuperAdmin={isSuperAdmin}
               clients={clients}
+              weeks={weeks}
               activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
               weekResponses={weekResponses}
+              makeupCredits={makeupCredits}
               payments={payments}
               fidelizacoes={fidelizacoes}
               assessments={assessments}
@@ -1542,6 +1549,8 @@ export function App() {
               activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
+              weekResponses={weekResponses}
+              makeupCredits={makeupCredits}
               exercises={exercises}
               workoutPlans={workoutPlans}
               workoutPlanItems={workoutPlanItems}

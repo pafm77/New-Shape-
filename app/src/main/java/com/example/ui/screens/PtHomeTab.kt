@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.data.MakeupCreditCalculator
 import com.example.data.model.BookingRecord
 import com.example.data.model.BookingStatus
 import com.example.data.model.TrainingSessionRecord
@@ -484,8 +485,25 @@ private fun PendingConfirmationCardView(
     onMoveItem: (BookingWithSession, TrainingSessionRecord) -> Unit
 ) {
     var showMessagePreview by remember { mutableStateOf(false) }
+    val hasMakeupInWeek = remember(allBookings, card.client.id, card.week.weekKey, card.items) {
+        card.items.any { it.booking.makeup } ||
+            card.client.id in MakeupCreditCalculator.getMakeupClientIdsForWeek(allBookings, card.week.weekKey)
+    }
 
-    BrandCard(highlightBorder = isFirst) {
+    Surface(
+        color = if (hasMakeupInWeek) MakeupPurpleContainer.copy(alpha = 0.45f) else CharcoalSurface,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(
+            width = if (hasMakeupInWeek || isFirst) 1.5.dp else 1.dp,
+            color = when {
+                hasMakeupInWeek -> MakeupPurple
+                isFirst -> NewShapeGold
+                else -> HairlineBorder
+            }
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -499,8 +517,11 @@ private fun PendingConfirmationCardView(
                     Text(
                         text = card.client.name,
                         style = MaterialTheme.typography.titleLarge,
-                        color = TextPrimaryDark
+                        color = if (hasMakeupInWeek) MakeupPurpleBright else TextPrimaryDark
                     )
+                    if (hasMakeupInWeek) {
+                        StatusPill("Em compensação", MakeupPurpleBright, MakeupPurpleContainer)
+                    }
                     if (card.client.fixedSlots.isNotEmpty()) {
                         StatusPill("Horário Fixo", NewShapeGoldBright, NewShapeGoldMuted)
                     }
@@ -529,13 +550,13 @@ private fun PendingConfirmationCardView(
                 Text(
                     text = card.week.label,
                     style = MaterialTheme.typography.labelSmall,
-                    color = NewShapeGold
+                    color = if (hasMakeupInWeek) MakeupPurpleBright else NewShapeGold
                 )
             }
         }
 
         Spacer(Modifier.height(12.dp))
-        HorizontalDivider(color = HairlineBorder)
+        HorizontalDivider(color = if (hasMakeupInWeek) MakeupPurple.copy(alpha = 0.4f) else HairlineBorder)
         Spacer(Modifier.height(10.dp))
 
         card.items.forEach { item ->
@@ -553,11 +574,23 @@ private fun PendingConfirmationCardView(
             }
 
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(
-                    text = "${item.session.dateLabel} – ${item.session.timeLabel.replace(":", "h")}",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = TextPrimaryDark
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "${item.session.dateLabel} – ${item.session.timeLabel.replace(":", "h")}",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (hasMakeupInWeek) MakeupPurpleBright else TextPrimaryDark
+                    )
+                    if (hasMakeupInWeek) {
+                        StatusPill(
+                            text = if (item.booking.makeup) "Compensação" else "Em compensação",
+                            textColor = MakeupPurpleBright,
+                            containerColor = MakeupPurpleContainer
+                        )
+                    }
+                }
                 if (!card.isCancelledAll) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -736,6 +769,7 @@ private fun PendingConfirmationCardView(
                     style = MaterialTheme.typography.labelMedium
                 )
             }
+        }
         }
     }
 }

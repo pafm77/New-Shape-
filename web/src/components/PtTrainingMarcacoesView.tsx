@@ -32,6 +32,7 @@ import {
   MONTHS_PT,
 } from '../data/seedCatalog';
 import * as repo from '../services/firestoreRepository';
+import { getMakeupClientIdsForWeek } from '../services/makeupCalculator';
 import {
   BrandCard,
   EmptyState,
@@ -121,6 +122,11 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
   const weekMap = useMemo(() => new Map(weeks.map((w) => [w.weekKey, w])), [weeks]);
 
   const weekKey = activeWeek?.weekKey || '';
+
+  const makeupClientIdsForWeek = useMemo(
+    () => getMakeupClientIdsForWeek(bookings, weekKey),
+    [bookings, weekKey]
+  );
 
   const clientWeekBookingCounts = useMemo(() => {
     const map = new Map<string, { confirmed: number; pending: number }>();
@@ -412,7 +418,7 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
     if (!effectiveClient) return;
     setBusyKey(booking.id);
     try {
-      await repo.confirmClientBookings(uid, [booking]);
+      await repo.confirmClientBookings(uid, [booking], sessionMap);
       onBanner(`Horário de ${effectiveClient.name} confirmado ✓`);
       if (shouldPromptMessage(effectiveClient) && !session.ptPrivatePersonal) {
         const targetWeek = weekMap.get(session.weekKey) || activeWeek;
@@ -485,7 +491,11 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
     if (!effectiveClient) return;
     setBusyKey(booking.id);
     try {
-      await repo.removeBooking(uid, booking.id);
+      await repo.removeBooking(uid, booking.id, {
+        booking,
+        session,
+        grantRemovedCredit: true,
+      });
       if (swappingTarget?.booking.id === booking.id) {
         setSwappingTarget(null);
       }
@@ -630,6 +640,9 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
+              {makeupClientIdsForWeek.has(effectiveClient.id) && (
+                <StatusPill tone="purple">Em compensação</StatusPill>
+              )}
               <StatusPill tone={confirmedCountInWeek > 0 ? 'green' : 'amber'}>
                 {confirmedCountInWeek > 0
                   ? `✓ ${confirmedCountInWeek}${
@@ -771,12 +784,16 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                   const isPastSession = session.startMillis > 0 && session.startMillis <= Date.now();
                   const isPresent = booking.attendanceStatus === 'PRESENT';
                   const isAbsent = booking.attendanceStatus === 'ABSENT';
+                  const isMakeupClientWeek =
+                    Boolean(booking.makeup) || makeupClientIdsForWeek.has(booking.clientId);
                   return (
                     <div
                       key={booking.id}
                       className={`rounded-xl border p-2.5 transition space-y-2 ${
                         isSwappingThis
                           ? 'border-[#EAB308] bg-[#3D3314]/50'
+                          : isMakeupClientWeek
+                          ? 'border-[#A855F7] bg-[#2E1065]/45'
                           : isPresent
                           ? 'border-[#22C55E]/55 bg-[#143524]/35'
                           : isAbsent
@@ -791,9 +808,18 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-sm font-bold text-[#F4F4F5]">
+                            <span
+                              className={`text-sm font-bold ${
+                                isMakeupClientWeek ? 'text-[#E9D5FF]' : 'text-[#F4F4F5]'
+                              }`}
+                            >
                               {session.dateLabel}
                             </span>
+                            {booking.makeup ? (
+                              <StatusPill tone="purple">Compensação</StatusPill>
+                            ) : isMakeupClientWeek ? (
+                              <StatusPill tone="purple">Em compensação</StatusPill>
+                            ) : null}
                             {session.ptPrivatePersonal && (
                               <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
                             )}
@@ -801,7 +827,11 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                               {isConfirmed ? 'Confirmado ✓' : isPastSession ? 'Expirado' : 'Por confirmar'}
                             </StatusPill>
                           </div>
-                          <p className="mt-0.5 text-xs font-semibold text-[#FACC15]">
+                          <p
+                            className={`mt-0.5 text-xs font-semibold ${
+                              isMakeupClientWeek ? 'text-[#D8B4FE]' : 'text-[#FACC15]'
+                            }`}
+                          >
                             {session.timeLabel}
                             {endTime ? ` – ${endTime}` : ''} · {session.durationMinutes} min
                           </p>
@@ -840,7 +870,11 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                               if (session.ptPrivatePersonal) {
                                 setBusyKey(booking.id);
                                 try {
-                                  await repo.removeBooking(uid, booking.id);
+                                  await repo.removeBooking(uid, booking.id, {
+                                    booking,
+                                    session,
+                                    grantRemovedCredit: true,
+                                  });
                                   if (isSwappingThis) setSwappingTarget(null);
                                   onBanner(`Treino personalizado desmarcado para ${effectiveClient.name}.`);
                                 } finally {
@@ -1013,16 +1047,31 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                 const isOriginalSwapSlot = swappingTarget?.session.id === session.id;
                 const endTime = computeEndTime(session.timeLabel, session.durationMinutes);
                 const isBusy = busyKey === session.id || busyKey === existingBooking?.id;
+                const isMakeupSlotHighlight =
+                  Boolean(existingBooking) &&
+                  Boolean(
+                    existingBooking?.makeup ||
+                      (effectiveClient && makeupClientIdsForWeek.has(effectiveClient.id))
+                  );
 
                 return (
                   <BrandCard
                     key={session.id}
-                    highlight={Boolean(existingBooking) || isOriginalSwapSlot}
+                    highlight={!isMakeupSlotHighlight && (Boolean(existingBooking) || isOriginalSwapSlot)}
+                    className={
+                      isMakeupSlotHighlight
+                        ? 'border-[#A855F7] bg-[#2E1065]/40'
+                        : undefined
+                    }
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className="flex flex-col items-center justify-center rounded-xl border border-[#323238] bg-[#242429] px-3 py-2 text-center min-w-[78px]">
-                          <span className="text-base font-extrabold text-[#FACC15]">
+                          <span
+                            className={`text-base font-extrabold ${
+                              isMakeupSlotHighlight ? 'text-[#E9D5FF]' : 'text-[#FACC15]'
+                            }`}
+                          >
                             {session.timeLabel}
                           </span>
                           {endTime && (
@@ -1033,6 +1082,11 @@ export const PtTrainingMarcacoesView: React.FC<PtTrainingMarcacoesViewProps> = (
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
+                            {existingBooking?.makeup ? (
+                              <StatusPill tone="purple">Compensação</StatusPill>
+                            ) : isMakeupSlotHighlight ? (
+                              <StatusPill tone="purple">Em compensação</StatusPill>
+                            ) : null}
                             {session.ptPrivatePersonal && (
                               <StatusPill tone="gold">Personalizado · Oculto</StatusPill>
                             )}
