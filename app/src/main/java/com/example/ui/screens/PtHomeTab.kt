@@ -175,20 +175,6 @@ private fun PorConfirmarSection(
             }
         }
 
-        if (state.isSuperAdmin) {
-            item(key = "admin_business_summary_card") {
-                BusinessSummaryCard(
-                    clients = state.clients,
-                    payments = state.payments,
-                    fidelizacoes = state.fidelizacoes,
-                    bookings = state.bookings,
-                    isSuperAdmin = state.isSuperAdmin,
-                    onJumpToFinance = onJumpToFinance,
-                    onJumpToFidelizacoes = onJumpToFidelizacoes
-                )
-            }
-        }
-
         if (expiringFidsCount > 0) {
             item {
                 Surface(
@@ -482,6 +468,20 @@ private fun PorConfirmarSection(
                         viewModel.moveBooking(item.booking, newSession.id)
                         openWhatsApp(context, card.client.phone, msg, state.settings.whatsappWebMode)
                     }
+                )
+            }
+        }
+
+        if (state.isSuperAdmin) {
+            item(key = "admin_business_summary_card") {
+                BusinessSummaryCard(
+                    clients = state.clients,
+                    payments = state.payments,
+                    fidelizacoes = state.fidelizacoes,
+                    bookings = state.bookings,
+                    isSuperAdmin = state.isSuperAdmin,
+                    onJumpToFinance = onJumpToFinance,
+                    onJumpToFidelizacoes = onJumpToFidelizacoes
                 )
             }
         }

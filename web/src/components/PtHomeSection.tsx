@@ -406,19 +406,6 @@ const PorConfirmarView: React.FC<{
         </div>
       )}
 
-      {isSuperAdmin && (
-        <BusinessSummaryCard
-          clients={clients}
-          payments={payments}
-          fidelizacoes={fidelizacoes}
-          bookings={bookings}
-          isSuperAdmin={isSuperAdmin}
-          userEmail={userEmail}
-          onJumpToFinance={onJumpToFinance}
-          onJumpToFidelizacoes={onJumpToFidelizacoes}
-        />
-      )}
-
       {(expiringFidsCount > 0 || inactiveStudentsCount > 0) && (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {expiringFidsCount > 0 && (
@@ -662,6 +649,19 @@ const PorConfirmarView: React.FC<{
             />
           ))}
         </div>
+      )}
+
+      {isSuperAdmin && (
+        <BusinessSummaryCard
+          clients={clients}
+          payments={payments}
+          fidelizacoes={fidelizacoes}
+          bookings={bookings}
+          isSuperAdmin={isSuperAdmin}
+          userEmail={userEmail}
+          onJumpToFinance={onJumpToFinance}
+          onJumpToFidelizacoes={onJumpToFidelizacoes}
+        />
       )}
     </div>
   );
