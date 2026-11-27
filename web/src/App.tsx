@@ -1464,11 +1464,13 @@ export function App() {
             <PtHomeSection
               uid={studioUid}
               isSuperAdmin={isSuperAdmin}
+              userEmail={authUser?.email}
               clients={clients}
               weeks={weeks}
               activeWeek={activeWeek}
               sessions={sessions}
               bookings={bookings}
+              payments={payments}
               fidelizacoes={fidelizacoes}
               waitlistEntries={waitlistEntries}
               weekResponses={weekResponses}
@@ -1488,6 +1490,10 @@ export function App() {
               onConfirmCard={handleConfirmCard}
               onJumpToTeamApprovals={() => {
                 setMgmtSubTab('team');
+                setPtTab('management');
+              }}
+              onJumpToFinance={() => {
+                setMgmtSubTab('finance');
                 setPtTab('management');
               }}
               onJumpToFidelizacoes={() => {

@@ -33,6 +33,7 @@ import {
   ClientRecord,
   FidelizacaoRecord,
   MessageTemplateRecord,
+  PaymentRecord,
   PendingConfirmationCard,
   PtNotificationRecord,
   StudioSettingsRecord,
@@ -43,6 +44,7 @@ import {
   getWeekDayWorkoutType,
 } from '../types/studio';
 import { DayWorkoutTypesModal } from './DayWorkoutTypesModal';
+import { BusinessSummaryCard } from './BusinessSummaryCard';
 import {
   buildMessageFromTemplate,
   buildPtPortalLink,
@@ -90,11 +92,13 @@ export type PtHomeSubTab = 'confirm' | 'marcacoes' | 'weeks' | 'responses' | 'me
 interface PtHomeSectionProps {
   uid: string;
   isSuperAdmin: boolean;
+  userEmail?: string | null;
   clients: ClientRecord[];
   weeks: TrainingWeekRecord[];
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  payments?: PaymentRecord[];
   fidelizacoes?: FidelizacaoRecord[];
   waitlistEntries: WaitlistEntryRecord[];
   weekResponses: WeekResponseRecord[];
@@ -109,6 +113,7 @@ interface PtHomeSectionProps {
   onWhatsAppOpened: () => void;
   onConfirmCard: (card: PendingConfirmationCard) => Promise<void>;
   onJumpToTeamApprovals: () => void;
+  onJumpToFinance?: () => void;
   onJumpToFidelizacoes?: () => void;
   onJumpToAttendance?: () => void;
   onJumpToAssessment?: (clientId: string) => void;
@@ -118,10 +123,12 @@ interface PtHomeSectionProps {
 export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   uid,
   isSuperAdmin,
+  userEmail,
   clients,
   activeWeek,
   sessions,
   bookings,
+  payments = [],
   fidelizacoes = [],
   waitlistEntries,
   weekResponses,
@@ -136,6 +143,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
   onWhatsAppOpened,
   onConfirmCard,
   onJumpToTeamApprovals,
+  onJumpToFinance,
   onJumpToFidelizacoes,
   onJumpToAttendance,
   onJumpToAssessment,
@@ -189,10 +197,12 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
         <PorConfirmarView
           uid={uid}
           isSuperAdmin={isSuperAdmin}
+          userEmail={userEmail}
           clients={clients}
           activeWeek={activeWeek}
           sessions={sessions}
           bookings={bookings}
+          payments={payments}
           fidelizacoes={fidelizacoes}
           weekResponses={weekResponses}
           ptNotifications={ptNotifications}
@@ -203,6 +213,7 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
           lockedByWhatsApp={lockedByWhatsApp}
           onJumpToResponses={() => setSubTab('responses')}
           onJumpToTeamApprovals={onJumpToTeamApprovals}
+          onJumpToFinance={onJumpToFinance}
           onJumpToFidelizacoes={onJumpToFidelizacoes}
           onJumpToAttendance={onJumpToAttendance}
           onJumpToAssessment={onJumpToAssessment}
@@ -285,10 +296,12 @@ export const PtHomeSection: React.FC<PtHomeSectionProps> = ({
 const PorConfirmarView: React.FC<{
   uid: string;
   isSuperAdmin: boolean;
+  userEmail?: string | null;
   clients: ClientRecord[];
   activeWeek: TrainingWeekRecord | null;
   sessions: TrainingSessionRecord[];
   bookings: BookingRecord[];
+  payments: PaymentRecord[];
   fidelizacoes: FidelizacaoRecord[];
   weekResponses: WeekResponseRecord[];
   ptNotifications: PtNotificationRecord[];
@@ -299,6 +312,7 @@ const PorConfirmarView: React.FC<{
   lockedByWhatsApp: boolean;
   onJumpToResponses: () => void;
   onJumpToTeamApprovals: () => void;
+  onJumpToFinance?: () => void;
   onJumpToFidelizacoes?: () => void;
   onJumpToAttendance?: () => void;
   onJumpToAssessment?: (clientId: string) => void;
@@ -308,10 +322,12 @@ const PorConfirmarView: React.FC<{
 }> = ({
   uid,
   isSuperAdmin,
+  userEmail,
   clients,
   activeWeek,
   sessions,
   bookings,
+  payments,
   fidelizacoes,
   weekResponses,
   ptNotifications,
@@ -322,6 +338,7 @@ const PorConfirmarView: React.FC<{
   lockedByWhatsApp,
   onJumpToResponses,
   onJumpToTeamApprovals,
+  onJumpToFinance,
   onJumpToFidelizacoes,
   onJumpToAttendance,
   onJumpToAssessment,
@@ -387,6 +404,19 @@ const PorConfirmarView: React.FC<{
           </div>
           <GoldButton onClick={onJumpToTeamApprovals}>Ver pedidos PT</GoldButton>
         </div>
+      )}
+
+      {isSuperAdmin && (
+        <BusinessSummaryCard
+          clients={clients}
+          payments={payments}
+          fidelizacoes={fidelizacoes}
+          bookings={bookings}
+          isSuperAdmin={isSuperAdmin}
+          userEmail={userEmail}
+          onJumpToFinance={onJumpToFinance}
+          onJumpToFidelizacoes={onJumpToFidelizacoes}
+        />
       )}
 
       {(expiringFidsCount > 0 || inactiveStudentsCount > 0) && (

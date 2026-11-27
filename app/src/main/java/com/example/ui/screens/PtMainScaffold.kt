@@ -406,6 +406,12 @@ fun PtMainScaffold(
                                         selectedTab = 5
                                     }
                                 },
+                                onJumpToFinance = {
+                                    if (state.isSuperAdmin) {
+                                        mgmtInitialSubTab = 0
+                                        selectedTab = 5
+                                    }
+                                },
                                 onJumpToFidelizacoes = {
                                     mgmtInitialSubTab = if (state.isSuperAdmin) 2 else 1
                                     selectedTab = 5

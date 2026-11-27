@@ -32,6 +32,7 @@ fun PtHomeTab(
     viewModel: NewShapeViewModel,
     requestedSubTab: Pair<Int, Int>? = null,
     onJumpToPtApprovals: () -> Unit = {},
+    onJumpToFinance: () -> Unit = {},
     onJumpToFidelizacoes: () -> Unit = {},
     onJumpToAttendance: () -> Unit = {},
     onJumpToAssessment: (String) -> Unit = {}
@@ -82,6 +83,7 @@ fun PtHomeTab(
                 viewModel = viewModel,
                 onJumpToResponses = { selectedSubTab = 3 },
                 onJumpToPtApprovals = onJumpToPtApprovals,
+                onJumpToFinance = onJumpToFinance,
                 onJumpToFidelizacoes = onJumpToFidelizacoes,
                 onJumpToAttendance = onJumpToAttendance,
                 onJumpToAssessment = onJumpToAssessment
@@ -101,6 +103,7 @@ private fun PorConfirmarSection(
     viewModel: NewShapeViewModel,
     onJumpToResponses: () -> Unit,
     onJumpToPtApprovals: () -> Unit,
+    onJumpToFinance: () -> Unit,
     onJumpToFidelizacoes: () -> Unit,
     onJumpToAttendance: () -> Unit,
     onJumpToAssessment: (String) -> Unit
@@ -169,6 +172,20 @@ private fun PorConfirmarSection(
                         }
                     }
                 }
+            }
+        }
+
+        if (state.isSuperAdmin) {
+            item(key = "admin_business_summary_card") {
+                BusinessSummaryCard(
+                    clients = state.clients,
+                    payments = state.payments,
+                    fidelizacoes = state.fidelizacoes,
+                    bookings = state.bookings,
+                    isSuperAdmin = state.isSuperAdmin,
+                    onJumpToFinance = onJumpToFinance,
+                    onJumpToFidelizacoes = onJumpToFidelizacoes
+                )
             }
         }
 
